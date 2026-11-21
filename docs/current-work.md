@@ -6,11 +6,11 @@ The working tree adds OIDC sign-in, server-side sessions, Go-enforced role and m
 
 ## Merchant creation and OpenAI rule drafting
 
-The working tree reduces merchant creation to one required field and one submission. Business and integration settings can be added later. Eligible free-text merchant instructions go to OpenAI first when configured. The preview identifies OpenAI, local processing, or fallback. Temporary exact-email commands stay in PayGuard. [Merchant management walkthrough](simulation-runbook.md#merchant-management) · [Rule drafting contract](requirements/ai-rule-management.md)
+The working tree reduces merchant creation to one required field and one submission. Business and integration settings can be added later. **Draft rule** requires OpenAI for Platform and Merchant rules and uses the validated AI proposal as the preview and save structure. If OpenAI is unavailable, the editor shows an error. Merchant exact-email drafts send OpenAI a placeholder and bind the mailbox reference in Go. A compound block preserves the product and price conditions, and an ambiguous price asks for the unit. Existing API clients retain timed exact-email compatibility. [Merchant management walkthrough](simulation-runbook.md#merchant-management) · [Rule drafting contract](requirements/ai-rule-management.md)
 
 - Chromium against an isolated Go backend verified that submitting only a merchant name created exactly one record and opened its details directly in the Local Sandbox Preview.
-- The isolated Go API sent synthetic English and Thai prompts about a 50,000 minor-unit threshold directly to OpenAI with `gpt-4.1-mini`. Both returned a `READY` draft with `source: openai`, a `REVIEW` action, and the expected amount. Neither preview saved a rule.
-- The full Go suite passed 380 tests and subtests with zero failures or skips on disposable PostgreSQL. Go vet, twelve Node tests, TypeScript checking, and the frontend production build passed.
+- Six isolated synthetic cases passed against the revised backend using live OpenAI on `gpt-4.1-mini`. They verified clarification for a missing price unit, English and Thai exact-email flight blocks with a strict comparison above 500,000 minor units for 5,000 THB, a two-minute exact-email draft, and general Merchant and Platform drafts.
+- An independent full Go suite run against fresh PostgreSQL recorded 386 passing tests and subtests with zero failures or skips. Two command packages have no tests. Go vet and `git diff --check` passed. Fourteen frontend tests, TypeScript checking, the production build, and an isolated browser check passed.
 
 ## Concurrent Merchant Rules and shared AI Rule preview
 
