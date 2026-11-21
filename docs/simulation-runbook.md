@@ -58,6 +58,36 @@ For a repeatable local check, configure both distinct demo merchant tokens in yo
 python3 scripts/booking-smoke.py --base http://127.0.0.1:8081 --threshold 3
 ```
 
+## Local evaluation
+
+Start the stack with distinct demo merchant and operations bearer tokens. Configure `PAYGUARD_DEMO_ANALYST_A_TOKEN`, `PAYGUARD_DEMO_ANALYST_A2_TOKEN`, `PAYGUARD_DEMO_VIEWER_A_TOKEN`, `PAYGUARD_DEMO_ANALYST_B_TOKEN`, and `PAYGUARD_DEMO_VIEWER_B_TOKEN` as needed. Analyst and viewer credentials identify a fixed demo actor within their own merchant. The browser keeps credentials in memory for the current page. Use the [booking smoke script](#mock-checkout-and-booking-lineage) to create repeatable labeled synthetic cases for the shadow report.
+
+1. Open `/settings/mock-checkout` with a demo merchant token. Submit a normal synthetic booking, then a second with **Simulate timeout** enabled. The latter creates a manual-review case.
+2. Open `/settings/operations` and select **Load transactions** with the same merchant’s viewer token. Filter by product, outcome, or HOLD state. Open the timeout booking and inspect its masked contact, saved assessment, and HOLD deadline. Queue KPIs summarize the tenant’s stored transactions, and freshness is the age of the newest receipt. The latency metric uses bookings with an assessment timestamp.
+3. Reconnect with an analyst token. Reveal the synthetic contact with a reason to see an audit reference. Claim the HOLD and record a review disposition. An overdue HOLD requires active escalation before it can be reassigned and resolved. Connect with the second analyst to confirm another actor cannot resolve a case assigned to the first analyst.
+4. In an assessed transaction, select **Generate dossier** and wait for the cited evidence. Use **Export masked JSON** to save the bounded set of assessment fields and recorded versions. Use **Dashboard settings** to choose which KPIs appear and save the active filters for this demo actor.
+5. Reconnect with the merchant token and open **Rule workspace**. Set a holdout interval containing labeled fixture bookings, select a data cutoff after the applicable outcomes were recorded, and run a shadow report. Inspect sample exclusions, confusion matrices, recall, false-positive rate, and pinned version tuples. A missing denominator displays as undefined.
+6. In **Change approvals**, propose a velocity threshold from a report with at least one scored booking, or make a profile, rubric, or product-list proposal. Use a same-tenant analyst credential to approve or reject it. Check the audit actors, status, active revision, and expiry. A rollback copies an earlier approved candidate into a fresh proposal.
+7. In Simulation Lab, enter the optional demo merchant token and run an OTA, e-commerce, or gateway fixture. Inspect linked entities and the platform, merchant-policy, and final action fields. Repeat a normal fixture with legitimate shared Wi-Fi to verify that shared IP alone does not trigger a block.
+
+### Operations and governance API
+
+These routes use `Authorization: Bearer <token>`. The operations prefix is `/api/v1/booking/ops/transactions`.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/v1/booking/ops/transactions` | Returns tenant queue rows, KPIs, and the authenticated actor. Filters are `product`, `outcome`, `hold`, and `limit` up to `100`. |
+| `GET /api/v1/booking/ops/transactions/{id}` | Returns the booking, saved assessment, masked synthetic contact when available, and review state. |
+| `POST /api/v1/booking/ops/transactions/{id}/reveal` | An analyst sends a `reason` of `manual_review` or `support`. Returns the synthetic address and an audit ID after recording access. |
+| `POST /api/v1/booking/ops/transactions/{id}/hold/{action}` | An analyst sends `claim`, `escalate`, or `resolve`. Resolution takes `{"resolution":"cleared"}` or `{"resolution":"rejected"}`. State changes serialize on the merchant and booking case and record review history. |
+| `POST` or `GET /api/v1/booking/ops/transactions/{id}/dossier` | Requests or reads the asynchronous dossier for an assessed booking. |
+| `POST /api/v1/booking/shadow` | Sends `holdoutStart`, `holdoutEnd`, `asOf`, and a positive integer `reviewThreshold`. The holdout is start-inclusive and end-exclusive on booking receipt time. This read-only comparison uses synthetic verified outcomes available at the cutoff and excludes baseline overlap. |
+| `GET` or `POST /api/v1/booking/changes` | Lists merchant changes or accepts a proposal from the merchant actor. Proposals include a lowercase UUID `id`, `kind`, `expiresAt`, and `candidate`. Use `rollbackOf` instead of `candidate` to copy an approved revision of the same kind. Rule proposals also include a matching `shadowWindow` with scorable evidence. |
+| `POST /api/v1/booking/changes/{id}/decision` | A different analyst submits `{"decision":"approve"}` or `{"decision":"reject"}` before expiration. An approved rollback becomes a new revision. |
+| `POST /api/v1/booking/network/runs` | Creates a saved synthetic Simulation Lab run for the authenticated merchant. Read its evidence at `GET /api/v1/booking/network/runs/{id}` and its QA aggregates at `GET /api/v1/booking/network/runs/{id}/report`. |
+
+The local HOLD deadline is 15 minutes. Escalation and dispositions are demo workflow records. Rule replays and shadow reports take no payment action. Production expiry policy, real-label validation, and security and legal review require separate team decisions.
+
 ## HTTP contract
 
 | Method and path | Behavior |

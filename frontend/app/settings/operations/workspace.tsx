@@ -7,6 +7,11 @@ import { AssessmentResult } from "../booking-assessment/assessment-result";
 import { holdStates, operationsRequest, outcomes, products } from "./contracts";
 import type { Detail, Filters, Hold, Queue, Reveal, Transaction } from "./contracts";
 import { BookingDossier } from "./dossier";
+import { ChangeGovernance } from "./governance";
+import { DashboardSettings, defaultPreferences, readPreferences } from "./preferences";
+import type { DashboardPreferences } from "./preferences";
+import { ShadowWorkspace } from "./shadow-workspace";
+import type { ShadowReport } from "./shadow-workspace";
 
 const emptyFilters = { product: "", outcome: "", hold: "" };
 const panel = "min-w-0 rounded-xl border border-slate-200 bg-white shadow-xs";
@@ -30,6 +35,10 @@ export function OperationsWorkspace() {
   const [activeFilters, setActiveFilters] = useState<Filters>(emptyFilters);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState("");
+  const [section, setSection] = useState<"queue" | "rules">("queue");
+  const [shadowReport, setShadowReport] = useState<ShadowReport | null>(null);
+  const [preferences, setPreferences] = useState<DashboardPreferences>(defaultPreferences);
+  const [preferenceStatus, setPreferenceStatus] = useState("");
   const [selected, setSelected] = useState("");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -61,6 +70,10 @@ export function OperationsWorkspace() {
     setQueue(null);
     setQueueLoading(false);
     setQueueError("");
+    setSection("queue");
+    setShadowReport(null);
+    setPreferences(defaultPreferences);
+    setPreferenceStatus("");
     setFilters(emptyFilters);
     setActiveFilters(emptyFilters);
     setSelected("");
@@ -73,18 +86,30 @@ export function OperationsWorkspace() {
     setOperationStatus("");
   }
 
-  async function loadQueue(credential: string, criteria: Filters) {
+  async function loadQueue(credential: string, criteria: Filters, restorePreferences = false) {
     queueRequest.current?.abort();
     const request = new AbortController();
     queueRequest.current = request;
-    const search = new URLSearchParams({ limit: "50" });
-    Object.entries(criteria).forEach(([key, value]) => {
-      if (value) search.set(key, value);
-    });
+    function fetchQueue(filters: Filters) {
+      const search = new URLSearchParams({ limit: "50" });
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value) search.set(key, value);
+      });
+      return operationsRequest<Queue>(`?${search}`, credential, { signal: request.signal });
+    }
     setQueueLoading(true);
     setQueueError("");
     try {
-      const result = await operationsRequest<Queue>(`?${search}`, credential, { signal: request.signal });
+      let result = await fetchQueue(criteria);
+      if (request.signal.aborted) return;
+      if (restorePreferences) {
+        const saved = readPreferences(result.actor);
+        if (Object.values(saved.filters).some(Boolean)) result = await fetchQueue(saved.filters);
+        if (request.signal.aborted) return;
+        criteria = saved.filters;
+        setPreferences(saved);
+        setFilters(criteria);
+      }
       if (!request.signal.aborted) {
         setQueue(result);
         setActiveFilters(criteria);
@@ -151,7 +176,7 @@ export function OperationsWorkspace() {
 
   function connect(event: FormEvent) {
     event.preventDefault();
-    if (bearer) void loadQueue(bearer, activeFilters);
+    if (bearer) void loadQueue(bearer, activeFilters, !queue);
   }
 
   return <div className="space-y-5">
@@ -179,7 +204,26 @@ export function OperationsWorkspace() {
           <RotateCw className="size-4" aria-hidden="true" />{queueLoading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
-      <QueueMetrics kpis={queue.kpis} />
+      <nav aria-label="Operations workspace" className="flex flex-wrap gap-2">
+        <button type="button" className={section === "queue" ? primary : button} aria-pressed={section === "queue"} onClick={() => {
+          setSection("queue");
+          setShadowReport(null);
+        }}>Transaction queue</button>
+        <button type="button" className={section === "rules" ? primary : button} aria-pressed={section === "rules"} onClick={() => {
+          setSection("rules");
+          setRevealed(null);
+        }}>Rule workspace</button>
+      </nav>
+      {section === "rules" ? <div className="space-y-4">
+        {queue.actor.role === "merchant" && <ShadowWorkspace token={bearer} onReport={setShadowReport} />}
+        <ChangeGovernance token={bearer} actor={queue.actor} report={shadowReport} />
+      </div> : <>
+      <DashboardSettings actor={queue.actor} preferences={preferences} filters={activeFilters} onChange={(next, saved) => {
+        setPreferences(next);
+        setPreferenceStatus(saved ? "Dashboard settings saved." : "Dashboard settings apply for this session.");
+      }} />
+      {preferenceStatus && <p role="status" className="text-xs text-slate-600">{preferenceStatus}</p>}
+      <QueueMetrics kpis={queue.kpis} metrics={preferences.metrics} />
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <section className={panel} aria-labelledby="transactions-heading" aria-busy={queueLoading}>
           <div className="p-4 sm:p-5">
@@ -246,6 +290,7 @@ export function OperationsWorkspace() {
           {detail && !detail.assessment && <div className={`${panel} p-5 text-sm text-slate-600`}>This booking is awaiting assessment.</div>}
         </div>
       </div>
+      </>}
     </>}
   </div>;
 }
@@ -261,15 +306,16 @@ function Filter({ label, values, value, onChange, optional = true, disabled = fa
   </label>;
 }
 
-function QueueMetrics({ kpis }: { kpis: Queue["kpis"] }) {
-  const metrics = [
-    { label: "Bookings", value: number.format(kpis.total), detail: `${number.format(kpis.assessed)} assessed`, icon: Shield },
-    { label: "Manual reviews", value: number.format(kpis.manualReview), detail: `${number.format(kpis.openHolds)} open · ${number.format(kpis.overdueHolds)} overdue`, icon: TriangleAlert },
-    { label: "Average assessment latency", value: kpis.averageAssessmentLatencyMs == null ? "—" : `${number.format(kpis.averageAssessmentLatencyMs)} ms`, detail: "Booking receipt to assessment", icon: Timer },
-    { label: "Latest booking", value: kpis.freshnessSeconds == null ? "—" : `${number.format(kpis.freshnessSeconds)} s old`, detail: kpis.latestReceivedAt ? formatDate(kpis.latestReceivedAt) : "No bookings received", icon: Clock3 },
-  ];
+function QueueMetrics({ kpis, metrics }: { kpis: Queue["kpis"]; metrics: DashboardPreferences["metrics"] }) {
+  const cards = [
+    { id: "bookings", label: "Bookings", value: number.format(kpis.total), detail: `${number.format(kpis.assessed)} assessed`, icon: Shield },
+    { id: "review", label: "Manual reviews", value: number.format(kpis.manualReview), detail: `${number.format(kpis.openHolds)} open · ${number.format(kpis.overdueHolds)} overdue`, icon: TriangleAlert },
+    { id: "latency", label: "Average assessment latency", value: kpis.averageAssessmentLatencyMs == null ? "—" : `${number.format(kpis.averageAssessmentLatencyMs)} ms`, detail: "Booking receipt to assessment", icon: Timer },
+    { id: "freshness", label: "Latest booking", value: kpis.freshnessSeconds == null ? "—" : `${number.format(kpis.freshnessSeconds)} s old`, detail: kpis.latestReceivedAt ? formatDate(kpis.latestReceivedAt) : "No bookings received", icon: Clock3 },
+  ] as const;
+  if (metrics.length === 0) return null;
   return <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-    {metrics.map(({ label, value, detail, icon: Icon }) => <div className={`${panel} p-4`} key={label}>
+    {cards.filter(({ id }) => metrics.includes(id)).map(({ label, value, detail, icon: Icon }) => <div className={`${panel} p-4`} key={label}>
       <dt className="flex items-start gap-2 text-xs font-semibold text-slate-600"><Icon className="size-4 shrink-0 text-indigo-600" aria-hidden="true" />{label}</dt>
       <dd className="mt-2 break-words text-xl font-semibold tracking-tight">{value}</dd>
       <dd className="mt-1 text-xs text-slate-500">{detail}</dd>

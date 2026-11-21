@@ -1,5 +1,29 @@
 # Current work
 
+## PG-11 through PG-19 local evaluation
+
+Local evaluation uses synthetic bookings and outcomes. The [evaluation runbook](simulation-runbook.md#local-evaluation) walks through the operations queue, fixed-window shadow replay, change approvals, and linked-entity simulation.
+
+| Task | Local implementation |
+| --- | --- |
+| PG-11 | Demo merchant, viewer, and analyst credentials resolve a tenant and actor. Transaction details show masked synthetic contact information. Analyst reveals record actor, reason, and time in PostgreSQL. |
+| PG-12 | Manual-review assessments appear as HOLDs. Analysts can claim and resolve their own cases or explicitly escalate an overdue case. The local deadline is 15 minutes and dispositions are review records. |
+| PG-13 | Risk Operations shows a tenant-scoped transaction list, booking and assessment evidence, and KPIs computed from stored records and receipt and assessment timestamps. |
+| PG-14 | A fixed holdout window and data cutoff compare recorded decisions with a candidate velocity rule. Reports include recall, false-positive rate, exclusion counts, and pinned versions. |
+| PG-15 | Tenant change proposals support profiles, rules, rubrics, and product review lists. A different analyst records a decision. Expiry and rollback revisions preserve the history. |
+| PG-16 | Simulation Lab uses separate travel, e-commerce, and gateway product modules. Merchant policy evaluates the exact configured flight domain separately and reports the action source. |
+| PG-17 | An asynchronous dossier builds a typed, masked evidence export from a saved assessment and its versions. |
+| PG-18 | A demo merchant token scopes saved Simulation Lab network runs and linked entity evidence to the merchant. |
+| PG-19 | Risk Operations stores dashboard metrics and default filters per demo actor in the browser. The rule workspace provides a fixed-window preview and navigation to the visual rule editor. |
+
+- Live PostgreSQL and Redis checks verified role gates and cross-tenant denial, masked and audited reveal, concurrent claim exclusivity, idempotent resolution, explicit overdue escalation and reassignment, and product, outcome, and HOLD filters. The queue returned measured assessment latency and freshness. The operations smoke passed on both an independent stack and the combined preview.
+- A fixed shadow holdout replayed unchanged. The recorded decisions produced one true negative and one false negative. The candidate produced one true positive and one false positive. Assessment snapshots remained identical, and the tenant boundary held.
+- Governance checks verified distinct maker and checker actors, decision replay and conflict, tenant denial, rejection, and rollback as a new revision. Product and policy checks covered the gateway stages and exact domain matching. The asynchronous dossier persisted typed citations and omitted raw contact and outcome data.
+- Identical tenant-scoped network fixtures produced distinct entity keys across tenants. Reading another tenant’s run failed, and a legitimate shared IP alone did not trigger a block.
+- Go tests and vet passed. The frontend production build and type check passed. Independent Chrome checks verified viewer masking, real queue filters and KPIs, dossier export, browser preferences by actor, shadow metrics, and rejection by a separate analyst. The 390 px layout fit without horizontal overflow.
+
+PG-20 requires approved real outcome labels and shadow results. PG-21 requires Security and Legal review.
+
 ## PG-07 through PG-10 mock checkout, baseline and booking lineage
 
 Implemented and verified the local synthetic checkout, outcome import, baseline activation, and tenant-scoped lineage. The demo runs at `/settings/mock-checkout`. [Requirements](requirements/checkout-and-lineage.md) · [Checkout UI](ui/mock-checkout.md) · [Runbook](simulation-runbook.md#mock-checkout-and-booking-lineage)
