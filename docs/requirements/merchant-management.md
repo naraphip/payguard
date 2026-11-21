@@ -8,13 +8,15 @@ Open `/settings/merchants` as Platform Admin. The directory displays stored busi
 
 Create a merchant using its business name, optional description, and independently selectable catalogue products. The persisted setup from the earlier registration flow remains compatible. Copy the merchant credential from the one-time issuance message and select **Open merchant details**. The persistent detail route `/settings/merchants/{merchantId}` provides Overview, Transactions, Merchant Rules, Advanced Risk Configuration, Integrations, and Audit Logs. Legacy links with `?merchant=` redirect to the persistent route with their tab and transaction selection. The Overview transaction counts have a 30-day window. The active policy count reflects the current ruleset. Open Mock Checkout or Simulation Lab from the merchant detail to preselect the merchant.
 
+On the merchant’s **Overview**, a Platform Admin can select **Get temporary token**, then **Show token** or **Copy token**. The token grants access as that merchant for one hour. The original token issued at creation remains valid. The creation receipt also supports **Show token** and **Copy token**.
+
 The transaction ledger supports a transaction ID prefix, outcome, review state, and inclusive UTC day filters. It shows saved outcomes and final decision sources, matched policies and versions when available, and separate review dispositions. Merchant Rules includes business policy inspection and the existing booking review rules with saved Jev results. Advanced Risk Configuration displays the available active profile version and signals. Integrations displays recorded products, stages, signals, and saved Sandbox scenarios. Platform Rules and AI Configuration have their own administrative workspaces. [Decision Engine](decision-engine.md)
 
 ## Permission model
 
 | Actor | Capabilities in this slice |
 | --- | --- |
-| Platform Admin | List and create merchants, edit metadata, deactivate merchants, read a selected merchant's records and rule history, and record existing administrative dispositions. Merchant Policy inspection uses read-only endpoints. |
+| Platform Admin | List and create merchants, edit metadata, issue temporary merchant tokens, deactivate merchants, read a selected merchant's records and rule history, and record existing administrative dispositions. Merchant Policy inspection uses read-only endpoints. |
 | Merchant | Read its own scoped records, compose and manage its own policies, and view its own policy versions. The API derives the tenant from the issued merchant bearer token. |
 | Platform checker | Reviews global Platform changes through the approval workflow. The checker credential does not confer merchant management access. |
 
@@ -32,8 +34,11 @@ Use a bearer credential on the existing `/api/v1/booking/demo/merchants` base pa
 | `GET /{merchantId}/policies` | Read a merchant's policies and effective versions. |
 | `GET /{merchantId}/policies/{id}` | Read the rule and its stored version history. |
 | `GET /{merchantId}/audit` | Up to 100 recent audit entries for the merchant. |
+| `POST /{merchantId}/access-token` | Platform Admin issues a temporary token for an active merchant. The HTTP 201 response contains only `token` and `expiresAt` and uses `Cache-Control: no-store`. |
 
 The original directory and transaction list responses remain available without query parameters. The additive startup migration adds business description, creation time, and a creation request hash to merchant records and creates the audit table. It preserves merchant IDs and stored decisions. [API implementation](../../backend/merchant_management.go) · [Merchant policy mutation API](../simulation-runbook.md#composer-and-policy-apis)
+
+The database stores temporary token hashes with their expiration times. Issuance records a `MERCHANT_TEMPORARY_CREDENTIAL_ISSUED` audit event. Directory, detail, and audit reads omit credential values. Deactivation ends access for both original and temporary tokens.
 
 The existing administrator `POST /api/v1/booking/demo/merchants` accepts a multi-product catalogue and an optional `Idempotency-Key` of 1 to 128 printable ASCII characters without spaces. A repeated key returns 409 and leaves the original merchant in the directory. The issued credential appears in the original 201 response only. In this example, both product types belong to one tenant.
 

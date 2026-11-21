@@ -14,7 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const merchantDemoPath = "/api/v1/booking/demo/merchants"
+const (
+	merchantDemoPath          = "/api/v1/booking/demo/merchants"
+	merchantAccessTokenPrefix = "merchant-temp-"
+)
 
 var (
 	errMerchantCreateReplay = errors.New("This creation request was already used. Find the existing merchant in the directory. Its credential is shown only once.")
@@ -33,6 +36,11 @@ type mockMerchantService struct {
 type mockMerchantActor struct {
 	Admin      bool
 	MerchantID string
+}
+
+type merchantAccessToken struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 type mockMerchant struct {
@@ -115,6 +123,7 @@ func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/policies", service.managedMerchantPolicies)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/policies/{id}", service.managedMerchantPolicyHistory)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/audit", service.managedMerchantAudit)
+	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/access-token", service.createMerchantAccessToken)
 	mux.HandleFunc("PUT "+merchantDemoPath+"/{merchantId}", service.updateMerchant)
 	mux.HandleFunc("DELETE "+merchantDemoPath+"/{merchantId}", service.deleteMerchant)
 	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/scenarios", service.saveScenario)
@@ -138,9 +147,13 @@ func (s mockMerchantService) authorize(w http.ResponseWriter, r *http.Request, a
 				return mockMerchantActor{Admin: true}, true
 			}
 			var merchantID string
-			err := s.repo.db.QueryRow(r.Context(), `
-				SELECT id::text FROM merchant_demo_merchants WHERE token_hash=$1 AND deleted_at IS NULL
-			`, hash[:]).Scan(&merchantID)
+			query := `SELECT id::text FROM merchant_demo_merchants WHERE token_hash=$1 AND deleted_at IS NULL`
+			if strings.HasPrefix(value, merchantAccessTokenPrefix) {
+				query = `SELECT m.id::text FROM merchant_demo_access_tokens AS t
+					JOIN merchant_demo_merchants AS m ON m.id=t.merchant_id
+					WHERE t.token_hash=$1 AND t.expires_at>statement_timestamp() AND m.deleted_at IS NULL`
+			}
+			err := s.repo.db.QueryRow(r.Context(), query, hash[:]).Scan(&merchantID)
 			switch {
 			case err == nil:
 				if adminOnly {
@@ -275,6 +288,22 @@ func (s mockMerchantService) createMerchant(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	respond(w, http.StatusCreated, map[string]any{"merchant": merchant, "token": token})
+}
+
+func (s mockMerchantService) createMerchantAccessToken(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorize(w, r, true); !ok {
+		return
+	}
+	id, ok := demoPathID(w, r, "merchantId")
+	if !ok {
+		return
+	}
+	access, err := s.repo.issueMerchantAccessToken(r.Context(), id)
+	if err != nil {
+		demoWriteError(w, err)
+		return
+	}
+	respond(w, http.StatusCreated, access)
 }
 
 func (s mockMerchantService) updateMerchant(w http.ResponseWriter, r *http.Request) {

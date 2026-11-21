@@ -10,6 +10,7 @@ import { useWorkspaceView } from "../../workspace-view";
 import { MerchantTransactions } from "./transactions";
 import { isBusinessModel } from "../merchant-setup/contracts";
 import type { BusinessModel, MerchantSetup } from "../merchant-setup/contracts";
+import { MerchantTokenControls } from "./access-token";
 import { MerchantManagementAccess, managementError } from "./management-access";
 import { merchantDate, merchantDetailsHref } from "./management-contracts";
 import type { MerchantDirectoryPage, MerchantTab } from "./management-contracts";
@@ -105,8 +106,8 @@ function DirectoryList({ token, preferredTab }: { token: string; preferredTab: M
 
   if (receipt) return <section className={`${card} max-w-2xl space-y-3`} aria-labelledby="merchant-access-token">
     <h2 id="merchant-access-token" className="text-lg font-semibold">Merchant access token</h2>
-    <p role="status" className="text-sm text-muted">Created {receipt.merchant.name}. Copy its sandbox token now. It is shown once.</p>
-    <code className="block break-all rounded-md bg-paper p-3 text-sm">{receipt.token}</code>
+    <p role="status" className="text-sm text-muted">Created {receipt.merchant.name}. Copy its one-time sandbox token before leaving.</p>
+    <MerchantTokenControls token={receipt.token} />
     <button type="button" className={action} onClick={() => {
       const href = merchantDetailsHref(receipt.merchant.id);
       setReceipt(undefined);

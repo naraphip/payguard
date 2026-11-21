@@ -22,6 +22,13 @@ ALTER TABLE merchant_demo_merchants
   ADD COLUMN IF NOT EXISTS setup jsonb,
   ADD COLUMN IF NOT EXISTS mailbox_ref_key uuid NOT NULL DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+CREATE TABLE IF NOT EXISTS merchant_demo_access_tokens (
+  token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+  merchant_id uuid NOT NULL REFERENCES merchant_demo_merchants(id),
+  expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS merchant_demo_access_tokens_expiry_idx
+  ON merchant_demo_access_tokens(expires_at);
 CREATE TABLE IF NOT EXISTS merchant_demo_scenarios (
   merchant_id uuid NOT NULL REFERENCES merchant_demo_merchants(id),
   id uuid NOT NULL,
@@ -130,15 +137,22 @@ func (r repository) listMockMerchants(ctx context.Context, merchantID string) ([
 	return scanMockMerchants(ctx, r.db, merchantID)
 }
 
-func (r repository) createMockMerchant(ctx context.Context, input mockMerchantInput) (mockMerchant, string, error) {
+func newMerchantToken(prefix string) (string, [sha256.Size]byte, error) {
 	var secret [32]byte
 	if _, err := rand.Read(secret[:]); err != nil {
+		return "", [sha256.Size]byte{}, err
+	}
+	token := prefix + hex.EncodeToString(secret[:])
+	return token, sha256.Sum256([]byte(token)), nil
+}
+
+func (r repository) createMockMerchant(ctx context.Context, input mockMerchantInput) (mockMerchant, string, error) {
+	token, hash, err := newMerchantToken("merchant-demo-")
+	if err != nil {
 		return mockMerchant{}, "", err
 	}
-	token := "merchant-demo-" + hex.EncodeToString(secret[:])
-	hash := sha256.Sum256([]byte(token))
 	merchant := mockMerchant{Name: input.Name, Setup: input.Setup, PolicyIntegration: input.PolicyIntegration, Scenarios: []mockScenario{}}
-	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO merchant_demo_merchants(name, token_hash, setup, policy_integration, description, creation_request_hash)
 			VALUES ($1, $2, NULLIF($3::jsonb, 'null'::jsonb), NULLIF($4::jsonb, 'null'::jsonb), COALESCE($5, ''), $6)
@@ -159,6 +173,33 @@ func (r repository) createMockMerchant(ctx context.Context, input mockMerchantIn
 		return mockMerchant{}, "", err
 	}
 	return merchant, token, nil
+}
+
+func (r repository) issueMerchantAccessToken(ctx context.Context, merchantID string) (merchantAccessToken, error) {
+	token, hash, err := newMerchantToken(merchantAccessTokenPrefix)
+	if err != nil {
+		return merchantAccessToken{}, err
+	}
+	result := merchantAccessToken{Token: token}
+	err = pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if err := lockMockMerchant(ctx, tx, merchantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM merchant_demo_access_tokens WHERE expires_at <= statement_timestamp()`); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO merchant_demo_access_tokens (token_hash, merchant_id, expires_at)
+			VALUES ($1, $2::text::uuid, clock_timestamp() + interval '1 hour')
+			RETURNING expires_at`, hash[:], merchantID).Scan(&result.ExpiresAt); err != nil {
+			return err
+		}
+		return auditMerchant(ctx, tx, merchantID, "MERCHANT_TEMPORARY_CREDENTIAL_ISSUED")
+	})
+	if err != nil {
+		return merchantAccessToken{}, err
+	}
+	return result, nil
 }
 
 func (r repository) updateMockMerchant(ctx context.Context, merchantID string, input mockMerchantInput) (mockMerchant, error) {

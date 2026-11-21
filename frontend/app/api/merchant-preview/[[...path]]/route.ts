@@ -12,7 +12,7 @@ function allowed(method: string, path: string[]) {
   if (!uuid.test(merchant)) return false;
   if (path.length === 1) return method === "GET" || method === "PUT" || method === "DELETE";
   if (path.length === 2) {
-    return (method === "POST" && collection === "scenarios")
+    return (method === "POST" && (collection === "scenarios" || collection === "access-token"))
       || (method === "GET" && (collection === "policies" || collection === "audit"))
       || (collection === "transactions" && (method === "GET" || method === "POST"));
   }

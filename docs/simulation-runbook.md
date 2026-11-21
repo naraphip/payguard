@@ -138,16 +138,18 @@ This path uses synthetic transactions and one structured threshold rule per scen
 
 ## Merchant Management
 
-Sign in as Platform Admin and open `/settings/merchants`. Search by the merchant's name or ID, or sort by its creation date or last activity. Create a synthetic merchant, choose its supplied catalogue products, and copy the credential from the one-time issuance message. Open the merchant's detail URL and confirm the actual stored totals, effective policies, and audit entries.
+Sign in as Platform Admin and open `/settings/merchants`. Search by the merchant's name or ID, or sort by its creation date or last activity. Create a synthetic merchant, choose its supplied catalogue products, and select **Copy token** on the one-time issuance message. Open the merchant's detail URL and confirm the actual stored totals, effective policies, and audit entries.
+
+To sign in to an existing merchant for a Sandbox walkthrough, open its **Overview** as Platform Admin and select **Get temporary token**. Select **Copy token**, or use **Show token** to view it. In a separate browser tab, choose the **Merchant** workspace, paste the token in the access form, and select **Connect**. The token expires an hour after issuance. The merchant’s original token remains valid.
 
 Use `/settings/merchants/{merchantId}?tab=transactions` to open the ledger for a known merchant. The filters use transaction ID prefix, saved outcome, review state, and UTC dates. Open a saved transaction and check the separate platform-side result, Merchant Policy result, final decision, and review disposition. Missing evidence depends on the product, stage, and sources and displays only where recorded.
 
 Verify isolation with two synthetic merchants. Sign in with one merchant credential and check that the other merchant's workspace or rule history is unavailable. With the administrator credential, inspect both merchants' rule history through their detail workspace. Use the selected merchant's scenario in Mock Checkout or Simulation Lab, then verify it feeds that merchant's existing ledger. Review the merchant audit after a metadata change, policy revision, or transaction review. [Read API and permissions](requirements/merchant-management.md)
 
-Point `PAYGUARD_POLICY_TEST_DATABASE_URL` at a disposable PostgreSQL database named `payguard_policy_test_*` before running the management API integration test.
+Point `PAYGUARD_POLICY_TEST_DATABASE_URL` at a disposable PostgreSQL database named `payguard_policy_test_*` before running the management and temporary token API integration tests.
 
 ```sh
-(cd backend && go test -run '^TestMerchantManagementPostgres$' -count=1)
+(cd backend && go test -run '^(TestMerchantManagementPostgres|TestMerchantTemporaryAccessTokenPostgres)$' -count=1)
 ```
 
 ## Local evaluation

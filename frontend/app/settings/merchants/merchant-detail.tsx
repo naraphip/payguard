@@ -11,6 +11,7 @@ import { PolicyExpiry, RuleAccess, RulePreview, useRuleCredential } from "../rul
 import type { MerchantPolicyVersion } from "../rule-composer";
 import { outlineButton } from "../system-rules/contracts";
 import { SystemRulesDashboard } from "../system-rules/dashboard";
+import { MerchantAccessToken } from "./access-token";
 import { MerchantTransactions } from "./transactions";
 import { MerchantWorkspace } from "./directory";
 import { MerchantManagementAccess, managementError } from "./management-access";
@@ -142,6 +143,7 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
     ["Active merchant policies", metrics.activePolicies],
   ] as const;
   return <div className="space-y-5">
+    <MerchantAccessToken merchantId={merchant.id} adminToken={token} />
     <section aria-label="Merchant activity" className="space-y-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold">Merchant activity</h2>
