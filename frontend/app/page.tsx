@@ -1,11 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Activity, ArrowRight, Building2, CreditCard, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, SlidersHorizontal, TabletSmartphone } from "lucide-react";
+import { Activity, ArrowRight, CreditCard, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, TabletSmartphone } from "lucide-react";
 import { Network } from "./network";
-import { PayGuardLogo } from "./payguard-logo";
 import type { Config, Decision, SimulationProduct, Report, Run, Scenario } from "./types";
 
 const defaults: Config = {
@@ -235,30 +233,6 @@ export default function Home() {
 
   return (
     <>
-      <header className="border-b border-line bg-white">
-        <div className="mx-auto flex min-h-16 max-w-[1440px] flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2 sm:px-8">
-          <div className="flex items-center gap-3">
-            <PayGuardLogo />
-            <span className="hidden border-l border-line pl-3 text-sm text-muted sm:inline">Simulation Lab</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <Link href="/settings/mock-checkout" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
-              <ShoppingBag size={14} aria-hidden /><span>Mock checkout</span>
-            </Link>
-            <Link href="/settings/merchant-setup" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
-              <Building2 size={14} aria-hidden /><span>Merchant setup</span>
-            </Link>
-            <Link href="/settings/jev-rules" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
-              <ListChecks size={14} aria-hidden /><span>Jev Rules</span>
-            </Link>
-            <Link href="/settings/system-rules" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
-              <SlidersHorizontal size={14} aria-hidden /><span>Platform Rules</span>
-            </Link>
-            <span className="hidden items-center gap-2 rounded-full border border-line bg-paper px-3 py-1 text-xs font-semibold text-muted min-[400px]:flex"><span className="size-2 rounded-full bg-teal-600" /> Sandbox</span>
-          </div>
-        </div>
-      </header>
-
       <main className="mx-auto max-w-[1440px] space-y-5 px-4 py-6 sm:px-8 sm:py-8">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Simulation Lab</h1>

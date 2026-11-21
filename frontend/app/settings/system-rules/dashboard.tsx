@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowRight, ChevronRight, CircleAlert, FilePenLine, Layers3, LoaderCircle, Plus, Search, ShieldCheck } from "lucide-react";
-import { PayGuardLogo } from "../../payguard-logo";
-import { SettingsNavigation } from "../navigation";
+import { ArrowRight, CircleAlert, FilePenLine, Layers3, LoaderCircle, Plus, Search, ShieldCheck } from "lucide-react";
 import { RuleSheet } from "./rule-sheet";
 import { actions, outlineButton, primaryButton, ruleRequest, rulesEndpoint, stages } from "./contracts";
 import type { Rule, RuleCatalogue } from "./contracts";
@@ -81,27 +79,8 @@ export function SystemRulesDashboard() {
       .some(value => value.toLowerCase().includes(queryText))),
   );
 
-  return <div className="min-h-screen bg-[#f8fafc] text-slate-900 md:grid md:grid-cols-[218px_minmax(0,1fr)]">
-    <aside className="border-b border-slate-200 bg-white md:sticky md:top-0 md:h-dvh md:border-r md:border-b-0">
-      <div className="px-4 pt-4 pb-3 md:border-b md:border-slate-100 md:px-5 md:py-4">
-        <PayGuardLogo />
-      </div>
-      <div className="px-4 pb-3 md:px-3 md:py-5">
-        <SettingsNavigation current="/settings/system-rules" />
-      </div>
-    </aside>
-
+  return <>
     <main className="min-w-0">
-      <div className="flex min-h-[69px] items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 sm:px-7 lg:px-10">
-        <div className="flex min-w-0 items-center gap-2 text-sm text-slate-500">
-          <span>Settings</span><ChevronRight className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
-          <span className="truncate font-medium text-slate-900">Platform Rules</span>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-          <span className="size-1.5 rounded-full bg-teal-600" aria-hidden="true" />Sandbox
-        </span>
-      </div>
-
       <div className="mx-auto max-w-[1360px] space-y-6 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:space-y-7 lg:px-10">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -224,7 +203,7 @@ export function SystemRulesDashboard() {
       onClose={() => setEditor(null)}
       onSaved={saved}
     />}
-  </div>;
+  </>;
 }
 
 function RuleName({ rule }: { rule: Rule }) {
