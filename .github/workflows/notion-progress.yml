@@ -3,7 +3,9 @@ name: Notion progress sync
 on:
   workflow_dispatch:
   schedule:
-    - cron: '3-59/10 * * * *'
+    - cron: '7,17,27,37,47,57 * * * *'
+  push:
+    branches: [main]
 
 permissions:
   actions: read
