@@ -6,8 +6,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import type { FormEvent } from "react";
 import { getMerchantDemoRole, getMerchantDemoToken, merchantDemoRequest, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken, subscribeMerchantDemoSession } from "../merchant-demo";
 import type { DemoDirectory } from "../merchant-demo";
-import { containsMailbox, merchantMailboxDigest, parseMailboxBlock } from "../merchant-mailbox";
-import type { MailboxBlockDuration } from "../merchant-mailbox";
+import { applyMailboxPriceUnit, containsMailbox, maskMailboxInstruction, merchantMailboxDigest, needsMailboxPriceUnit } from "../merchant-mailbox";
 import { adminRulePath, useLocalAdminPreview } from "../local-admin-preview";
 import { useProductionSession } from "../production-auth";
 import { useWorkspaceView } from "../workspace-view";
@@ -271,6 +270,7 @@ export function RulePreview({ proposal, definition, mailbox, profile }: {
       <div><dt className="text-muted">When</dt><dd>{ruleStages.map(stage => stages[stage as keyof typeof stages] ?? stage).join(", ")}</dd></div>
       <div><dt className="text-muted">Action</dt><dd className="mt-1"><RuleActionBadge action={action} /></dd></div>
       {duration && <div><dt className="text-muted">Duration</dt><dd>{duration.value} {duration.unit}{duration.value === 1 ? "" : "s"} from activation</dd></div>}
+      {hasMailbox && !duration && <div><dt className="text-muted">Duration</dt><dd>Until disabled</dd></div>}
       {rule.description && <div className="sm:col-span-2"><dt className="text-muted">Description</dt><dd>{rule.description}</dd></div>}
     </dl>
     <div>
@@ -342,7 +342,6 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
   merchantProfile?: ReturnType<typeof useMerchantRuleProfile>;
 }) {
   const exactEmailEdit = edit?.proposal.conditions.rules.some(condition => condition.field === mailboxField);
-  const canUseBuilder = scope === "MERCHANT" && !exactEmailEdit;
   const { profile, profileError, retryProfile } = merchantProfile ?? {};
   const [editText] = useState(() => {
     if (!edit || exactEmailEdit) return { text: "", reconstructed: false };
@@ -352,6 +351,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
     return { text: describeSavedPolicy(edit.proposal, profile), reconstructed: true };
   });
   const [instruction, setInstruction] = useState(editText.text);
+  const [showPriceUnitQuestion, setShowPriceUnitQuestion] = useState(false);
   const [draft, setDraft] = useState<DraftPreview | null>(null);
   const [pending, setPending] = useState<"interpret" | "save" | null>(null);
   const [error, setError] = useState("");
@@ -366,7 +366,9 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
   const request = useRef<AbortController>(null);
   const editVersion = useRef(edit?.version);
   const id = useId();
-  const mailboxBlock = scope === "MERCHANT" ? parseMailboxBlock(instruction) : null;
+  const hasMailboxInstruction = scope === "MERCHANT" && containsMailbox(instruction);
+  const canUseBuilder = scope === "MERCHANT" && !exactEmailEdit && !hasMailboxInstruction;
+  const previewMailbox = hasMailboxInstruction ? maskMailboxInstruction(instruction)?.mailbox : undefined;
   const unchangedSummary = editText.reconstructed && instruction.trim() === editText.text;
   const needsProducts = profile?.products.length === 0;
 
@@ -388,25 +390,29 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
 
   async function interpret(event: FormEvent) {
     event.preventDefault();
-    if (request.current || !instruction.trim() || unchangedSummary || (scope === "MERCHANT" && (!profile || needsProducts))) return;
+    await draftInstruction(instruction);
+  }
+
+  async function draftInstruction(text: string) {
+    if (request.current || !text.trim() || (editText.reconstructed && text.trim() === editText.text) ||
+        (scope === "MERCHANT" && (!profile || needsProducts))) return;
     const controller = new AbortController();
     request.current = controller;
     setPending("interpret");
     setDraft(null);
     setSaved(null);
     setError("");
+    setShowPriceUnitQuestion(false);
+    const containsAddress = scope === "MERCHANT" && containsMailbox(text);
     try {
-      let payload: { scope: Scope; instruction: string } | { scope: Scope; mailboxBlock: { mailboxDigest: string } & MailboxBlockDuration };
-      if (mailboxBlock) {
+      const payload: { scope: Scope; instruction: string; mailboxDigest?: string; requireAI: true } =
+        { scope, instruction: text.trim(), requireAI: true };
+      if (containsAddress) {
         if (!profile?.merchantId) throw new Error("The merchant profile is unavailable. Reconnect and try again.");
-        const { mailbox, ...duration } = mailboxBlock;
-        const mailboxDigest = await merchantMailboxDigest(profile.merchantId, mailbox);
-        payload = { scope, mailboxBlock: { mailboxDigest, ...duration } };
-      } else {
-        if (scope === "MERCHANT" && containsMailbox(instruction)) {
-          throw new Error(`To block one email address, enter a duration in whole minutes or hours, up to 365 days. For example, ${mailboxExample}.`);
-        }
-        payload = { scope, instruction: instruction.trim() };
+        const masked = maskMailboxInstruction(text);
+        if (!masked) throw new Error("Enter one complete email address per rule.");
+        payload.instruction = masked.instruction;
+        payload.mailboxDigest = await merchantMailboxDigest(profile.merchantId, masked.mailbox);
       }
       if (controller.signal.aborted) return;
       const init = { method: "POST", body: JSON.stringify(payload), signal: controller.signal };
@@ -414,10 +420,19 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
         ? await merchantPolicyRequest<Interpretation>("interpret", token, init, adminMerchantId)
         : await authenticatedRequest<Interpretation>(adminRulePath(`${composer}/interpret`, localAdmin, token), token, init);
       if (controller.signal.aborted) return;
+      if (result.source !== "openai") throw new Error("This server did not generate the draft with OpenAI. Try again after updating the Rule Composer.");
+      if (containsAddress && result.status === "CLARIFICATION" && needsMailboxPriceUnit(payload.instruction)) {
+        setShowPriceUnitQuestion(true);
+        return;
+      }
       if (result.proposal && result.proposal.scope !== scope) throw new Error("The proposal belongs to another rule system.");
-      const sourceInstruction = result.proposal?.scope === "MERCHANT" && !mailboxBlock &&
+      if (containsAddress && result.status === "READY" && (result.proposal?.scope !== "MERCHANT" ||
+          !result.proposal.conditions.rules.some(condition => condition.field === mailboxField))) {
+        throw new Error("The draft is missing the exact email condition. Try drafting the rule again.");
+      }
+      const sourceInstruction = result.proposal?.scope === "MERCHANT" && !containsAddress &&
         !result.proposal.conditions.rules.some(condition => condition.field === mailboxField)
-        ? instruction.trim() : undefined;
+        ? text.trim() : undefined;
       setDraft({ ...result, sourceInstruction });
       if (result.proposal?.scope === "MERCHANT" && !result.proposal.conditions.rules.some(condition => condition.field === mailboxField)) {
         setBuilderProposal(result.proposal);
@@ -426,13 +441,20 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       }
     } catch (cause) {
       if (!controller.signal.aborted) {
-        if (canUseBuilder && !mailboxBlock) setShowConditions(true);
+        if (canUseBuilder && !containsAddress) setShowConditions(true);
         setError(errorText(cause));
       }
     } finally {
       if (!controller.signal.aborted) setPending(null);
       request.current = null;
     }
+  }
+
+  function choosePriceUnit(unit: "THB" | "minor units") {
+    const updated = applyMailboxPriceUnit(instruction, unit);
+    if (!updated) return;
+    setInstruction(updated);
+    void draftInstruction(updated);
   }
 
   async function save() {
@@ -476,6 +498,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
     setDraft(null);
     setSaved(null);
     setError("");
+    setShowPriceUnitQuestion(false);
   }
 
   function startJevCondition(field: string) {
@@ -517,8 +540,8 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
         }} />
       <p id={`${id}-instruction-help`} className="text-xs text-muted">
         {editText.reconstructed && <span className="mb-1 block">This text describes the saved conditions. Change it to generate a preview, or use Rule fields to edit the conditions directly.</span>}
-        {exactEmailEdit && <span className="mb-1 block">Re-enter the email address and duration to generate a new version.</span>}
-        {scope === "MERCHANT" ? <>Use bare domains for domain rules. Temporary exact-email blocks stay in PayGuard, for example <code>{mailboxExample}</code>. Leave out IP addresses, card details, and credentials.</>
+        {exactEmailEdit && <span className="mb-1 block">Re-enter the email address and the conditions for the new version.</span>}
+        {scope === "MERCHANT" ? <>Use bare domains for domain rules. You can combine an exact email address with a product and price, or add a duration for a temporary block. Full email addresses stay in PayGuard.</>
           : "Use policy conditions and domains. Leave out customer identities and card details."}
       </p>
       <button type="submit" className={ready ? outlineButton : primaryButton}
@@ -527,6 +550,13 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
         {pending === "interpret" ? "Drafting rule…" : "Draft rule"}
       </button>
     </form>
+    {showPriceUnitQuestion && <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+      <p role="status">What unit is the price in?</p>
+      {applyMailboxPriceUnit(instruction, "THB") ? <div className="flex flex-wrap gap-2">
+        <button type="button" className={primaryButton} onClick={() => choosePriceUnit("THB")}>Baht (THB)</button>
+        <button type="button" className={outlineButton} onClick={() => choosePriceUnit("minor units")}>Minor units (satang)</button>
+      </div> : <p>Add a unit next to each amount in the instruction, then draft the rule again.</p>}
+    </div>}
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {draft?.source && <div role="status">
       <span className={stateBadge(draft.source === "openai" ? "info" : draft.source === "local_fallback" ? "warning" : "neutral")}>
@@ -560,7 +590,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       {messages.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
         {messages.map((message, index) => <li key={index}>{message}</li>)}
       </ul>}
-      {draft.proposal && <RulePreview proposal={draft.proposal} definition={draft.definition} mailbox={mailboxBlock?.mailbox} profile={profile} />}
+      {draft.proposal && <RulePreview proposal={draft.proposal} definition={draft.definition} mailbox={previewMailbox} profile={profile} />}
       {ready && !saved && <>
         {scope === "PLATFORM" && runs.length > 0 && <label className="block text-sm font-semibold">Simulation run for replay (optional)
           <select className="control mt-1 max-w-md" value={runId} onChange={event => setRunId(event.currentTarget.value)} disabled={pending !== null}>

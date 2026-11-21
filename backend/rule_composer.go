@@ -194,9 +194,11 @@ Use a listed literal comparison when it represents the condition. Text contains 
 
 func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Scope        string                   `json:"scope"`
-		Instruction  *string                  `json:"instruction"`
-		MailboxBlock *mailboxBlockInstruction `json:"mailboxBlock"`
+		Scope         string                   `json:"scope"`
+		Instruction   *string                  `json:"instruction"`
+		MailboxBlock  *mailboxBlockInstruction `json:"mailboxBlock"`
+		MailboxDigest string                   `json:"mailboxDigest"`
+		RequireAI     bool                     `json:"requireAI"`
 	}
 	if !decodeBookingRiskJSON(w, r, &input) {
 		return
@@ -227,7 +229,7 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	}
 	started := time.Now()
 	if input.MailboxBlock != nil {
-		if input.Scope != composerMerchant || input.Instruction != nil {
+		if input.Scope != composerMerchant || input.Instruction != nil || input.MailboxDigest != "" || input.RequireAI {
 			s.audit("mailbox_interpret", input.Scope, actor, "INVALID_INSTRUCTION", "", started)
 			problem(w, http.StatusUnprocessableEntity, "Submit an exact email block by itself in Merchant AI Rules.")
 			return
@@ -248,12 +250,21 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.Scope == composerMerchant && composerHasMailbox(instruction) {
 		s.audit("interpret", input.Scope, actor, "SENSITIVE_INSTRUCTION", "", started)
-		problem(w, http.StatusUnprocessableEntity, "To block one email address temporarily, use the format Block email <address> for 2 minutes in Merchant AI Rules.")
+		problem(w, http.StatusUnprocessableEntity, "Draft an exact email rule from Merchant AI Rules so PayGuard can keep the address private.")
 		return
 	}
 	if sensitiveComposerText(instruction) {
 		s.audit("interpret", input.Scope, actor, "SENSITIVE_INSTRUCTION", "", started)
 		problem(w, http.StatusUnprocessableEntity, "Remove email addresses, IP addresses, payment card numbers, card security codes, and credentials. Bare email domains can be used.")
+		return
+	}
+	if input.MailboxDigest != "" || strings.Contains(instruction, compoundMailboxPlaceholder) {
+		if input.Scope != composerMerchant || !validMailboxDigest(input.MailboxDigest) ||
+			strings.Count(instruction, compoundMailboxPlaceholder) != 1 || strings.Contains(strings.ToLower(instruction), input.MailboxDigest) {
+			problem(w, http.StatusUnprocessableEntity, "Draft the rule with one exact email address in Merchant AI Rules.")
+			return
+		}
+		s.interpretCompoundMailbox(w, r, actor, instruction, input.MailboxDigest, started)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
@@ -270,13 +281,17 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(profile.Products) == 0 {
 			s.audit("interpret", input.Scope, actor, "CLARIFICATION", "", started)
+			if input.RequireAI {
+				problem(w, http.StatusUnprocessableEntity, "Add at least one supported product in Merchant Details before drafting a rule.")
+				return
+			}
 			respond(w, http.StatusOK, composerInterpretation{
 				Status: "CLARIFICATION", Source: composerSourceLocal,
 				Message: "Add at least one supported product in Merchant Details to create an AI Rule.",
 			})
 			return
 		}
-		if strings.HasPrefix(instruction, "{") {
+		if !input.RequireAI && strings.HasPrefix(instruction, "{") {
 			output, _ := interpretLocalMerchantRule(instruction, profile)
 			output.Source = composerSourceLocal
 			s.audit("interpret_local", input.Scope, actor, output.Status, "", started)
@@ -286,7 +301,7 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 		sentence := strings.TrimSpace(strings.TrimSuffix(unquoteRuleText(instruction), "."))
 		// A disposable email is a condition, including the Thai phrase with "temporary",
 		// so exclude email-risk terms when checking for an unsupported rule expiry.
-		if hasCustomRuleLifetime(emailRiskMention.ReplaceAllString(sentence, "email risk")) {
+		if !input.RequireAI && hasCustomRuleLifetime(emailRiskMention.ReplaceAllString(sentence, "email risk")) {
 			s.audit("interpret_local", input.Scope, actor, "UNSUPPORTED_DURATION", "", started)
 			respond(w, http.StatusOK, composerInterpretation{
 				Status: "CLARIFICATION", Source: composerSourceLocal,
@@ -298,11 +313,11 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.provider == nil {
 		s.audit("interpret", input.Scope, actor, "DISABLED", "", started)
-		if input.Scope == composerMerchant {
+		if input.Scope == composerMerchant && !input.RequireAI {
 			s.respondLocalFallback(w, actor, instruction, profile, "OpenAI drafting is disabled or not configured.", started)
 			return
 		}
-		problem(w, http.StatusServiceUnavailable, "Natural-language drafting is disabled. Use a structured rule draft.")
+		problem(w, http.StatusServiceUnavailable, "OpenAI rule drafting is unavailable. Ask an administrator to enable it and configure OPENAI_API_KEY.")
 		return
 	}
 
@@ -319,7 +334,7 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 			result, message = failure.outcome, failure.message
 		}
 		s.audit("interpret", input.Scope, actor, result, "", started)
-		if input.Scope == composerMerchant {
+		if input.Scope == composerMerchant && !input.RequireAI {
 			s.respondLocalFallback(w, actor, instruction, profile, message, started)
 			return
 		}
@@ -327,9 +342,9 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	output, err := parseComposerInterpretation(data, input.Scope, profile)
-	if err != nil || !composerPreservesEmailRisk(instruction, profile, output) {
+	if err != nil || (input.RequireAI && len(output.Validation.Errors) > 0) || !composerPreservesEmailRisk(instruction, profile, output) {
 		s.audit("interpret", input.Scope, actor, "INVALID_PROVIDER_OUTPUT", "", started)
-		if input.Scope == composerMerchant {
+		if input.Scope == composerMerchant && !input.RequireAI {
 			s.respondLocalFallback(w, actor, instruction, profile, "The OpenAI draft did not pass PayGuard validation.", started)
 			return
 		}
@@ -469,14 +484,21 @@ func parseComposerInterpretation(data []byte, scope string, profile merchantPoli
 		if !validComposerJSON(body.Proposal, &merchant) || merchant.Scope != composerMerchant {
 			return composerInterpretation{}, errComposerOutput
 		}
-		if merchant.DurationHours != 0 || merchant.DurationMinutes != 0 || slices.ContainsFunc(merchant.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+		if slices.ContainsFunc(merchant.Conditions.Rules, func(condition merchantPolicyCondition) bool {
 			return condition.Field == policyMailbox
 		}) {
 			return composerInterpretation{}, errComposerOutput
 		}
-		err = merchant.validate(profile)
-		if err == nil && sensitiveComposerText(merchant.Name) {
-			err = errors.New("Use a rule name without personal data or credentials.")
+		if profile.composerBoundMailbox {
+			// The caller validates the complete proposal after attaching the merchant's mailbox.
+			if sensitiveComposerText(merchant.Name) {
+				return composerInterpretation{}, errComposerOutput
+			}
+		} else {
+			if merchant.DurationHours != 0 || merchant.DurationMinutes != 0 {
+				return composerInterpretation{}, errComposerOutput
+			}
+			err = merchant.validate(profile)
 		}
 		proposal = merchant
 	}

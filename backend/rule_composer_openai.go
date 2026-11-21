@@ -170,7 +170,7 @@ func proposalSchema(scope string, profile merchantPolicyProfile) composerSchema 
 			"scope": composerEnum(composerPlatform), "rule": rule,
 		}, "scope", "rule")
 	} else {
-		proposal = composerObject(map[string]composerSchema{
+		fields := map[string]composerSchema{
 			"scope":         composerEnum(composerMerchant),
 			"name":          {Type: "string"},
 			"product_types": composerList(composerEnum(profile.Products...)),
@@ -179,7 +179,15 @@ func proposalSchema(scope string, profile merchantPolicyProfile) composerSchema 
 				"logic": composerEnum("AND", "OR"), "rules": composerList(merchantConditionSchema(profile)),
 			}, "logic", "rules"),
 			"action": composerEnum("BLOCK", "REVIEW", "CHALLENGE"),
-		}, "scope", "name", "product_types", "stages", "conditions", "action")
+		}
+		required := []string{"scope", "name", "product_types", "stages", "conditions", "action"}
+		if profile.composerBoundMailbox {
+			nullableInteger := composerSchema{AnyOf: []composerSchema{{Type: "integer"}, {Type: "null"}}}
+			fields["durationHours"] = nullableInteger
+			fields["durationMinutes"] = nullableInteger
+			required = append(required, "durationHours", "durationMinutes")
+		}
+		proposal = composerObject(fields, required...)
 	}
 	return composerObject(map[string]composerSchema{
 		"status":   composerEnum("READY", "CLARIFICATION"),

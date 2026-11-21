@@ -4,6 +4,9 @@ const englishBlock = /^block[ \t]+(?:email(?:[ \t]+address)?[ \t]+)?(\S+)[ \t]+(
 const thaiBlock = /^บล็อก[ \t]*(?:อีเมล[ \t]+)?(\S+)[ \t]+(?:เป็นเวลา[ \t]*)?([1-9]\d{0,5})[ \t]*(ชั่วโมง|ชม|นาที)\.?$/u;
 const maxBlockHours = 365 * 24;
 const maxBlockMinutes = maxBlockHours * 60;
+const exactMailboxPlaceholder = "[EXACT_EMAIL]";
+const rulePrice = /(?:\b(?:price|amount|total)\s*(?:is\s+)?(?:at least|at most|greater than|less than|more than|over|under|equals|[<>]=?|!=|=)|(?:ราคา|ยอด(?:เงิน)?)\s*(?:ตั้งแต่|อย่างน้อย|มากกว่า|เกิน|ไม่เกิน|น้อยกว่า|เท่ากับ|[<>]=?|!=|=))\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\d.,])/giu;
+const rulePriceUnit = /^\s*(?:THB\b|baht\b|satang\b|minor units?\b|บาท|สตางค์|หน่วยย่อย)/iu;
 
 type ScenarioEmail = { domain?: string; mailbox?: string };
 export type MerchantEmailShape = { length: number; letters: number; digits: number; transitions: number };
@@ -53,6 +56,35 @@ export function merchantEmailShape(mailbox: string): MerchantEmailShape | undefi
 
 export function containsMailbox(instruction: string): boolean {
   return Array.from(instruction.matchAll(mailboxInInstruction)).some(([, local]) => local !== "*");
+}
+
+export function maskMailboxInstruction(instruction: string) {
+  const matches = Array.from(instruction.matchAll(mailboxInInstruction)).filter(([, local]) => local !== "*");
+  if (matches.length !== 1 || instruction.includes(exactMailboxPlaceholder)) return null;
+  const match = matches[0];
+  const mailbox = parseScenarioEmail(match[0])?.mailbox;
+  if (!mailbox || match.index === undefined) return null;
+  return {
+    mailbox,
+    instruction: instruction.slice(0, match.index) + exactMailboxPlaceholder + instruction.slice(match.index + match[0].length),
+  };
+}
+
+function missingPriceUnits(instruction: string) {
+  return Array.from(instruction.matchAll(rulePrice))
+    .map(match => match.index + match[0].length)
+    .filter(end => !rulePriceUnit.test(instruction.slice(end)));
+}
+
+export function needsMailboxPriceUnit(instruction: string) {
+  return missingPriceUnits(instruction).length > 0;
+}
+
+export function applyMailboxPriceUnit(instruction: string, unit: "THB" | "minor units") {
+  const missing = missingPriceUnits(instruction);
+  if (missing.length !== 1) return null;
+  const [end] = missing;
+  return instruction.slice(0, end) + " " + unit + instruction.slice(end);
 }
 
 export function parseMailboxBlock(instruction: string): ({ mailbox: string } & MailboxBlockDuration) | null {

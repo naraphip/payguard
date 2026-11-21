@@ -35,6 +35,7 @@ type merchantPolicyProfile struct {
 	Signals               []string             `json:"signals"`
 	FieldRegistry         []merchantCapability `json:"fieldRegistry,omitempty"`
 	ScoringProfileVersion string               `json:"scoringProfileVersion,omitempty"`
+	composerBoundMailbox  bool
 }
 
 type merchantPolicyCondition struct {
@@ -164,14 +165,18 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 	if (p.Conditions.Logic != "AND" && p.Conditions.Logic != "OR") || len(p.Conditions.Rules) < 1 || len(p.Conditions.Rules) > 5 {
 		return errors.New("Use an AND or OR group containing 1 to 5 conditions.")
 	}
-	hasMailbox := slices.ContainsFunc(p.Conditions.Rules, func(condition merchantPolicyCondition) bool {
-		return condition.Field == policyMailbox
-	})
-	if hasMailbox {
-		if p.Action != "BLOCK" || p.Conditions.Logic != "AND" || len(p.Conditions.Rules) != 1 {
-			return errors.New("A temporary email block requires one exact mailbox condition.")
+	mailboxCount := 0
+	for _, condition := range p.Conditions.Rules {
+		if condition.Field == policyMailbox {
+			mailboxCount++
 		}
-		if !validMailboxBlockDuration(p.DurationHours, p.DurationMinutes) {
+	}
+	if mailboxCount > 0 {
+		if p.Action != "BLOCK" || p.Conditions.Logic != "AND" || mailboxCount != 1 {
+			return errors.New("An exact email block requires one mailbox condition joined with AND.")
+		}
+		if (len(p.Conditions.Rules) == 1 || p.DurationHours != 0 || p.DurationMinutes != 0) &&
+			!validMailboxBlockDuration(p.DurationHours, p.DurationMinutes) {
 			return errors.New(mailboxBlockDurationMessage)
 		}
 	} else if p.DurationHours != 0 || p.DurationMinutes != 0 {
@@ -241,7 +246,7 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 				value = domain
 			}
 			if condition.Field == policyMailbox && !validMailboxDigest(value) {
-				return errors.New("Generate a preview from an exact email address to create a temporary email block.")
+				return errors.New("Generate a preview from an exact email address to create an email block.")
 			}
 			if condition.Field == policyProduct && !slices.Contains(p.ProductTypes, value) {
 				return errors.New("A product condition must refer to a selected product.")

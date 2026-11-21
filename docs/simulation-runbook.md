@@ -357,7 +357,7 @@ PAYGUARD_RULE_COMPOSER_MODEL=gpt-4.1-mini
 Set `OPENAI_API_KEY` in the ignored `backend/.env`, which Compose loads into Go. Use a checker token distinct from the administrator token to enable independent Platform Rule approval and rollback. For a host-run backend, export the composer variables and `OPENAI_API_KEY` into the Go process before starting it. For Compose, recreate the backend with `docker compose up -d --wait backend` after an environment change. Build the application after changing code. The OpenRouter key belongs to the [Jev assessment and diagnostic](#jev-ai-configuration). [Rule fields, actions, and lifecycle](requirements/ai-rule-management.md)
 
 1. Create a synthetic merchant in **Merchants** as Platform Admin. Enter its catalogue products under **Business and integration settings** and declare email domain support only if the integration supplies it. For the Merchant workspace test, use the one-time Sandbox credential or issue a temporary credential from **Overview**. Existing merchant setup and observed evidence can supply available signals.
-2. As Platform Admin, open **Merchants**, select the shop, and open **AI Rule**. In the Merchant workspace, use **Merchant AI Rules**. Describe the rule in Thai or English and select **Draft rule**. For a merchant that supplies flight tickets and email domains, try “Block flight tickets when email domain equals example.test.” The **OpenAI** label and model identify a result from the live composer. **PayGuard fallback** indicates local parsing after OpenAI was disabled or unavailable. Review the source, product, stage, signal, and action before selecting **Save Rule**. If the draft asks for more detail, revise the instruction or use **Rule fields**.
+2. As Platform Admin, open **Merchants**, select the shop, and open **AI Rule**. In the Merchant workspace, use **Merchant AI Rules**. Describe the rule in Thai or English and select **Draft rule**. For a merchant that supplies flight tickets and email domains, try “Block flight tickets when email domain equals example.test.” The **OpenAI** label and model identify a result from the live composer. If OpenAI is disabled or unavailable, **Draft rule** shows an error. The composer requires OpenAI in both Platform and Merchant scopes. Review the source, product, stage, signal, and action before selecting **Save Rule**. If the draft asks for more detail, revise the instruction or use **Rule fields**.
 3. Check the saved status and preview counts. Use **Test rule** to replay against recent stored evidence. An active policy applies to future merchant transactions. Submit a matching synthetic transaction in Mock Checkout or the merchant rule panel of Simulation Lab, then inspect the Platform, Merchant Policy, and Final decisions. An older transaction with the same input and ID returns its saved decision.
 4. As Platform Admin, open `/settings/system-rules`. Compose a global rule, select a shared Simulation Lab run for optional replay, and save it as a draft. To request activation in the local test stack, open **Platform rule approval** and submit the current draft with a shared run that has eligible events and a reason.
 5. Use the independent checker credential to review the pending revision and its recorded replay. Approve with a reason to apply the revision on new Simulation Lab runs. The checker can also restore an earlier active revision or disable the rule. Compare the ruleset version and rule hits on a new run with the original stored run.
@@ -376,19 +376,26 @@ Set `OPENAI_API_KEY` in the ignored `backend/.env`, which Compose loads into Go.
 4. Open **Simulation Lab → Merchant rule simulation** and use the same merchant, product, and amount with `A shuttle bus transfer to the airport, transport only`. Expect Jev `NO_MATCH` and **Low risk** when no other rule escalates it.
 5. Submit a fresh test with no description. An applicable unresolved rule records `UNKNOWN` / `NOT_RUN` and produces **Review** with **Unresolved** in the automated decision evidence. In **Transactions**, open each result to check the rule version and answer, and the served model and provider decision ID when available. An exact replay returns the stored result.
 
-To test fallback in an isolated Sandbox with OpenAI disabled, enter `Block ticket ที่เป็น *disney* land hongkong และ ip มาจาก india`. Look for **PayGuard fallback**. With a registered `custom_ip_country` country field, check that the preview preserves both the `IN` condition and the ticket condition. Verify every clause and its evidence field before saving.
+For a compound Jev authoring test, register a `custom_ip_country` country field and describe a rule that requires both `IN` for that field and the meaning of the ticket description above. Check that the OpenAI preview preserves both clauses and identifies their evidence fields. With OpenAI disabled in an isolated Sandbox, check that **Draft rule** reports an error without a replacement preview.
 
 When the editor shows an error while loading rule fields, use **Retry loading rule fields**. A connection error calls for checking whether the local Go backend is running. An unavailable API route calls for checking that Go and Next.js were built from the same checkout. A timeout or unreadable response calls for checking backend logs. Jev runtime status is recorded with the transaction result.
 
 ### Temporary exact-email block
 
 1. Open **Merchant AI Rules** with the merchant's credential or open the merchant's **AI Rule** tab as Platform Admin. The merchant needs at least one supported product in its profile.
-2. Enter `block buyer@example.test 2min` or `บล็อกอีเมล buyer@example.test 2 นาที`, then select **Draft rule**. The preview is labeled **Processed in PayGuard**. The form also accepts hour-based commands such as `Block email buyer@example.test for 12 hours`. Use one synthetic address and a duration from 1 minute to 365 days, in whole minutes or hours.
+2. Enter `block buyer@example.test 2min` or `บล็อกอีเมล buyer@example.test 2 นาที`, then select **Draft rule**. Check the **OpenAI** source and model on the preview. The form also accepts hour-based commands such as `Block email buyer@example.test for 12 hours`. Use one synthetic address and a duration from 1 minute to 365 days, in whole minutes or hours.
 3. Verify the address, duration, and products in the preview, then select **Save Rule**. The rule covers all supported products shown in the preview. The timer starts when the rule becomes active, and **Saved rules** shows the expiry. From **Edit**, saving creates a new version of that rule.
 4. Run a merchant-selected test in **Mock Checkout** and **Simulation Lab** with `buyer@example.test`. Check that the final decision is **Block** and the merchant policy is the source. Run again with `other@example.test` to confirm this rule only matches the first mailbox.
 5. Once the rule expires, submit a new transaction with `buyer@example.test` and verify the expired rule does not match. Replaying the original transaction with its original ID and input returns its saved decision.
 
-The full address stays in the browser. PayGuard receives a digest, derives a reference with the merchant's key, and checks the reference and expiry locally.
+The browser sends OpenAI's instruction through Go with the address replaced by `[EXACT_EMAIL]`. Go receives the mailbox digest separately, derives a reference with the merchant's key, and checks the reference and expiry locally.
+
+### Exact email with product and price
+
+1. Use a synthetic merchant that supplies flight tickets and booking amounts. Enter `Block email buyer@example.test and product = flight and price > 5000` and select **Draft rule**.
+2. When the composer asks for the price unit, choose THB or minor units and check that the instruction still includes the email, product, and comparison. With THB selected, the OpenAI draft should show flight tickets, a required exact-email match, and an amount strictly greater than 500,000 minor units.
+3. Save the rule and use fresh synthetic transactions to check that it applies only when the mailbox, product, and amount all match. Try another mailbox on `example.test`, a different product, and a flight purchase of exactly 5,000 THB. Check that none of those cases matches this rule.
+4. Check that the provider receives only the sanitized text and eligible rule fields. Go binds the exact mailbox reference locally. With no duration in the instruction, the proposal carries no expiry.
 
 ### Composer and policy APIs
 
@@ -399,17 +406,17 @@ api=http://127.0.0.1:8081
 curl --fail-with-body --silent --show-error \
   -H "Authorization: Bearer ${merchant_token}" \
   -H 'Content-Type: application/json' \
-  --data '{"scope":"MERCHANT","instruction":"Block flight tickets when email domain equals skycannner.com."}' \
+  --data '{"scope":"MERCHANT","requireAI":true,"instruction":"Block flight tickets when email domain equals example.test."}' \
   "$api/api/v1/booking/rule-composer/interpret"
 
 curl --fail-with-body --silent --show-error \
   -H "Authorization: Bearer ${admin_token}" \
   -H 'Content-Type: application/json' \
-  --data '{"scope":"PLATFORM","instruction":"At payment, review when there were more than five orders on the same device in 60 seconds."}' \
+  --data '{"scope":"PLATFORM","requireAI":true,"instruction":"At payment, review when there were more than five orders on the same device in 60 seconds."}' \
   "$api/api/v1/booking/rule-composer/interpret"
 ```
 
-An interpretation returns `READY` with a validated proposal and a shared, read-only `definition` with `schemaVersion: 1`. A `CLARIFICATION` includes a message or validation errors and omits the definition. The `source` is `openai`, `local`, or `local_fallback`. Only `openai` includes `model`. Pass the returned scope-specific proposal as `{"proposal":{...}}` when saving. For a Platform draft with replay, add `"runId"` to the save body. [Shared rule preview data](requirements/ai-rule-management.md#shared-rule-preview-data)
+An interpretation returns `READY` with a validated proposal and a shared, read-only `definition` with `schemaVersion: 1`. A `CLARIFICATION` includes a message or validation errors and omits the definition. With `requireAI: true`, a completed AI interpretation has `source: openai` and includes `model`. Existing clients that omit `requireAI` can also receive `local` or `local_fallback`. Pass the returned scope-specific proposal as `{"proposal":{...}}` when saving. For a Platform draft with replay, add `"runId"` to the save body. [Shared rule preview data](requirements/ai-rule-management.md#shared-rule-preview-data)
 
 | Method and path | Purpose |
 | --- | --- |

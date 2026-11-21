@@ -1,6 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { containsMailbox, merchantEmailShape, merchantMailboxDigest, parseMailboxBlock, parseScenarioEmail } from "../app/merchant-mailbox.ts";
+import {
+  applyMailboxPriceUnit, containsMailbox, maskMailboxInstruction, merchantEmailShape,
+  merchantMailboxDigest, needsMailboxPriceUnit, parseMailboxBlock, parseScenarioEmail,
+} from "../app/merchant-mailbox.ts";
+
+test("masks the exact address without changing the other natural-language clauses", () => {
+  assert.deepEqual(maskMailboxInstruction("block email buyer@example.test and product = flight and price > 5000"), {
+    mailbox: "buyer@example.test",
+    instruction: "block email [EXACT_EMAIL] and product = flight and price > 5000",
+  });
+  assert.equal(maskMailboxInstruction("Block buyer@example.test or other@example.test"), null);
+  assert.equal(maskMailboxInstruction("Block buyer@example.test and [EXACT_EMAIL]"), null);
+  assert.equal(maskMailboxInstruction("Block *@example.test"), null);
+});
+
+test("adds the chosen price unit without dropping conditions or changing the threshold", () => {
+  const english = "Block buyer@example.test and product = flight and price > 5,000";
+  const thai = "บล็อกอีเมล buyer@example.test เมื่อเป็นเที่ยวบินและราคามากกว่า 5000";
+  assert.equal(needsMailboxPriceUnit(english), true);
+  assert.equal(applyMailboxPriceUnit(english, "THB"), english + " THB");
+  assert.equal(applyMailboxPriceUnit(thai, "minor units"), thai + " minor units");
+  assert.equal(needsMailboxPriceUnit(thai + " บาท"), false);
+  assert.equal(needsMailboxPriceUnit(english + " minor units"), false);
+  assert.equal(applyMailboxPriceUnit("price < 5000 and amount > 1000", "THB"), null);
+});
 
 test("shares only ASCII username shape counts for a full mailbox", () => {
   assert.deepEqual(merchantEmailShape("k8p2x9q4m7z6@gmail.com"), { length: 12, letters: 6, digits: 6, transitions: 11 });
