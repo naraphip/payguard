@@ -20,6 +20,7 @@ export type Config = {
   missingToken: boolean;
   jevTimeout: boolean;
   merchantPolicy: boolean;
+  contactEmailDomain?: string;
 };
 
 export type Entity = { kind: EntityKind; key: string };

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,55 @@ func TestPolicyAndTimeoutKeepSeparateEvidence(t *testing.T) {
 	d = assess(e, nil, true, true)
 	if d.Action != "UNSUCCESSFUL" || d.JevStatus != "TIMEOUT" || !slices.Contains(d.Missing, "payment_token") {
 		t.Fatalf("missing timeout or token evidence: %+v", d)
+	}
+}
+
+func TestContactEmailDomainValidation(t *testing.T) {
+	c := config{Product: "flight_ticket", Date: "2026-12-04", Scenario: "normal", Accounts: 1, Rate: 30, Quantity: 1}
+	for _, domain := range []string{"", "restricted.test", "test.buyer-1.test"} {
+		c.ContactEmailDomain = domain
+		if err := c.validate(); err != nil {
+			t.Errorf("expected domain %q to be allowed: %v", domain, err)
+		}
+	}
+	for _, domain := range []string{
+		"test", "buyer@example.test", "example.com", "restricted.test.", "a..test", "-a.test",
+		"a-.test", "K.test", "a_b.test", strings.Repeat("a", 64) + ".test", strings.Repeat(strings.Repeat("a", 63)+".", 4) + "test",
+	} {
+		c.ContactEmailDomain = domain
+		if err := c.validate(); err == nil {
+			t.Errorf("expected domain %q to be rejected", domain)
+		}
+	}
+}
+
+func TestContactDomainAppliesToFirstCheckout(t *testing.T) {
+	c := config{Seed: 42, Product: "flight_ticket", Date: "2026-12-04", Scenario: "normal", Accounts: 5, Rate: 30, Quantity: 1, Retry: true}
+	secret := []byte("test-key")
+	seededEvents, seededTruth := generate(c, "tenant-a", secret)
+	c.ContactEmailDomain = "sub.restricted.test"
+	contactEvents, contactTruth := generate(c, "tenant-a", secret)
+	if !slices.Equal(seededTruth, contactTruth) {
+		t.Fatal("contact changed seeded ground truth")
+	}
+	features := []feature{{Kind: "token", Orders: 1}}
+	for i, e := range contactEvents {
+		seeded := seededEvents[i]
+		if e.OrderID != "order-2a-001" {
+			if !sameEvent(e, seeded) || !slices.Equal(e.Entities, seeded.Entities) {
+				t.Errorf("contact changed another account's event: %+v", e)
+			}
+			continue
+		}
+		if e.Domain != c.ContactEmailDomain {
+			t.Errorf("expected contact domain on stage %s, got %q", e.Stage, e.Domain)
+		}
+		if paymentStage(e.Stage) {
+			original := assess(seeded, features, true, false)
+			override := assess(e, features, true, false)
+			if original.Action != "BLOCK" || override.Action != "ALLOW" || override.Merchant != "PASS" {
+				t.Errorf("unexpected exact-match policy results: seeded %s, override %s/%s", original.Action, override.Action, override.Merchant)
+			}
+		}
 	}
 }
