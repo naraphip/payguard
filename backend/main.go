@@ -34,7 +34,13 @@ func env(key, fallback string) string {
 }
 
 func main() {
-	bookingAuth, err := newBookingAuth(os.Getenv("PAYGUARD_DEMO_MERCHANT_A_TOKEN"), os.Getenv("PAYGUARD_DEMO_MERCHANT_B_TOKEN"))
+	bookingAuth, err := newBookingAuth(os.Getenv("PAYGUARD_DEMO_MERCHANT_A_TOKEN"), os.Getenv("PAYGUARD_DEMO_MERCHANT_B_TOKEN"),
+		bookingActorCredential{"demo-merchant-a", "analyst", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_A_TOKEN")},
+		bookingActorCredential{"demo-merchant-a", "analyst-2", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_A2_TOKEN")},
+		bookingActorCredential{"demo-merchant-a", "viewer", bookingRoleViewer, os.Getenv("PAYGUARD_DEMO_VIEWER_A_TOKEN")},
+		bookingActorCredential{"demo-merchant-b", "analyst", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_B_TOKEN")},
+		bookingActorCredential{"demo-merchant-b", "viewer", bookingRoleViewer, os.Getenv("PAYGUARD_DEMO_VIEWER_B_TOKEN")},
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -70,6 +76,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/booking/events/{id}/assessment", bookingRisk.assessEvent)
 	mux.HandleFunc("POST /api/v1/booking/events/{id}/outcomes", bookingRisk.importOutcome)
 	mux.HandleFunc("GET /api/v1/booking/events/{id}/lineage", bookingRisk.readLineage)
+	registerBookingOps(mux, a.repo, bookingAuth, a.secret)
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)

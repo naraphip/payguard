@@ -23,52 +23,105 @@ var (
 )
 
 type bookingAuth struct {
-	tokens map[string][sha256.Size]byte
+	tokens []bookingCredential
 }
 
-func newBookingAuth(tokenA, tokenB string) (bookingAuth, error) {
-	if tokenA != "" && tokenA == tokenB {
-		return bookingAuth{}, errors.New("demo merchant bearer tokens must be distinct")
+type bookingRole string
+
+const (
+	bookingRoleMerchant bookingRole = "merchant"
+	bookingRoleAnalyst  bookingRole = "analyst"
+	bookingRoleViewer   bookingRole = "viewer"
+)
+
+type bookingActor struct {
+	MerchantID string      `json:"merchantId"`
+	ActorID    string      `json:"actorId"`
+	Role       bookingRole `json:"role"`
+}
+
+type bookingActorCredential struct {
+	MerchantID string
+	ActorID    string
+	Role       bookingRole
+	Token      string
+}
+
+type bookingCredential struct {
+	actor bookingActor
+	hash  [sha256.Size]byte
+}
+
+func newBookingAuth(tokenA, tokenB string, extra ...bookingActorCredential) (bookingAuth, error) {
+	credentials := []bookingActorCredential{
+		{"demo-merchant-a", "merchant", bookingRoleMerchant, tokenA},
+		{"demo-merchant-b", "merchant", bookingRoleMerchant, tokenB},
 	}
-	auth := bookingAuth{tokens: make(map[string][sha256.Size]byte)}
-	for tenant, token := range map[string]string{"demo-merchant-a": tokenA, "demo-merchant-b": tokenB} {
-		if token == "" {
+	credentials = append(credentials, extra...)
+	var auth bookingAuth
+	usedTokens := make(map[[sha256.Size]byte]bool)
+	usedActors := make(map[[2]string]bool)
+	for _, credential := range credentials {
+		if credential.Token == "" {
 			continue
 		}
-		if !bookingTokenPattern.MatchString(token) {
+		if !bookingTokenPattern.MatchString(credential.Token) {
 			return bookingAuth{}, errors.New("demo merchant token contains invalid bearer token characters")
 		}
-		auth.tokens[tenant] = sha256.Sum256([]byte(token))
+		if credential.MerchantID != "demo-merchant-a" && credential.MerchantID != "demo-merchant-b" ||
+			!bookingKeyPattern.MatchString(credential.ActorID) ||
+			(credential.Role != bookingRoleMerchant && credential.Role != bookingRoleAnalyst && credential.Role != bookingRoleViewer) {
+			return bookingAuth{}, errors.New("invalid demo booking actor")
+		}
+		hash := sha256.Sum256([]byte(credential.Token))
+		actorKey := [2]string{credential.MerchantID, credential.ActorID}
+		if usedTokens[hash] || usedActors[actorKey] {
+			return bookingAuth{}, errors.New("demo booking actors and bearer tokens must be distinct")
+		}
+		usedTokens[hash] = true
+		usedActors[actorKey] = true
+		auth.tokens = append(auth.tokens, bookingCredential{bookingActor{credential.MerchantID, credential.ActorID, credential.Role}, hash})
 	}
 	return auth, nil
 }
 
-func (a bookingAuth) merchant(headers []string) string {
+func (a bookingAuth) actor(headers []string) bookingActor {
 	if len(headers) != 1 {
-		return ""
+		return bookingActor{}
 	}
 	scheme, token, ok := strings.Cut(headers[0], " ")
 	token = strings.TrimLeft(token, " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") || !bookingTokenPattern.MatchString(token) {
-		return ""
+		return bookingActor{}
 	}
 	presented := sha256.Sum256([]byte(token))
-	var merchant string
-	for tenant, expected := range a.tokens {
-		if subtle.ConstantTimeCompare(presented[:], expected[:]) == 1 {
-			merchant = tenant
+	var actor bookingActor
+	for _, credential := range a.tokens {
+		if subtle.ConstantTimeCompare(presented[:], credential.hash[:]) == 1 {
+			actor = credential.actor
 		}
 	}
-	return merchant
+	return actor
+}
+
+func (a bookingAuth) requireBookingActor(w http.ResponseWriter, r *http.Request, roles ...bookingRole) bookingActor {
+	actor := a.actor(r.Header.Values("Authorization"))
+	if actor.MerchantID == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		problem(w, http.StatusUnauthorized, "A valid demo merchant bearer token is required.")
+		return bookingActor{}
+	}
+	for _, role := range roles {
+		if actor.Role == role {
+			return actor
+		}
+	}
+	problem(w, http.StatusForbidden, "The demo actor does not have access to this operation.")
+	return bookingActor{}
 }
 
 func (a bookingAuth) requireMerchant(w http.ResponseWriter, r *http.Request) string {
-	merchant := a.merchant(r.Header.Values("Authorization"))
-	if merchant == "" {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		problem(w, http.StatusUnauthorized, "A valid demo merchant bearer token is required.")
-	}
-	return merchant
+	return a.requireBookingActor(w, r, bookingRoleMerchant).MerchantID
 }
 
 type bookingInput struct {
