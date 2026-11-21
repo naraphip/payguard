@@ -57,4 +57,6 @@ The repository includes [render.yaml](render.yaml) for a free Render Blueprint w
 
 After syncing this Blueprint in Render, both web services track `main` and auto-deploy on every commit to that branch.
 
+The Key Value store blocks external connections with an empty IP allow list; the backend connects using Render's internal URL.
+
 This deployment is an online demo, not a production rollout. Render's free web services spin down after inactivity. The free PostgreSQL database expires after 30 days and the free Key Value instance may lose state on restart. Free PostgreSQL has no managed backups. Keep demo credentials and synthetic data only.
