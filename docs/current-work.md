@@ -2,7 +2,7 @@
 
 ## GitHub progress monitoring in Notion
 
-Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4de98381dcac67fb442ef0c35b) under the monitoring plan. The workflow is active on GitHub `main`. See the [monitoring requirements](requirements/notion-progress.md) for repository configuration and rollout checks.
+Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4de98381dcac67fb442ef0c35b) under the monitoring plan. The workflow is active on GitHub `main` at `40341b5`. See the [monitoring requirements](requirements/notion-progress.md) for repository configuration and rollout checks.
 
 - Independent fixture and workflow YAML checks passed. A live local sync changed 18 activity records in Notion. The GitHub Actions repository secret and variable are configured.
 - The [manual GitHub Actions run](https://github.com/pwatakul/payguard/actions/runs/44868685163) succeeded. The Notion health row showed Last Success at 11:59 Bangkok time on 21 November 2026. Verification of two scheduled runs is ongoing.
