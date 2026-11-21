@@ -13,4 +13,6 @@ Start with the [Simulation Lab requirements](requirements/simulation-lab.md), [U
 
 ## Deployment
 
-Local development uses Docker Compose for Redis and PostgreSQL and local Go and Node.js processes. Production deployment, tenant authentication, and live payment or Jev integration remain outside this milestone.
+Run `docker compose up --build -d --wait` from the repository root to start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis. Open the [Simulation Lab](http://127.0.0.1:3000) after the services are healthy. PostgreSQL stores data in a named volume that persists when the stack stops.
+
+For host development, run `docker compose up -d --wait postgres redis` and start Go and Next.js using the [README instructions](../README.md). Production deployment, tenant authentication, and live payment or Jev integration remain outside this milestone.
