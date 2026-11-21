@@ -20,6 +20,14 @@ The Go API returns evidence about an IP address, a card BIN, or a disposable-ema
 
 The [local verification record](../current-work.md#provider-enrichment) includes imported counts, canonical field completeness, and results for exact, partial, prefix, and no-match fixtures.
 
+## Local assessment data migration
+
+Verified 10 fingerprints from the downloaded enrichment package. The local assessment database contains 458,044 BIN prefixes at revision `fcc907c81cf02b12e396b0c12a8c16472b47619a`. A repeated import reused the existing snapshot. The email-domain lookup uses 231,582 bundled entries and 138,682 local overlay entries, yielding 244,118 unique domains after deduplication.
+
+The local assessment API returned `OK` for exact matches `424242` and `45717360`. It returned `UNKNOWN` with shorter-prefix reference evidence for `42424299` and `UNKNOWN` with no master match for `00000000`. The domain lookup reported four source entries for the matched parent `mailinator.com`. Reserved IPv4 and IPv6 fixtures returned `UNKNOWN` with `NON_PUBLIC_IP`. The missing-token, invalid BIN/IP, and unknown-field tests returned 401, 422, and 400 respectively.
+
+A temporary live IP test returned `OK` from ipapi.is for `1.1.1.1` with country code `AU`. The repeat request was a cache hit. The temporary service was removed. The normal local assessment configuration keeps external lookups disabled. [Local setup](../simulation-runbook.md#provider-enrichment)
+
 ## Provider limits and terms
 
 Published limits depend on the provider plan. PayGuard can use optional server-side keys for the two IP providers. The BIN adapters use the keyless endpoints.
