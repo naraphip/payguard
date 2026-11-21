@@ -23,6 +23,8 @@ services:
       DATABASE_URL: postgres://payguard:payguard@postgres:5432/payguard?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       PAYGUARD_ADDR: 0.0.0.0:8081
+      PAYGUARD_DEMO_MERCHANT_A_TOKEN: ${PAYGUARD_DEMO_MERCHANT_A_TOKEN:-}
+      PAYGUARD_DEMO_MERCHANT_B_TOKEN: ${PAYGUARD_DEMO_MERCHANT_B_TOKEN:-}
     ports:
       - "127.0.0.1:8081:8081"
     depends_on:

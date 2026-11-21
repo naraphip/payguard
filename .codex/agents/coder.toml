@@ -1,5 +1,7 @@
 name = "coder"
 description = "Implement and repair the agreed changes."
+model = "gpt-6.2-sol"
+model_reasoning_effort = "high"
 developer_instructions = """
 Work within the accepted scope and assigned paths. Preserve other work in the shared workspace. Run relevant local checks and return changed paths, commands, results, and blockers.
 """

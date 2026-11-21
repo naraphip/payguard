@@ -33,6 +33,10 @@ func env(key, fallback string) string {
 }
 
 func main() {
+	bookingAuth, err := newBookingAuth(os.Getenv("PAYGUARD_DEMO_MERCHANT_A_TOKEN"), os.Getenv("PAYGUARD_DEMO_MERCHANT_B_TOKEN"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx := context.Background()
 	db, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://payguard:payguard@127.0.0.1:55432/payguard?sslmode=disable"))
 	if err != nil {
@@ -48,10 +52,10 @@ func main() {
 	}
 	cache := redis.NewClient(options)
 	defer cache.Close()
-
 	a := app{repository{db}, cache, []byte(env("ENTITY_KEY_SECRET", "payguard-local-synthetic-v1"))}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
+	mux.HandleFunc("POST /api/v1/booking/events", bookingHandler{a.repo, bookingAuth}.create)
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)

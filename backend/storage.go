@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS simulation_qa.ground_truth (
   PRIMARY KEY (merchant_id, run_id, event_id),
   FOREIGN KEY (merchant_id, run_id) REFERENCES simulation_runs (merchant_id, run_id)
 );
+CREATE TABLE IF NOT EXISTS booking_events (
+  merchant_id text NOT NULL,
+  event_id uuid NOT NULL,
+  idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 128),
+  schema_version integer NOT NULL CHECK (schema_version = 1),
+  stage text NOT NULL CHECK (stage = 'booking'),
+  occurred_at timestamptz NOT NULL,
+  amount_minor bigint CHECK (amount_minor >= 0),
+  received_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (merchant_id, event_id),
+  UNIQUE (merchant_id, idempotency_key)
+);
 `
 
 type redisVelocity struct {
