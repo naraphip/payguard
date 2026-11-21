@@ -2,6 +2,30 @@
 
 Follow the [local startup steps](../README.md). PostgreSQL initializes its demo tables and QA schema when Go starts.
 
+## Local keys and Omise sandbox preparation
+
+Docker Compose reads the repository-root `.env` for demo merchant tokens and optional enrichment settings. Create it from the [example template](../.env.example) if it does not already exist.
+
+```sh
+test -e .env || (umask 077; cp .env.example .env)
+```
+
+Run `openssl rand -hex 32` separately for each demo merchant you want to enable, then assign each generated value to its matching `PAYGUARD_DEMO_MERCHANT_A_TOKEN` or `PAYGUARD_DEMO_MERCHANT_B_TOKEN` in `.env`. The template also has optional `PAYGUARD_IPAPI_IS_KEY` and `PAYGUARD_PROXYCHECK_KEY` fields. Set `PAYGUARD_ENRICHMENT_ENABLED=true` to enable outbound provider lookups. Local masters work with the default setting.
+
+For sandbox checkout, get the keys from **Omise Dashboard → Test mode → Keys** and put the pair in the ignored `backend/.env`. Set `OMISE_PUBLIC_KEY` to the `pkey_test_` key and `OMISE_SECRET_KEY` to the `skey_test_` key. Keep the secret key in the backend environment. Compose loads `backend/.env` for the Go service. After changing the file for a running stack, apply it with `docker compose up -d --wait backend`. [Finding Omise API keys](https://docs.omise.co/how-to-access-omise-api-keys)
+
+When running Go directly on the host, export values from your trusted shell-compatible key file. From the repository root, run the following after starting PostgreSQL and Redis. If you also use the root `.env` for demo tokens or enrichment, export those variables before starting Go.
+
+```sh
+(
+  cd backend || exit
+  set -a
+  . ./.env || exit
+  set +a
+  go run .
+)
+```
+
 ## Booking event intake
 
 PG-01 adds `POST /api/v1/booking/events` on the Go API at `http://127.0.0.1:8081`. Set distinct local tokens in `PAYGUARD_DEMO_MERCHANT_A_TOKEN` and `PAYGUARD_DEMO_MERCHANT_B_TOKEN` before starting Compose. An unset token disables access for its demo merchant. Send the token as `Authorization: Bearer <token>` and supply one `Idempotency-Key` header with 1–128 printable ASCII characters and no spaces.
@@ -120,10 +144,26 @@ The example produces 24 decisions, skips 12 duplicate PSP retries, and reports 1
 
 ### Verify checkout contact and merchant policy
 
-1. Select **OTA → Flight ticket** and **Normal** traffic. Set **Accounts** to `1`. Leave **Omit payment token** and **Mock Jev timeout** off.
+1. Select **Travel → Bangkok to Singapore**. In **Simulation settings**, select **Normal traffic**, set **Accounts** to `1`, and leave **Omit payment token** and **Mock Jev timeout** off.
 2. Enter a synthetic contact such as **Test Buyer**, `buyer@restricted.test`, and `+1 202-555-0142`. Enable **Block flights for restricted.test**, then run the scenario. In the first order's **PRE PAYMENT** evidence, check that the contact is visible, **Event email domain** reads `restricted.test`, the merchant policy and final action are `BLOCK`, and the final action source is `MERCHANT_POLICY`. The platform decision is `ALLOW` for this fixture.
 3. Change the email to `buyer@traveler.test` and run again. Check that the contact reflects the new submission, **Event email domain** reads `traveler.test`, the merchant policy is `PASS`, and the final action is `ALLOW`. A subdomain such as `sub.restricted.test` also passes because the rule matches the exact hostname.
 4. Clear the contact and run again to use the original seeded domain. To verify product and stage boundaries, inspect **BOOKING**, disable the policy before rerunning, or repeat with a hotel or e-commerce product. Merchant policy is `NOT_APPLICABLE` in those cases.
+
+## Omise sandbox checkout
+
+The Omise test payment flow applies to the shared synthetic demo in **Travel** and **Online store**. Merchant-scoped scenarios and **Gateway** use simulated payments.
+
+1. Configure the [test-mode keys](#local-keys-and-omise-sandbox-preparation) and start the app. Confirm `GET /api/v1/simulation/checkout/config` reports checkout available before opening the lab.
+2. Choose a product in **Travel** or **Online store** and set the quantity. For a simple eligible run, open **Simulation settings**, select **Normal traffic**, and set **Accounts** to `1`. Leave merchant blocking, **Omit payment token**, and **Mock Jev timeout** off. Select **Run simulation** in the inline **Trip summary** or **Your cart**.
+3. Choose **Pay in test mode** in the same panel. The first order must have final action `ALLOW` at `PRE_PAYMENT` for Travel or `PAYMENT` for Online store. If the checkout settings changed, run the simulation again before paying. Fill the Omise-hosted form with an official test card. [Omise.js hosted form](https://docs.omise.co/omise-js), [Official test cards](https://docs.omise.co/api-testing)
+4. Review the payment status in the inline summary. If the status is pending or unknown, check the Test dashboard for the provider's outcome. The existing attempt remains associated with the saved run.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/v1/simulation/checkout/config` | Returns `enabled`, `currency`, and the per-product `prices` in satang, plus `publicKey` when sandbox checkout is configured. |
+| `POST /api/v1/simulation/checkout/charges` | Accepts `{runId, token}`. Go verifies the saved run, calculates the THB total from its product and quantity, and records one charge attempt per run in PostgreSQL. A recorded attempt prevents another sandbox charge for the same run. |
+
+Omise.js tokenizes the test card in the hosted form. PayGuard receives the token, and Go authenticates the sandbox charge with the test secret key. Full card numbers and security codes stay in the hosted form. [Omise authentication](https://docs.omise.co/api-authentication)
 
 ## System Rules
 
@@ -164,3 +204,63 @@ curl -fsS http://127.0.0.1:8081/api/v1/booking/jev/rules \
 ```
 
 For a rule that uses `amountMinor`, first approve a Scoring Profile that includes it. Assess a fresh booking at the threshold and inspect its `ruleHits`, outcome, and the Jev ruleset version in `jevRuleVersion` when present or `ruleVersion` otherwise. To isolate an amount rule during this check, use a fresh fixture window with fewer than five bookings. Replay an assessment made before the push to confirm it still returns the original result.
+
+## Provider enrichment
+
+`POST /api/v1/enrichment` is available directly on the Go API at port 8081. Authenticate with an existing `PAYGUARD_DEMO_MERCHANT_A_TOKEN` or `PAYGUARD_DEMO_MERCHANT_B_TOKEN` as a bearer token. Missing or invalid authentication returns 401. Local BIN and email-domain lookups work with the default environment. Set `PAYGUARD_ENRICHMENT_ENABLED=true` before starting Go or Compose to allow optional external IP and BIN lookups.
+
+| Backend variable | Purpose |
+| --- | --- |
+| `PAYGUARD_ENRICHMENT_ENABLED` | Defaults to `false`. Controls external provider calls only. |
+| `PAYGUARD_IPAPI_IS_KEY` | Optional ipapi.is key. |
+| `PAYGUARD_PROXYCHECK_KEY` | Optional proxycheck.io key. |
+| `PAYGUARD_ENRICHMENT_CACHE_SECRET` | Optional HMAC secret for stable cache keys across backend restarts. Go generates a random secret for each process if unset. |
+| `PAYGUARD_EMAIL_MASTER_LOCAL` | Optional path to a local domain overlay. With the variable unset, Go loads `masterdata/local/domains.txt.gz` relative to its working directory if present. |
+
+### Prepare the local masters
+
+With PostgreSQL running, import the pinned snapshot into `enrichment_bin_master` and `enrichment_bin_snapshot`. Importing the same snapshot again reuses the stored data. The command honors `DATABASE_URL` and defaults to the loopback Compose database.
+
+```sh
+(cd backend && go run ./cmd/import-bin-master)
+```
+
+If using Docker for the backend, run the importer from the locally built image after PostgreSQL is up.
+
+```sh
+docker compose run --rm --entrypoint /usr/local/bin/payguard-import-bin-master backend
+```
+
+The backend loads the bundled email-domain master on the first email-domain lookup. To regenerate the snapshots and add the optional local-only feeds, run the refresh command and restart the backend. Compose mounts `backend/masterdata/local` read-only at `/masterdata/local`. For a custom path in Compose, use the path as seen by the container.
+
+```sh
+(cd backend && go run ./cmd/refresh-email-master -local)
+```
+
+### Request and response
+
+Send a JSON object with one or more string fields: `ip`, `bin`, or `emailDomain`. Use a literal IPv4 or IPv6 address, 6–8 ASCII digits for the BIN, and a bare domain for email. The API rejects a full card number, a full email address, and unknown fields such as `rule` or `stage`. The response contains lookup evidence only.
+
+Each requested kind returns an object with `status` (`OK` or `UNKNOWN`), `lookedUpAt`, and `cached`. Optional fields are `reason`, `provider`, `dataTimestamp`, and normalized `data`. Omitted flags are unknown, and explicit `false` flags stay visible. Backend logs record the lookup kind, status, provider, timestamps, and cache status.
+
+| Response object | Evidence |
+| --- | --- |
+| `ip.data` | Available normalized flags, risk score, and country code. |
+| `bin.data` | Canonical exact-prefix evidence with `scheme`, `funding`, `issuer`, and `countryCode` when known. `bin.fieldSources` identifies the source of each populated field. |
+| `bin.master` | `FOUND`, `NOT_FOUND`, or `UNKNOWN`, with `EXACT` or `PREFIX`, `matchedPrefix`, dataset `source` and `revision`, and `recordSource` and `seen` when available. A shorter match uses `reference` with the same BIN field names. |
+| `email.data` | Normalized `domain`, a `listed` boolean, and optional `matchedDomain` and `sources` for the most specific listed domain or parent. |
+
+An exact PostgreSQL record supplies its known fields first. When enabled, external evidence for the requested BIN may fill gaps. For a 7–8 digit request, the provider must echo the exact digits. A shorter master match stays in `bin.master.reference`. All four known fields yield `bin.status: "OK"`. An incomplete lookup returns `UNKNOWN` and can still include the known exact fields.
+
+The following request consumes no provider quota. The TEST-NET IP returns `UNKNOWN` with `reason: "NON_PUBLIC_IP"`. The bundled snapshot returns `email.status: "OK"` and lists the parent `mailinator.com` in `email.data`.
+
+```sh
+curl -fsS http://127.0.0.1:8081/api/v1/enrichment \
+  -H "Authorization: Bearer ${PAYGUARD_DEMO_MERCHANT_A_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"ip":"192.0.2.10","emailDomain":"trial.mailinator.com"}'
+```
+
+After importing the master, use `{"bin":"424242"}` for a complete exact local lookup. With external providers disabled, use `{"bin":"42424299"}` to see `bin.status: "UNKNOWN"` with the shorter `424242` record under `bin.master.reference`.
+
+See the [lookup behavior, cache policy and provider terms](requirements/provider-enrichment.md).
