@@ -5,7 +5,8 @@ services:
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile
     plan: free
-    autoDeployTrigger: off
+    branch: main
+    autoDeployTrigger: commit
     healthCheckPath: /healthz
     envVars:
       - key: PAYGUARD_ADDR
@@ -32,7 +33,8 @@ services:
     dockerContext: ./frontend
     dockerfilePath: ./frontend/Dockerfile
     plan: free
-    autoDeployTrigger: off
+    branch: main
+    autoDeployTrigger: commit
     healthCheckPath: /
     envVars:
       - key: PAYGUARD_API_URL
