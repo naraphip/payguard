@@ -84,6 +84,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)
+	a.registerTenantSimulation(mux, bookingAuth)
 	mux.HandleFunc("GET /api/v1/system/rules", a.readRules)
 	mux.HandleFunc("POST /api/v1/system/rules", a.createRule)
 	mux.HandleFunc("PUT /api/v1/system/rules/{id}", a.updateRule)
@@ -130,6 +131,10 @@ func (a app) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a app) create(w http.ResponseWriter, r *http.Request) {
+	a.createSimulation(w, r, merchantID)
+}
+
+func (a app) createSimulation(w http.ResponseWriter, r *http.Request, tenant string) {
 	var request struct {
 		ID     string `json:"id"`
 		Config config `json:"config"`
@@ -152,7 +157,7 @@ func (a app) create(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	saved, err := a.repo.get(ctx, merchantID, request.ID)
+	saved, err := a.repo.get(ctx, tenant, request.ID)
 	switch {
 	case err == nil:
 		returnRun(w, saved, request.Config)
@@ -167,15 +172,15 @@ func (a app) create(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, err)
 		return
 	}
-	events, truth := generate(request.Config, merchantID, a.secret)
-	counter := redisVelocity{a.redis, "payguard:" + merchantID + ":" + request.ID + ":" + id}
+	events, truth := generate(request.Config, tenant, a.secret)
+	counter := redisVelocity{a.redis, "payguard:" + tenant + ":" + request.ID + ":" + id}
 	decisions, err := evaluate(ctx, counter, events, request.Config.MerchantPolicy, request.Config.JevTimeout)
 	if err != nil {
 		unavailable(w, err)
 		return
 	}
 	result := run{request.ID, request.Config, generatorVersion, ruleVersion, jevVersion, len(events) - len(decisions), decisions}
-	saved, err = a.repo.save(ctx, merchantID, result, truth)
+	saved, err = a.repo.save(ctx, tenant, result, truth)
 	if err != nil {
 		unavailable(w, err)
 		return
@@ -191,13 +196,13 @@ func returnRun(w http.ResponseWriter, saved run, requested config) {
 	respond(w, 200, saved)
 }
 
-func (a app) find(w http.ResponseWriter, r *http.Request) (run, bool) {
+func (a app) find(w http.ResponseWriter, r *http.Request, tenant string) (run, bool) {
 	id := r.PathValue("id")
 	if !validID.MatchString(id) {
 		problem(w, 404, "Run not found.")
 		return run{}, false
 	}
-	result, err := a.repo.get(r.Context(), merchantID, id)
+	result, err := a.repo.get(r.Context(), tenant, id)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		problem(w, 404, "Run not found.")
@@ -210,17 +215,21 @@ func (a app) find(w http.ResponseWriter, r *http.Request) (run, bool) {
 }
 
 func (a app) readRun(w http.ResponseWriter, r *http.Request) {
-	if saved, ok := a.find(w, r); ok {
+	if saved, ok := a.find(w, r, merchantID); ok {
 		respond(w, 200, saved)
 	}
 }
 
 func (a app) readReport(w http.ResponseWriter, r *http.Request) {
-	saved, ok := a.find(w, r)
+	a.readSimulationReport(w, r, merchantID)
+}
+
+func (a app) readSimulationReport(w http.ResponseWriter, r *http.Request, tenant string) {
+	saved, ok := a.find(w, r, tenant)
 	if !ok {
 		return
 	}
-	result, err := a.repo.qaReport(r.Context(), merchantID, saved)
+	result, err := a.repo.qaReport(r.Context(), tenant, saved)
 	if err != nil {
 		unavailable(w, err)
 		return

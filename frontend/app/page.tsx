@@ -147,6 +147,7 @@ export default function Home() {
   const [config, setConfig] = useState(defaults);
   const [contact, setContact] = useState(emptyContact);
   const [contactEmailError, setContactEmailError] = useState(false);
+  const [tenantToken, setTenantToken] = useState("");
   const [run, setRun] = useState<Run | null>(null);
   const [runContact, setRunContact] = useState<{ orderId: string; contact: Contact } | null>(null);
   const [selectedID, select] = useState("");
@@ -156,6 +157,9 @@ export default function Home() {
   const [error, setError] = useState("");
   const [reportError, setReportError] = useState("");
   const lastRequest = useRef<{ id: string; config: Config } | null>(null);
+  const scoped = tenantToken.trim();
+  const runEndpoint = scoped ? "/api/v1/booking/network/runs" : endpoint;
+  const requestHeaders = scoped ? { Authorization: `Bearer ${scoped}` } : undefined;
   const ota = config.product === "flight_ticket" || config.product === "hotel_room";
   const gateway = config.product === "payment_gateway";
   const choices: SimulationProduct[] = ota ? ["flight_ticket", "hotel_room"] : gateway ? ["payment_gateway"] : ["physical", "digital"];
@@ -194,8 +198,8 @@ export default function Home() {
       lastRequest.current = { id: crypto.randomUUID(), config: current };
     }
     try {
-      const result = await api<Run>(endpoint, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(lastRequest.current),
+      const result = await api<Run>(runEndpoint, {
+        method: "POST", headers: { "Content-Type": "application/json", ...requestHeaders }, body: JSON.stringify(lastRequest.current),
       });
       setRun(result);
       const firstOrderID = result.decisions[0]?.event.orderId;
@@ -221,7 +225,7 @@ export default function Home() {
     setReportBusy(true);
     setReportError("");
     try {
-      setReport(await api<Report>(`${endpoint}/${run.id}/report`));
+      setReport(await api<Report>(`${runEndpoint}/${run.id}/report`, { headers: requestHeaders }));
     } catch (failure) {
       setReportError((failure as Error).message);
     } finally {
@@ -244,6 +248,9 @@ export default function Home() {
             <Link href="/settings/merchant-setup" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
               <Building2 size={14} aria-hidden /><span>Merchant setup</span>
             </Link>
+            <Link href="/settings/jev-rules" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
+              <ListChecks size={14} aria-hidden /><span>Jev Rules</span>
+            </Link>
             <Link href="/settings/system-rules" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
               <SlidersHorizontal size={14} aria-hidden /><span>Platform Rules</span>
             </Link>
@@ -264,6 +271,19 @@ export default function Home() {
             <fieldset disabled={busy} className="min-w-0 space-y-5 p-4 sm:p-5">
               <legend className="sr-only">Simulation setup</legend>
               <h2 className="font-semibold">Simulation setup</h2>
+              <Field label="Demo merchant token (optional)">
+                <input className="control" type="password" autoComplete="off" value={tenantToken}
+                  onChange={event => {
+                    setTenantToken(event.currentTarget.value);
+                    lastRequest.current = null;
+                    setRun(null);
+                    setRunContact(null);
+                    setReport(null);
+                    setError("");
+                    setReportError("");
+                  }} />
+                <span className="text-xs text-muted">Enter a token to scope linked entities and saved runs to your demo merchant.</span>
+              </Field>
               <div className="grid grid-cols-3 gap-1 rounded-lg bg-paper p-1" role="group" aria-label="Storefront">
                 {[{ label: "OTA", active: ota, icon: Plane, value: "flight_ticket" }, { label: "E-commerce", active: !ota && !gateway, icon: ShoppingBag, value: "physical" }, { label: "Gateway", active: gateway, icon: CreditCard, value: "payment_gateway" }].map(({ label, active, icon: Icon, value }) => (
                   <button key={label} type="button" onClick={() => product(value as SimulationProduct)} aria-pressed={active} className={`flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs font-semibold ${active ? "bg-white text-accent shadow-xs" : "text-muted hover:text-ink"}`}>
