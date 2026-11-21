@@ -67,6 +67,14 @@ The repository includes [render.yaml](render.yaml) for a free Render Blueprint w
 
 After syncing this Blueprint in Render, both web services track `main` and auto-deploy on every commit to that branch.
 
+### Update and verify the existing demo
+
+If a service was suspended by its owner, have an authorized workspace member select **Resume** in the Render Dashboard. Confirm that `payguard-postgres` is available before deploying. [Render service controls](https://render.com/changelog/suspend-and-resume-services-in-bulk-from-the-render-dashboard)
+
+1. Compare the commit on GitHub `main` with the live commit shown on the **Deploys** page for `payguard-backend` and `payguard-frontend`. If the Blueprint changed, confirm that its latest sync succeeded before deploying. If a service still needs the verified `main` commit and no deploy is running, select **Manual Deploy > Deploy latest commit** for that service. [Render deployment instructions](https://render.com/docs/deploys)
+2. Once both services show the expected commit as live, use the public URLs shown in Render. Check that the backend returns HTTP 200 at `/healthz` and that the frontend returns HTTP 200 at `/dashboard` and JSON with HTTP 200 at `/api/v1/system/rules`. The rules request verifies the frontend-to-backend connection.
+3. If a deployment fails, check its build and service logs. If a new live version fails the checks, use **Rollback** on the affected service's previous healthy deploy and repeat the health checks. A dashboard rollback turns off automatic deploys for that service. Turn them back on after the fix is verified. [Render rollback instructions](https://render.com/docs/rollbacks)
+
 The Key Value store blocks external connections with an empty IP allow list; the backend connects using Render's internal URL.
 
 This deployment is an online demo, not a production rollout. Render's free web services spin down after inactivity. The free PostgreSQL database expires after 30 days and the free Key Value instance may lose state on restart. Free PostgreSQL has no managed backups. Keep demo credentials and synthetic data only.

@@ -41,12 +41,12 @@ services:
         fromService:
           name: payguard-backend
           type: web
-          property: host
+          envVarKey: RENDER_EXTERNAL_URL
       - key: PAYGUARD_BOOKING_API_URL
         fromService:
           name: payguard-backend
           type: web
-          property: host
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: keyvalue
     name: payguard-redis
