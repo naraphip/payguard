@@ -1,8 +1,8 @@
 # PayGuard implementation task breakdown
 
-Parent IDs match the [local task list](payguard-tasks.md) and the [live action plan](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260117). This breakdown uses the live plan, the [master requirements package](https://drive.google.com/file/d/1vEKS3-get8bIeceeQG0DI_2fT7awD6v3/view), and a source review at revision `52c1b5e`. The linked System Handbook requires access. Reconcile this breakdown against the handbook when available.
+Parent IDs match the [local task list](payguard-tasks.md) and the [live action plan](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260117). The scope draws on the [master requirements package](https://drive.google.com/file/d/1vEKS3-get8bIeceeQG0DI_2fT7awD6v3/view) and the [System Handbook](https://docs.google.com/document/d/1RtzQI1VIRXabDKUBPGcfQM8NxJZs1u_geFWFYC8Hq_I/edit).
 
-The [Simulation Lab](requirements/simulation-lab.md) already has synthetic storefronts, seeded event generation, run-level replay, Redis velocity, typed mock Jev results, and a tenant-scoped synthetic graph. Reuse these pieces. Verify each parent task against its own acceptance criteria before updating its Sheet status. Source review alone establishes overlap, and runtime checks remain pending because Go was unavailable in this environment.
+Reuse the merged sandbox capabilities listed in [verified implementation progress](payguard-tasks.md#verified-implementation-progress). [Current work](current-work.md) records the Go, browser, and API checks. Verify each parent task against its full acceptance criteria before updating its Sheet status.
 
 ## Local development environment
 

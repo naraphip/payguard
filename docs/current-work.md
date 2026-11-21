@@ -1,8 +1,15 @@
 # Current work
 
+## Merged implementation · main at `e58e59a`
+
+- Simulation Lab delivered the synthetic storefronts, seeded runs, evidence and entity graph, and offline QA. [GitHub PR #1](https://github.com/pwatakul/payguard/pull/1)
+- Checkout Contact, the platform System Rules dashboard, and the supplied PayGuard logo merged. Chrome verified the PNG in both headers at desktop and mobile widths. [GitHub PR #2](https://github.com/pwatakul/payguard/pull/2)
+
+The [implementation progress table](payguard-tasks.md#verified-implementation-progress) maps the verified sandbox features to their full Action Plan acceptance criteria. Runtime checks below cover the local sandbox.
+
 ## System Rules dashboard · 21 November 2026
 
-Implemented and verified locally on `codex/system-rules`. The dashboard shows active platform built-ins in evaluation order, saves editable drafts in PostgreSQL, and previews candidate conditions against one selected synthetic run. Active rule execution and Merchant Policy retain their existing behavior. See the [requirements](requirements/system-rules.md), [UI](ui/system-rules.md), and [runbook](simulation-runbook.md#system-rules).
+The dashboard shows active platform built-ins in evaluation order, saves editable drafts in PostgreSQL, and previews candidate conditions against one selected synthetic run. Active rule execution and Merchant Policy retain their existing behavior. See the [requirements](requirements/system-rules.md), [UI](ui/system-rules.md), and [runbook](simulation-runbook.md#system-rules).
 
 - Go race tests and vet passed. Frontend type checking and the Next.js production build passed on Node.js 24.
 - Live API checks with PostgreSQL and Redis verified the fresh rule catalogue, built-in protection, typed and stage-aware validation, draft edits, stale-version rejection, and persistence after a backend restart.
@@ -11,7 +18,7 @@ Implemented and verified locally on `codex/system-rules`. The dashboard shows ac
 
 ## Simulation Lab checkout contact · 21 November 2026
 
-Implemented and verified locally on `codex/simulation-contact`. The first order displays the submitted synthetic contact in both stages. The full contact stays in browser memory, and Go receives only the normalized `.test` email domain. See the [requirements](requirements/simulation-lab.md), [UI](ui/simulation-lab.md), and [runbook](simulation-runbook.md#verify-checkout-contact-and-merchant-policy).
+The first order displays the submitted synthetic contact in both stages. The full contact stays in browser memory, and Go receives only the normalized `.test` email domain. See the [requirements](requirements/simulation-lab.md), [UI](ui/simulation-lab.md), and [runbook](simulation-runbook.md#verify-checkout-contact-and-merchant-policy).
 
 - Go race tests and vet passed. Frontend type checking and the Next.js production build passed on Node.js 24.
 - Live API tests with PostgreSQL and Redis verified domain validation, case-insensitive replay, a 409 for a different domain under the same run ID, first-order scope, exact policy matching, disabled and non-flight policy behavior, and timeout precedence.

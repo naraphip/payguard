@@ -30,6 +30,24 @@ Sources include the [PayGuard requirements folder](https://drive.google.com/driv
 
 The local Go and Next.js Simulation Lab provides a base for the demo. Start with PG-01 and see the [implementation task breakdown](payguard-task-breakdown.md) for reusable code, dependencies, and acceptance checks. Use synthetic data for the demo.
 
+## Verified implementation progress
+
+The sandbox implementation has merged into `main`. The delivery table above retains the live Action Plan statuses because the remaining acceptance work below is open. [Verification evidence](current-work.md), [GitHub PR #1](https://github.com/pwatakul/payguard/pull/1), [GitHub PR #2](https://github.com/pwatakul/payguard/pull/2)
+
+| ID | Verified in the sandbox | Remaining acceptance work |
+| --- | --- | --- |
+| PG-01 | Simulation requests validate and replay by run ID. A changed payload under the same ID returns a conflict. | Versioned booking-event contract with tenant resolution from authentication and event-level idempotency. |
+| PG-05 | Seeded scenarios reproduce Redis velocity counts, and missing payment signals are explicit. | Connect the authenticated assessment path and persist cold-start state before a baseline is available. |
+| PG-06 | Typed mock Jev results include timeout evidence. | Approved rubric lineage and an operator handoff. |
+| PG-07 | OTA and e-commerce mock checkout shows rule hits, decision evidence, and Jev status in the lab. | Connect checkout to the PG-04 booking endpoint running an approved profile. |
+| PG-09 | Smoke tests covered deterministic fixtures, duplicate replay, timeout, and separation of QA labels. | Integrated checks across PG-01 through PG-08, including authenticated tenant scope. |
+| PG-14 | Rule preview reads one saved synthetic run and leaves recorded decisions and fresh same-seed results unchanged. | Pinned temporal replay and shadow evaluation with held-out metrics and baseline versions. |
+| PG-16 | Synthetic Contact supports a domain override. Exact-match flight policy and separate action attribution were verified. | Versioned product schemas and tenant-scoped policy on the authenticated path. |
+| PG-18 | The synthetic entity graph displays linked evidence. Shared Wi-Fi alone did not block normal traffic. | Verify production entity scope and authenticated tenant isolation. |
+| PG-19 | System Rules supports typed draft editing, PostgreSQL persistence, and preview with matched event IDs. | Advanced visual and personalized tooling after replay and PG-15 approvals. |
+
+The supplied PayGuard logo is a merged UI change outside the Action Plan tasks.
+
 ## Decisions
 
 See the [live review decisions](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260116) for demo recommendations and approval details. An open decision stays open until its owner approves it.
@@ -58,5 +76,5 @@ Mark a task complete only when its acceptance checks pass. Update the local stat
 | Task ID | Verification evidence | Sheet sync |
 | --- | --- | --- |
 
-No tasks have been verified complete in this repository.
+Full PG completion is still unverified. See the [verified implementation progress](#verified-implementation-progress) for completed sandbox capabilities.
 
