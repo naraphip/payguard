@@ -11,8 +11,6 @@ import (
 	"math/rand/v2"
 	"regexp"
 	"slices"
-	"strings"
-	"time"
 )
 
 const (
@@ -58,20 +56,7 @@ func (c config) validate() error {
 	default:
 		return errors.New("choose normal, fraud or mixed")
 	}
-	switch c.Product {
-	case "flight_ticket", "hotel_room":
-		if _, err := time.Parse("2006-01-02", c.Date); err != nil || c.Delivery != "" {
-			return errors.New("OTA requires a valid booking date and no delivery type")
-		}
-	case "physical", "digital":
-		if c.Date != "" || (c.Product == "physical" && c.Delivery != "standard" && c.Delivery != "express") ||
-			(c.Product == "digital" && c.Delivery != "instant") {
-			return errors.New("select a valid delivery type for the product")
-		}
-	default:
-		return errors.New("unknown product")
-	}
-	return nil
+	return validateSimulationProduct(c)
 }
 
 type entity struct {
@@ -150,17 +135,14 @@ func generate(c config, tenant string, secret []byte) ([]event, []label) {
 			age = random.IntN(6)
 		}
 		orderID := fmt.Sprintf("order-%x-%03d", c.Seed, i+1)
-		first, second := "BOOKING", "PRE_PAYMENT"
-		if c.Product == "physical" || c.Product == "digital" {
-			first, second = "CHECKOUT", "PAYMENT"
-		}
+		module := simulationProducts[c.Product]
 		base := event{
-			ID: orderID + "-01", OrderID: orderID, Stage: first, At: start + int64(i*60/c.Rate),
+			ID: orderID + "-01", OrderID: orderID, Stage: module.firstStage, At: start + int64(i*60/c.Rate),
 			Product: c.Product, Quantity: c.Quantity, Date: c.Date, Delivery: c.Delivery,
 			Domain: domain, AgeDays: age, Entities: group,
 		}
 		payment := base
-		payment.ID, payment.Stage, payment.At, payment.Entities = orderID+"-02", second, base.At+1, paymentGroup
+		payment.ID, payment.Stage, payment.At, payment.Entities = orderID+"-02", module.secondStage, base.At+1, paymentGroup
 		events = append(events, base, payment)
 		if c.Retry {
 			events = append(events, payment)
@@ -257,14 +239,9 @@ func assess(e event, features []feature, policy, timeout bool) decision {
 	if timeout {
 		d.JevStatus, d.JevAnswer, d.Action, d.Source = "TIMEOUT", "UNAVAILABLE", "UNSUCCESSFUL", "JEV_TIMEOUT"
 	}
-	if policy && e.Product == "flight_ticket" && paymentStage(e.Stage) {
-		d.Merchant = "PASS"
-		if strings.EqualFold(e.Domain, "restricted.test") {
-			d.Merchant = "BLOCK"
-			if !timeout {
-				d.Action, d.Source = "BLOCK", "MERCHANT_POLICY"
-			}
-		}
+	d.Merchant = resolveSimulationMerchantPolicy(e, policy)
+	if d.Merchant == "BLOCK" && !timeout {
+		d.Action, d.Source = "BLOCK", "MERCHANT_POLICY"
 	}
 	return d
 }

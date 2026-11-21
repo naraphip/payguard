@@ -29,14 +29,18 @@ func decodeRuleRequest(w http.ResponseWriter, r *http.Request, value any) bool {
 }
 
 func (a app) readRules(w http.ResponseWriter, r *http.Request) {
+	a.readTenantRules(w, r, merchantID)
+}
+
+func (a app) readTenantRules(w http.ResponseWriter, r *http.Request, tenant string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	drafts, err := a.repo.draftRules(ctx, merchantID)
+	drafts, err := a.repo.draftRules(ctx, tenant)
 	if err != nil {
 		unavailable(w, err)
 		return
 	}
-	runs, err := a.repo.previewRuns(ctx, merchantID)
+	runs, err := a.repo.previewRuns(ctx, tenant)
 	if err != nil {
 		unavailable(w, err)
 		return
@@ -50,6 +54,10 @@ func (a app) readRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a app) createRule(w http.ResponseWriter, r *http.Request) {
+	a.createTenantRule(w, r, merchantID)
+}
+
+func (a app) createTenantRule(w http.ResponseWriter, r *http.Request, tenant string) {
 	var input ruleInput
 	if !decodeRuleRequest(w, r, &input) {
 		return
@@ -60,7 +68,7 @@ func (a app) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	rule, err := a.repo.createDraft(ctx, merchantID, input)
+	rule, err := a.repo.createDraft(ctx, tenant, input)
 	if err != nil {
 		unavailable(w, err)
 		return
@@ -69,6 +77,10 @@ func (a app) createRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a app) updateRule(w http.ResponseWriter, r *http.Request) {
+	a.updateTenantRule(w, r, merchantID)
+}
+
+func (a app) updateTenantRule(w http.ResponseWriter, r *http.Request, tenant string) {
 	id := r.PathValue("id")
 	for _, rule := range builtinRules {
 		if id == rule.ID {
@@ -93,7 +105,7 @@ func (a app) updateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	rule, err := a.repo.updateDraft(ctx, merchantID, id, request.Version, request.ruleInput)
+	rule, err := a.repo.updateDraft(ctx, tenant, id, request.Version, request.ruleInput)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		problem(w, 404, "Rule draft not found.")
@@ -107,6 +119,10 @@ func (a app) updateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a app) previewRules(w http.ResponseWriter, r *http.Request) {
+	a.previewTenantRules(w, r, merchantID)
+}
+
+func (a app) previewTenantRules(w http.ResponseWriter, r *http.Request, tenant string) {
 	var request struct {
 		RunID string    `json:"runId"`
 		Rule  ruleInput `json:"rule"`
@@ -124,7 +140,7 @@ func (a app) previewRules(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	saved, err := a.repo.get(ctx, merchantID, request.RunID)
+	saved, err := a.repo.get(ctx, tenant, request.RunID)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		problem(w, 404, "Run not found.")

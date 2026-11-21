@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,9 +34,26 @@ func env(key, fallback string) string {
 }
 
 func main() {
-	bookingAuth, err := newBookingAuth(os.Getenv("PAYGUARD_DEMO_MERCHANT_A_TOKEN"), os.Getenv("PAYGUARD_DEMO_MERCHANT_B_TOKEN"))
+	bookingAuth, err := newBookingAuth(os.Getenv("PAYGUARD_DEMO_MERCHANT_A_TOKEN"), os.Getenv("PAYGUARD_DEMO_MERCHANT_B_TOKEN"),
+		bookingActorCredential{"demo-merchant-a", "analyst", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_A_TOKEN")},
+		bookingActorCredential{"demo-merchant-a", "analyst-2", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_A2_TOKEN")},
+		bookingActorCredential{"demo-merchant-a", "viewer", bookingRoleViewer, os.Getenv("PAYGUARD_DEMO_VIEWER_A_TOKEN")},
+		bookingActorCredential{"demo-merchant-b", "analyst", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_B_TOKEN")},
+		bookingActorCredential{"demo-merchant-b", "viewer", bookingRoleViewer, os.Getenv("PAYGUARD_DEMO_VIEWER_B_TOKEN")},
+	)
 	if err != nil {
 		log.Fatal(err)
+	}
+	merchantJev, err := newMerchantJev(os.Getenv("PAYGUARD_AI_MODE"), os.Getenv("OPENROUTER_API_KEY"), os.Getenv("OPENROUTER_MODEL_PRIMARY"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	var baselineMinSamples int
+	if raw := os.Getenv("PAYGUARD_DEMO_BASELINE_MIN_SAMPLES"); raw != "" {
+		baselineMinSamples, err = strconv.Atoi(raw)
+		if err != nil || baselineMinSamples < 1 {
+			log.Fatal("PAYGUARD_DEMO_BASELINE_MIN_SAMPLES must be a positive integer")
+		}
 	}
 	ctx := context.Background()
 	db, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://payguard:payguard@127.0.0.1:55432/payguard?sslmode=disable"))
@@ -52,13 +70,40 @@ func main() {
 	}
 	cache := redis.NewClient(options)
 	defer cache.Close()
+	enrichment, err := newEnrichmentHandler(bookingAuth, db, options)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if enrichment.cache != nil {
+		defer enrichment.cache.Close()
+	}
 	a := app{repository{db}, cache, []byte(env("ENTITY_KEY_SECRET", "payguard-local-synthetic-v1"))}
+	checkout := newOmiseCheckout(a.repo, os.Getenv("OMISE_PUBLIC_KEY"), os.Getenv("OMISE_SECRET_KEY"))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("POST /api/v1/booking/events", bookingHandler{a.repo, bookingAuth}.create)
+	bookingRisk := bookingRiskHandler{repo: a.repo, auth: bookingAuth, redis: cache, baselineMinSamples: baselineMinSamples}
+	mux.HandleFunc("POST /api/v1/booking/profiles/proposal", bookingRisk.proposeProfile)
+	mux.HandleFunc("POST /api/v1/booking/profiles/approve", bookingRisk.approveProfile)
+	mux.HandleFunc("GET /api/v1/booking/jev/rules", bookingRisk.listJevRules)
+	mux.HandleFunc("POST /api/v1/booking/jev/rules", bookingRisk.pushJevRule)
+	mux.HandleFunc("POST /api/v1/booking/jev/rules/preview", bookingRisk.testJevRule)
+	mux.HandleFunc("POST /api/v1/booking/events/{id}/assessment", bookingRisk.assessEvent)
+	mux.HandleFunc("POST /api/v1/booking/events/{id}/outcomes", bookingRisk.importOutcome)
+	mux.HandleFunc("GET /api/v1/booking/events/{id}/lineage", bookingRisk.readLineage)
+	mux.HandleFunc("POST /api/v1/booking/shadow", bookingRisk.shadowBookings)
+	registerBookingOps(mux, a.repo, bookingAuth, a.secret)
+	registerMerchantDemo(mux, a.repo, os.Getenv("PAYGUARD_DEMO_ADMIN_TOKEN"), merchantJev)
+	registerBookingDossiers(mux, a.repo, bookingAuth)
+	registerBookingGovernance(mux, a.repo, bookingAuth)
+	go a.repo.runBookingDossiers(ctx)
+	mux.HandleFunc("POST /api/v1/enrichment", enrichment.lookup)
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)
+	a.registerTenantSimulation(mux, bookingAuth)
+	mux.HandleFunc("GET /api/v1/simulation/checkout/config", checkout.config)
+	mux.HandleFunc("POST /api/v1/simulation/checkout/charges", checkout.create)
 	mux.HandleFunc("GET /api/v1/system/rules", a.readRules)
 	mux.HandleFunc("POST /api/v1/system/rules", a.createRule)
 	mux.HandleFunc("PUT /api/v1/system/rules/{id}", a.updateRule)
@@ -105,6 +150,10 @@ func (a app) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a app) create(w http.ResponseWriter, r *http.Request) {
+	a.createSimulation(w, r, merchantID)
+}
+
+func (a app) createSimulation(w http.ResponseWriter, r *http.Request, tenant string) {
 	var request struct {
 		ID     string `json:"id"`
 		Config config `json:"config"`
@@ -127,7 +176,7 @@ func (a app) create(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	saved, err := a.repo.get(ctx, merchantID, request.ID)
+	saved, err := a.repo.get(ctx, tenant, request.ID)
 	switch {
 	case err == nil:
 		returnRun(w, saved, request.Config)
@@ -142,15 +191,15 @@ func (a app) create(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, err)
 		return
 	}
-	events, truth := generate(request.Config, merchantID, a.secret)
-	counter := redisVelocity{a.redis, "payguard:" + merchantID + ":" + request.ID + ":" + id}
+	events, truth := generate(request.Config, tenant, a.secret)
+	counter := redisVelocity{a.redis, "payguard:" + tenant + ":" + request.ID + ":" + id}
 	decisions, err := evaluate(ctx, counter, events, request.Config.MerchantPolicy, request.Config.JevTimeout)
 	if err != nil {
 		unavailable(w, err)
 		return
 	}
 	result := run{request.ID, request.Config, generatorVersion, ruleVersion, jevVersion, len(events) - len(decisions), decisions}
-	saved, err = a.repo.save(ctx, merchantID, result, truth)
+	saved, err = a.repo.save(ctx, tenant, result, truth)
 	if err != nil {
 		unavailable(w, err)
 		return
@@ -166,13 +215,13 @@ func returnRun(w http.ResponseWriter, saved run, requested config) {
 	respond(w, 200, saved)
 }
 
-func (a app) find(w http.ResponseWriter, r *http.Request) (run, bool) {
+func (a app) find(w http.ResponseWriter, r *http.Request, tenant string) (run, bool) {
 	id := r.PathValue("id")
 	if !validID.MatchString(id) {
 		problem(w, 404, "Run not found.")
 		return run{}, false
 	}
-	result, err := a.repo.get(r.Context(), merchantID, id)
+	result, err := a.repo.get(r.Context(), tenant, id)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		problem(w, 404, "Run not found.")
@@ -185,17 +234,21 @@ func (a app) find(w http.ResponseWriter, r *http.Request) (run, bool) {
 }
 
 func (a app) readRun(w http.ResponseWriter, r *http.Request) {
-	if saved, ok := a.find(w, r); ok {
+	if saved, ok := a.find(w, r, merchantID); ok {
 		respond(w, 200, saved)
 	}
 }
 
 func (a app) readReport(w http.ResponseWriter, r *http.Request) {
-	saved, ok := a.find(w, r)
+	a.readSimulationReport(w, r, merchantID)
+}
+
+func (a app) readSimulationReport(w http.ResponseWriter, r *http.Request, tenant string) {
+	saved, ok := a.find(w, r, tenant)
 	if !ok {
 		return
 	}
-	result, err := a.repo.qaReport(r.Context(), merchantID, saved)
+	result, err := a.repo.qaReport(r.Context(), tenant, saved)
 	if err != nil {
 		unavailable(w, err)
 		return

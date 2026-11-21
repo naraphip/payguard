@@ -3,9 +3,10 @@ services:
     name: payguard-backend
     runtime: docker
     dockerContext: ./backend
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./backend/Dockerfile
     plan: free
-    autoDeployTrigger: off
+    branch: main
+    autoDeployTrigger: commit
     healthCheckPath: /healthz
     envVars:
       - key: PAYGUARD_ADDR
@@ -30,12 +31,18 @@ services:
     name: payguard-frontend
     runtime: docker
     dockerContext: ./frontend
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./frontend/Dockerfile
     plan: free
-    autoDeployTrigger: off
+    branch: main
+    autoDeployTrigger: commit
     healthCheckPath: /
     envVars:
       - key: PAYGUARD_API_URL
+        fromService:
+          name: payguard-backend
+          type: web
+          property: host
+      - key: PAYGUARD_BOOKING_API_URL
         fromService:
           name: payguard-backend
           type: web
@@ -44,6 +51,7 @@ services:
   - type: keyvalue
     name: payguard-redis
     plan: free
+    ipAllowList: []
 
 databases:
   - name: payguard-postgres

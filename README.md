@@ -4,13 +4,17 @@ A local sandbox for synthetic OTA bookings and e-commerce checkout risk. It runs
 
 ## Run locally
 
+The repository-root [`.env.example`](.env.example) lists the demo merchant and optional provider variables. For Omise Sandbox checkout, put `OMISE_PUBLIC_KEY` and `OMISE_SECRET_KEY` from Omise Test mode in the ignored `backend/.env`. Compose loads that file for the Go backend. See the [local keys setup](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
+
+For live Jev in merchant checkout and scenario simulation, set `PAYGUARD_AI_MODE=live` and `OPENROUTER_API_KEY` in the ignored root `.env`. The [Jev walkthrough](docs/simulation-runbook.md#enable-live-jev-for-synthetic-tests) shows how to verify the saved provider response.
+
 Requires Docker with Docker Compose. From the repository root, build and start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis:
 
 ```sh
 docker compose up --build -d --wait
 ```
 
-Open [Simulation Lab](http://127.0.0.1:3000). Select **Run simulation**, inspect a decision, then select **Score run** to calculate the synthetic QA metrics. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
+Open the [Dashboard](http://127.0.0.1:3000/dashboard) and select **Simulation Lab** in the sidebar, or open the [lab directly](http://127.0.0.1:3000/simulation-lab). Choose a product in **Travel** or **Online store**, then select **Run simulation** in the inline **Trip summary** or **Your cart**. An eligible first order can proceed to [Omise Sandbox checkout](docs/simulation-runbook.md#omise-sandbox-checkout). **Simulation results** below the checkout contains the event evidence and **Score run**. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
 
 ### Run the application directly on the host
 
@@ -22,7 +26,7 @@ For Go 1.26+ and Node.js 24+ development on the host, start only PostgreSQL and 
    docker compose up -d --wait postgres redis
    ```
 
-2. Start the Go API in a terminal.
+2. Start the Go API in a terminal. For sandbox checkout, use the [host setup that exports the backend keys](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
 
    ```sh
    cd backend
@@ -37,7 +41,7 @@ For Go 1.26+ and Node.js 24+ development on the host, start only PostgreSQL and 
    npm run dev
    ```
 
-4. Open [Simulation Lab](http://127.0.0.1:3000). Select **Run simulation**, inspect a decision, then select **Score run** to calculate the synthetic QA metrics.
+4. Open [Simulation Lab](http://127.0.0.1:3000/simulation-lab) and run the same storefront flow.
 
 Go listens on port 8081, PostgreSQL on 55432, and Redis on 56379. The default bindings use loopback. `docker compose down` stops the data stores and preserves the PostgreSQL volume.
 
@@ -52,5 +56,9 @@ The repository includes [render.yaml](render.yaml) for a free Render Blueprint w
 3. Review and apply [render.yaml](render.yaml).
 4. Set `PAYGUARD_DEMO_MERCHANT_A_TOKEN` and `PAYGUARD_DEMO_MERCHANT_B_TOKEN` if the booking API should be enabled. Their values must be distinct.
 5. Open the generated `payguard-frontend` URL.
+
+After syncing this Blueprint in Render, both web services track `main` and auto-deploy on every commit to that branch.
+
+The Key Value store blocks external connections with an empty IP allow list; the backend connects using Render's internal URL.
 
 This deployment is an online demo, not a production rollout. Render's free web services spin down after inactivity. The free PostgreSQL database expires after 30 days and the free Key Value instance may lose state on restart. Free PostgreSQL has no managed backups. Keep demo credentials and synthetic data only.

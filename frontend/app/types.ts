@@ -1,10 +1,11 @@
 export type Product = "flight_ticket" | "hotel_room" | "physical" | "digital";
+export type SimulationProduct = Product | "payment_gateway";
 export type Scenario = "normal" | "fraud" | "mixed";
 export type EntityKind = "account" | "device" | "ip" | "token";
 
 export type Config = {
   seed: number;
-  product: Product;
+  product: SimulationProduct;
   scenario: Scenario;
   accounts: number;
   rate: number;
@@ -31,7 +32,7 @@ export type Decision = {
     orderId: string;
     stage: string;
     at: number;
-    product: Product;
+    product: SimulationProduct;
     quantity: number;
     domain: string;
     ageDays: number;

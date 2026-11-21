@@ -93,3 +93,8 @@ export const fieldControl = "h-9 min-w-0 w-full rounded-lg border border-slate-2
 export function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
 }
+
+export type RuleTransport = <T>(suffix: string, init?: RequestInit) => Promise<T>;
+
+export const globalRuleTransport: RuleTransport = (suffix, init) =>
+  ruleRequest(rulesEndpoint + suffix, init);
