@@ -6,6 +6,7 @@ import type { FormEvent } from "react";
 import { AssessmentResult } from "../booking-assessment/assessment-result";
 import { holdStates, operationsRequest, outcomes, products } from "./contracts";
 import type { Detail, Filters, Hold, Queue, Reveal, Transaction } from "./contracts";
+import { BookingDossier } from "./dossier";
 
 const emptyFilters = { product: "", outcome: "", hold: "" };
 const panel = "min-w-0 rounded-xl border border-slate-200 bg-white shadow-xs";
@@ -236,6 +237,7 @@ export function OperationsWorkspace() {
                 </div>}
               </div>
               {detail.hold && <HoldDetail hold={detail.hold} detail={detail} operation={operation} resolution={resolution} setResolution={setResolution} runAction={runAction} />}
+              {detail.assessment && <BookingDossier key={detail.booking.eventId} eventId={detail.booking.eventId} token={bearer} />}
               {operationError && <p className="text-sm text-red-800" role="alert">{operationError}</p>}
               {operationStatus && <p className="text-sm text-emerald-800" role="status">{operationStatus}</p>}
             </div>}
