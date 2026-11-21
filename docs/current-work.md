@@ -157,6 +157,8 @@ Implemented and verified locally on `codex/provider-enrichment`. The authenticat
 
 Implemented the versioned booking intake on the local branch. The [runbook](simulation-runbook.md#booking-event-intake) documents the demo bearer token configuration, event contract, and replay responses.
 
+The pasted merchant data synthesis is recorded in the [Merchant event intake contract](requirements/merchant-event-contract.md). The note distinguishes Booking Event v1 from the proposed production envelope and stage and product extensions. Resolving the hotel guest-count and digital delivery-method requirements and publishing a single OpenAPI contract are pending.
+
 - Go tests and vet passed in the Docker Go toolchain. Live checks passed for validation, authentication, concurrent idempotency, conflicting retries, tenant separation, and missing versus zero amounts.
 - An identical request returned the saved response after a backend restart. Verification against the latest upstream application changes is pending. The team Sheet remains open until that integration is verified.
 
