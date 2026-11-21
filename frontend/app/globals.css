@@ -1,13 +1,14 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #17243a;
-  --color-muted: #51617a;
-  --color-line: #dce3ee;
-  --color-paper: #f5f7fb;
-  --color-accent: #354fd2;
-  --color-soft: #edf0ff;
-  --font-sans: "Geist", "Inter", system-ui, sans-serif;
+  --color-ink: #1f2937;
+  --color-muted: #4b5563;
+  --color-line: #e5e7eb;
+  --color-paper: #f3f4f6;
+  --color-accent: #0a2e6e;
+  --color-focus: #0078ff;
+  --color-soft: #e9f4ff;
+  --font-sans: "IBM Plex Sans Thai", system-ui, sans-serif;
 }
 
 body {
@@ -16,7 +17,7 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-focus);
   outline-offset: 3px;
 }
 

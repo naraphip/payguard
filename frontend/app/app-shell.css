@@ -1,9 +1,9 @@
 .app-shell {
   --shell-bg: #fff;
-  --shell-border: #e2e8f1;
-  --shell-muted: #54627a;
-  --shell-accent: #3d50c9;
-  --shell-selected: #edf0ff;
+  --shell-border: var(--color-line);
+  --shell-muted: var(--color-muted);
+  --shell-accent: var(--color-accent);
+  --shell-selected: var(--color-soft);
   --shell-header-height: 64px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -65,7 +65,7 @@
 
 .shell-nav-title {
   padding: 0 10px 5px;
-  color: #65728a;
+  color: var(--shell-muted);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: .08em;
@@ -88,7 +88,7 @@
 }
 
 .shell-nav-link svg { flex: 0 0 auto; }
-.shell-nav-link:hover { background: #f3f5fa; color: var(--color-ink); }
+.shell-nav-link:hover { background: var(--color-paper); color: var(--color-ink); }
 
 .shell-nav-link[aria-current="page"] {
   background: var(--shell-selected);
@@ -159,7 +159,7 @@
 }
 
 .shell-icon-button::-webkit-details-marker { display: none; }
-.shell-icon-button:hover, .shell-popover[open] summary { background: #f1f4fa; color: var(--color-ink); }
+.shell-icon-button:hover, .shell-popover[open] summary { background: var(--color-paper); color: var(--color-ink); }
 
 .shell-workspace {
   position: relative;
@@ -176,8 +176,8 @@
   font-weight: 650;
 }
 
-.shell-workspace:hover { background: #f6f8fc; }
-.shell-workspace:focus-within { outline: 2px solid var(--shell-accent); outline-offset: 2px; }
+.shell-workspace:hover { background: var(--color-paper); }
+.shell-workspace:focus-within { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 
 .shell-workspace-name, .shell-workspace-chevron { display: none; }
 

@@ -1,5 +1,13 @@
 # Current work
 
+## PayGuard corporate identity
+
+The v4 logo update uses the outlined horizontal logo without the tagline in expanded navigation and the mobile drawer. The collapsed sidebar and light and dark browser icons use the v4 symbol. The public compact logo uses a 954 × 266 viewBox to show the full shield and preserve the source paths. Shared controls use the established navy and pale blue palette, and the interface self-hosts IBM Plex Sans Thai in weights 400 through 700. [Crisp Logo Source Kit v4](../PayGuard_Logo_v4_Crisp_Vector/README.md), [brand palette](../PayGuard_Source/brand-colors.csv)
+
+- `npm run build` and `npm run typecheck` passed on Node.js 24.20.0. All five public SVGs parsed successfully. Path comparisons confirmed the production geometry matches the v4 source, and SHA-256 hashes matched for all 19 source files.
+- Chrome verified the expanded and collapsed sidebar at 1440 px and drawer navigation at 320 and 390 px without horizontal overflow. The shield and body fit inside the compact viewBox. Both favicon variants decoded, and the browser confirmed the palette and Latin and Thai font loading.
+- The [local dashboard](http://127.0.0.1:3000/dashboard) returned HTTP 200 and served all five v4 SVGs with contents matching the production files.
+
 ## GitHub progress monitoring in Notion
 
 Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4de98381dcac67fb442ef0c35b) under the monitoring plan. The workflow is active on GitHub `main` at `40341b5`. See the [monitoring requirements](requirements/notion-progress.md) for repository configuration and rollout checks.

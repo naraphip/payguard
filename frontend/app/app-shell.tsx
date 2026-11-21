@@ -117,7 +117,7 @@ function Sidebar({ view, activeHref, collapsed, drawer, onToggle, onNavigate, lo
   return <div className="shell-sidebar-inner">
     <div className="shell-sidebar-brand">
       <Link href={home} className="shell-logo" aria-label="PayGuard dashboard" onClick={onNavigate}>
-        {collapsed ? <ShieldCheck size={24} aria-hidden="true" /> : <PayGuardLogo />}
+        <PayGuardLogo compact={collapsed} />
       </Link>
       {drawer && <button className="shell-icon-button" type="button" aria-label={actionLabel} onClick={onToggle}>
         <Action size={18} aria-hidden="true" />
