@@ -28,7 +28,20 @@ Sources include the [PayGuard requirements folder](https://drive.google.com/driv
 | PG-20 | PRE-PROD GATE | — | Risk/QA | Real labels, shadow cycle, recall/fpr precision signoff | 10–19 | Recall>=98% only if demonstrated; conversion loss measured | Blocked |
 | PG-21 | PRE-PROD GATE | — | Security | PDPA/PCI, retention, cross-border provider assessment | 11,17 | Approved security/legal review | Blocked |
 
-The local Go and Next.js Simulation Lab provides a base for the demo. Start with PG-01 and see the [implementation task breakdown](payguard-task-breakdown.md) for reusable code, dependencies, and acceptance checks. Use synthetic data for the demo.
+The local Go and Next.js Simulation Lab provides a base for the demo. See the [implementation task breakdown](payguard-task-breakdown.md) for reusable code, dependencies, and acceptance checks. Use synthetic data for the demo.
+
+## Verified implementation progress
+
+The Action Plan status snapshot above records team tracking. The table below summarizes local implementation and verification. PG-20 requires approved real outcomes and shadow results, and PG-21 requires Security and Legal review. [Earlier Simulation Lab merge](https://github.com/pwatakul/payguard/pull/1), [earlier Contact and System Rules merge](https://github.com/pwatakul/payguard/pull/2)
+
+| ID | Verified in the local sandbox | Evidence |
+| --- | --- | --- |
+| PG-01–02 | Versioned booking intake verifies authentication and idempotency. The merchant setup form saves and reloads the business model and signals. | [Booking intake](current-work.md#pg-01-booking-intake), [merchant setup](current-work.md#pg-02-merchant-setup) |
+| PG-03–06 | Approved profile versions, booking assessment, trusted velocity and cold-start evidence, typed mock Jev results and the timeout handoff. | [Booking assessment](current-work.md#pg-03-through-pg-06-booking-assessment) |
+| PG-07–10 | Synthetic mock checkout, baseline activation, repeatable fixtures and tenant-scoped lineage. | [Checkout and lineage](current-work.md#pg-07-through-pg-10-mock-checkout-baseline-and-booking-lineage) |
+| PG-11–19 | Role isolation, HOLD cases, Risk Operations, pinned shadow replay, approvals, product modules, dossier, tenant-scoped network evidence, and dashboard preferences. | [Local evaluation](current-work.md#pg-11-through-pg-19-local-evaluation) |
+
+Sandbox work outside these task rows includes the supplied PayGuard logo and the integrated provider enrichment and Omise test checkout. [Integration handoff](current-work.md#integrated-main-candidate)
 
 ## Decisions
 
@@ -58,5 +71,5 @@ Mark a task complete only when its acceptance checks pass. Update the local stat
 | Task ID | Verification evidence | Sheet sync |
 | --- | --- | --- |
 
-No tasks have been verified complete in this repository.
+This log records team Action Plan completions and Sheet sync. See the [verified implementation progress](#verified-implementation-progress) for local verification evidence.
 
