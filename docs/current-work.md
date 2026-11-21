@@ -4,13 +4,13 @@
 
 The local preview implements a runnable slice of the [merchant scenarios requirements](requirements/merchant-scenarios.md). Under **Merchants**, a demo administrator can create and rename merchants and save multiple named scenarios. Each scenario previews and versions one booking amount threshold rule. Created merchants receive a scoped access token.
 
-Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab select a merchant and scenario, run the mock Jev decision, and save a transaction with its source, reasons, and versions. The merchant workspace lists transactions and records a review disposition separately from the saved assessment. [Evaluation steps](simulation-runbook.md#merchant-scenarios-and-mock-jev)
+Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab select a merchant and scenario, run the mock Jev decision, and save a transaction with its source, reasons, and versions. Platform administrators can review transactions across active merchants and record a disposition alongside the saved assessment. A merchant credential opens a read-only list of its own transactions and results. [Evaluation steps](simulation-runbook.md#merchant-scenarios-and-mock-jev)
 
 The [local preview](http://127.0.0.1:3001/settings/merchants) uses a structured threshold form and direct demo review. AI-assisted draft generation, a fully configurable rule set, the full HOLD lifecycle in this merchant workspace, and live Jev integration remain open.
 
-The opt-in loopback preview opens the Merchants workspace and scenario pickers as a demo administrator. Set the Next server’s `PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN` to the API’s demo administrator token to enable it. The old Risk Operations route redirects to **Merchants → Transactions** in this preview. Standalone routes and the ordinary authenticated flow remain available when the opt-in is disabled.
+The opt-in loopback preview opens the Merchants workspace and scenario pickers as a demo administrator. Set the Next server’s `PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN` to the API’s demo administrator token to enable it. The server uses that token for the loopback proxy. After creating a merchant, the administrator can copy that merchant’s scoped access token from the one-time confirmation. The old Risk Operations route redirects to **Merchants → Transactions** in this preview. Standalone routes and the ordinary authenticated flow remain available when the opt-in is disabled.
 
-The selected merchant has **Jev Rules** and **Platform Rules** tabs. Demo administrators manage that merchant’s rules, and authorized merchant users can view their own. Published amount-based Jev rules apply to Mock Checkout and the single-booking merchant scenario simulation, with the supplemental ruleset version pinned in the result. Platform built-ins remain read-only, and Platform drafts are for testing. A Platform draft preview requires a compatible saved Simulation Lab run for the selected merchant.
+The administrator manages a selected merchant’s scenarios, **Jev Rules**, and **Platform Rules**. Published amount-based Jev rules apply to Mock Checkout and the single-booking merchant scenario simulation, with the supplemental ruleset version pinned in the result. Platform built-ins remain read-only, and Platform drafts are for testing. A Platform draft preview requires a compatible saved Simulation Lab run for the selected merchant.
 
 Merchant creation and editing now save the original setup fields on the merchant record. The demo supports OTA or e-commerce, the Booking stage, the required booking timestamp, and optional booking amount availability. Existing name-only records appear as **Setup incomplete**, and the legacy name-only API remains compatible. The former standalone setup page opens **Merchants** in the automatic preview, and its separate navigation entry is removed. A confirmed **Delete merchant** removes the merchant from the directory and test pickers and deactivates its access. Stored history is retained and excluded from normal access.
 
@@ -18,10 +18,49 @@ Merchant creation and editing now save the original setup fields on the merchant
 - Live API checks verified missing amount versus zero, timeout and review resolution, replay pinned to an earlier revision, and cross-merchant denial.
 - Go tests, race tests, and vet passed. The isolated frontend production build, TypeScript checks, and existing booking smoke checks also passed.
 - Independent browser checks verified merchant creation, one-time token display, and saving two scenario drafts. The browser showed a **Low risk** checkout, a **Review** simulation with a matching rule, and an **Unresolved** simulation after a mock timeout. The merchant’s ledger contained exactly three transactions with the expected sources and outcomes. A direct link opened the saved transaction, and sign-in with the issued token showed only the merchant’s own workspace with merchant creation and editing unavailable.
-- A fresh Chrome session verified the automatic loopback path. It created a merchant and scenario, followed a deep link to checkout, and reopened its saved transaction after refreshing the ledger. The browser trace and storage contained no authorization header, administrator token, or issued merchant token.
+- Before the merge, Chrome verified automatic loopback access, creating a merchant and scenario, following a deep link to checkout, and reopening the saved transaction after refreshing the ledger.
 - Independent Chrome checks verified that the three old operations and rule URLs open their merchant workspace views without login. Two merchants started with the same scenario threshold and both returned **Low risk**. After publishing a Jev rule for merchant A, A returned **Review** and B remained **Low risk**. A Platform draft stayed scoped to its merchant and persisted on reload. Previously saved transactions retained their results.
-- Live API checks verified removal of the issued token from automatic-preview responses, rejection of unauthenticated direct API access and disallowed origins and hosts, and isolated create and edit operations for Platform drafts. New checkout and scenario simulation results pinned the selected merchant’s supplemental Jev revision, and replay returned the original result.
-- Integrated verification of merchant setup persistence, the legacy setup redirect, and deletion is pending.
+- Earlier API checks verified rejection of unauthenticated direct access and disallowed preview origins and hosts, and isolated create and edit operations for Platform drafts. New checkout and scenario simulation results pinned the selected merchant’s supplemental Jev revision, and replay returned the original result.
+- On the merged preview, Chrome verified delivery of the one-time scoped merchant credential. Two merchant credentials opened independently scoped, read-only ledgers. The Merchant workspace rejected an invalid credential and an administrator credential. Opening an administrator URL returned the signed-in merchant to **Transactions**. Merchant views had no mutation controls.
+- The merged API returned HTTP 401 without credentials, HTTP 404 for a transaction belonging to another merchant, and HTTP 403 when a merchant requested configured rules or attempted a mutation. Each merchant could list and open its own saved transactions.
+- Independent Chrome checks verified create, edit, and reload for two merchants. The legacy setup URL redirected to Merchants, and the sidebar had no standalone setup link. Canceling deletion kept the test merchant. Confirming deletion removed only that merchant, and both Mock Checkout and Simulation Lab omitted it from their pickers.
+
+## P0 Dashboard layout refactor
+
+The [Next.js root layout](../frontend/app/layout.tsx) wraps every page in one [AppShell](../frontend/app/app-shell.tsx). `/` redirects to `/dashboard`, and [Simulation Lab](../frontend/app/simulation-lab/page.tsx) opens at `/simulation-lab`. The desktop sidebar collapses from 240 px to 64 px, and a drawer serves narrow screens. The topbar holds the breadcrumb, workspace, notifications, user controls, and Sandbox status.
+
+[Fraud Overview](../frontend/app/dashboard/page.tsx) summarizes saved merchant records and shows recent transactions. An empty ledger displays an empty state. The administrator’s **Transactions** link opens the merchant transaction workspace in the automatic preview. The merchant sidebar has one destination, **Transactions**, and the merchant credential scopes the list and detail on the API. **Fraud Network** opens the evidence section in Simulation Lab. Mock Checkout and Simulation Lab continue to generate synthetic inputs on demand for testing.
+
+The menu review compared the combined workspace with GitHub `origin/main` at `74e7a88` and the current Drive action plan. The plan puts merchant setup, scoring profiles, Jev, and Mock Checkout in the demo, with the HOLD queue, dashboard KPIs, advanced rule builder and fraud-network work in later phases. The current request gives Platform Admin the merchant configuration and cross-merchant transaction workflows and limits merchant access to its own transaction list and details. The linked System Handbook returned a Drive permission error. The current Blueprint and Rule Builder Manual were accessible. [Team Drive](https://drive.google.com/drive/folders/1lKpQdDOkrqpF61vxN_wNN2HHo9NQjNnH) · [Action plan](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260117) · [Simulation Lab](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260115) · [Merchant policies](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260109) · [Rule Builder Manual](https://docs.google.com/document/d/1vYpo8hkpWS3jQ21ZiRBNThf8uUh2ZdVf_AtoNL7hQho/edit)
+
+Chrome followed all eight Platform Admin sidebar links in the merged automatic preview. **Dashboard**, **Merchants**, **Scoring Profiles**, **Mock Checkout**, and **Simulation Lab** opened their respective pages. **Transactions** opened the ledger, **Fraud Network** jumped to **Event decisions** in Simulation Lab, and both **Settings** links worked. The check also verified `/` opens `/dashboard` and a legacy root link with merchant and scenario parameters opens `/simulation-lab` with the exact saved scenario selected.
+
+Before the local reset, Dashboard matched API reads for 22 active merchants, 37 saved transactions, and 20 transactions needing a decision. A recent transaction link opened its exact saved detail. Both the Jev and Platform rule catalogues loaded from the selected merchant’s workspace.
+
+The final backend Docker build stage passed `go test ./...` and `go vet ./...`. The Next.js webpack production build, TypeScript checks, Compose configuration validation, and whitespace checks passed.
+
+The PostgreSQL reset on the active local assessment stack for port 3001 left zero merchants, scenarios, transactions, bookings, drafts, simulation runs, and QA labels. Omise charges remained at zero. The reset was scoped to that local stack.
+
+Before the merchant-workspace merge, the dashboard branch recorded these checks.
+
+- `go test ./...`, `npm run typecheck`, `npm run build` on Node.js 24.22.3, and `git diff --check` passed. HTTP checks verified the root redirect, the frontend routes, and read API parity for the Platform Rules catalogue, Omise configuration, Jev Rules, and Risk Operations.
+- Chrome checked all 13 destinations at 320, 390, 1024, and 1440 px with one shell and no horizontal page scrolling. Desktop checks verified 240 and 64 px sidebar widths, breadcrumbs, and active links. Mobile checks covered drawer navigation, keyboard dismissal, focus return, and backdrop dismissal. Platform Admin could open and cancel a draft. In Merchant view, a direct Platform Rules reload displayed the restricted view and sent no Platform Rules API requests.
+
+## Integrated main candidate
+
+The earlier local integration candidate combined merchant and booking flows, Jev Rules, Risk Operations and governance with the Simulation Lab storefront, provider enrichment, Omise Sandbox checkout, and earlier project documentation.
+
+- Go race tests and vet, Docker Compose configuration validation, and the frontend type check and Next.js production build on Node.js 24 passed.
+- The booking smoke script passed two fixtures and verified `COLD_START` to `ACTIVE` baseline activation, replay, tenant isolation, and lineage.
+- The integrated Go API with PostgreSQL and Redis returned both Jev Rules and Platform Rules. Live local checks verified the same run ID across separate tenants, tenant-scoped QA, Gateway, and rejection of blocked and cross-workspace Omise requests before a provider call. The enrichment check imported all 458,044 BINs and matched a disposable-email domain. These integration fixtures used local data and made no external charges.
+- Independent Chrome checks verified all seven navigation routes and active-link states, Jev Rules, Mock Checkout, both storefronts, and the Omise control on an eligible shared-demo run. Gateway stayed simulated. Scoped run and QA requests carried the merchant credential, isolation held, and clearing the token removed previous evidence. The 390 px viewport had no horizontal overflow. Chrome sent no external requests in this check.
+
+Omise uses the original synthetic demo prices for the shared Travel and Online store checkout. Merchant-scoped and Gateway flows use their simulated checkout. The [implementation progress table](payguard-tasks.md#verified-implementation-progress) and the historical verification below record their respective scopes.
+
+## Earlier merges through `e58e59a`
+
+- Simulation Lab delivered the synthetic storefronts, seeded runs, evidence and entity graph, and offline QA. [GitHub PR #1](https://github.com/pwatakul/payguard/pull/1)
+- Checkout Contact, the platform System Rules dashboard, and the supplied PayGuard logo merged. Chrome verified the PNG in both headers at desktop and mobile widths. [GitHub PR #2](https://github.com/pwatakul/payguard/pull/2)
 
 ## PG-11 through PG-19 local evaluation
 
@@ -87,8 +126,26 @@ Implemented and independently verified the [initial local preview](http://127.0.
 - `npm run typecheck`, `npm run build` in an isolated directory, and `git diff --check` passed.
 - Chrome 157 verified navigation from Simulation Lab and System Rules, active navigation, missing-stage feedback, and save and reload for an OTA setup with booking amount. Editing the setup to e-commerce with only the required `occurredAt` signal persisted after reload.
 - Chrome verified field-level errors for an invalid saved stage and signal, followed by a successful correction. A simulated `QuotaExceededError` retained the selections and save succeeded on retry. The page fit a 390 px viewport without horizontal overflow.
-- Implementation adds the [route](../frontend/app/settings/merchant-setup/page.tsx), [form](../frontend/app/settings/merchant-setup/setup-form.tsx), and [shared navigation](../frontend/app/settings/navigation.tsx), and connects navigation in [Simulation Lab](../frontend/app/page.tsx) and [System Rules](../frontend/app/settings/system-rules/dashboard.tsx).
+- The implementation added the [route](../frontend/app/settings/merchant-setup/page.tsx), [form](../frontend/app/settings/merchant-setup/setup-form.tsx), and shared navigation for Simulation Lab and System Rules. [PG-02 through PG-06 implementation](https://github.com/pwatakul/payguard/commit/c08fe09fb3b4b9cacb19ab9f32411078586151ad)
 - The broader action plan status and integrated PG-01 verification are pending.
+
+## Simulation Lab storefront and Omise Sandbox
+
+Implemented and verified locally on `codex/omise-simulation-checkout`. The lab offers **Travel** and **Online store**, an inline THB summary, and the existing synthetic controls and contact. Eligible first orders in the shared synthetic demo can use the Omise-hosted test card form. Merchant-scoped scenarios and the Gateway checkout use simulated payments. [Storefront UI](ui/simulation-lab.md), [sandbox runbook](simulation-runbook.md#omise-sandbox-checkout)
+
+- Go tests, race checks, and vet passed. Frontend type checking and the Next.js production build passed on Node.js 24.
+- The Omise Thailand test-account check confirmed THB support. Sandbox API tests completed a flight for two travelers at 918,000 satang and two physical items at 498,000 satang. Duplicate and concurrent requests for the same run returned its original charge ID. Runs with final decisions of `BLOCK` and `UNSUCCESSFUL` were denied at checkout.
+- Chrome completed the official Omise-hosted form on localhost and showed successful test payments for the Travel flight at 459,000 satang and the Online store digital gift card at 75,000 satang on mobile.
+- Independent Chrome checks covered all four product images and selection, booking and delivery controls, quantity and THB totals, contact and decision evidence, and Offline QA. A changed cart or blocked first checkout disabled payment. A fresh `ALLOW` enabled it. The page fit 390 px and 320 px viewports without horizontal scrolling. Independent Go race and vet checks passed, and Rule Base and enrichment paths matched their branch base.
+
+## Provider enrichment
+
+Implemented and verified locally on `codex/provider-enrichment`. The authenticated Go endpoint returns IP, BIN, and email-domain evidence. Local BIN and domain masters operate with external services disabled. Rule Base files match the upstream base at `a97fcbe`. [Requirements](requirements/provider-enrichment.md), [runbook](simulation-runbook.md#provider-enrichment)
+
+- Go race tests, vet, Docker Compose configuration validation, and the backend image build passed. The container importer reused the PostgreSQL snapshot, and the container user could read the local domain overlay. Provider fallback, normalization, and cache TTL checks used mocked responses.
+- The PostgreSQL importer loaded 458,044 BINs, including 454,496 six-digit and 3,548 eight-digit records. Of these, 220,620 had all four canonical fields, including 217,083 six-digit and 3,537 eight-digit records.
+- The local HTTP test returned complete exact matches for all six sampled BINs (`424242`, `540131`, `511332`, `371449`, `45717360`, and `43638410`). `010051` returned partial evidence under `UNKNOWN`. `00210299` returned its shorter match as reference evidence only. `00000000` returned no master match.
+- Email checks covered 231,582 bundled domains and the 244,118-domain union with the local overlay. `mailinator.com` and a child domain returned all four source identifiers. `gmail.com` returned `listed: false`.
 
 ## PG-01 booking intake
 
@@ -99,7 +156,7 @@ Implemented the versioned booking intake on the local branch. The [runbook](simu
 
 ## System Rules dashboard · 21 November 2026
 
-Implemented and verified locally on `codex/system-rules`. The dashboard shows active platform built-ins in evaluation order, saves editable drafts in PostgreSQL, and previews candidate conditions against one selected synthetic run. Active rule execution and Merchant Policy retain their existing behavior. See the [requirements](requirements/system-rules.md), [UI](ui/system-rules.md), and [runbook](simulation-runbook.md#system-rules).
+The dashboard shows active platform built-ins in evaluation order, saves editable drafts in PostgreSQL, and previews candidate conditions against one selected synthetic run. Active rule execution and Merchant Policy retain their existing behavior. See the [requirements](requirements/system-rules.md), [UI](ui/system-rules.md), and [runbook](simulation-runbook.md#system-rules).
 
 - Go race tests and vet passed. Frontend type checking and the Next.js production build passed on Node.js 24.
 - Live API checks with PostgreSQL and Redis verified the fresh rule catalogue, built-in protection, typed and stage-aware validation, draft edits, stale-version rejection, and persistence after a backend restart.
@@ -108,7 +165,7 @@ Implemented and verified locally on `codex/system-rules`. The dashboard shows ac
 
 ## Simulation Lab checkout contact · 21 November 2026
 
-Implemented and verified locally on `codex/simulation-contact`. The first order displays the submitted synthetic contact in both stages. The full contact stays in browser memory, and Go receives only the normalized `.test` email domain. See the [requirements](requirements/simulation-lab.md), [UI](ui/simulation-lab.md), and [runbook](simulation-runbook.md#verify-checkout-contact-and-merchant-policy).
+The first order displays the submitted synthetic contact in both stages. The full contact stays in browser memory, and Go receives only the normalized `.test` email domain. See the [requirements](requirements/simulation-lab.md), [UI](ui/simulation-lab.md), and [runbook](simulation-runbook.md#verify-checkout-contact-and-merchant-policy).
 
 - Go race tests and vet passed. Frontend type checking and the Next.js production build passed on Node.js 24.
 - Live API tests with PostgreSQL and Redis verified domain validation, case-insensitive replay, a 409 for a different domain under the same run ID, first-order scope, exact policy matching, disabled and non-flight policy behavior, and timeout precedence.
@@ -121,4 +178,4 @@ Local implementation and verification complete for the [requirements](requiremen
 - Go race tests and vet passed. Frontend clean install, type check and Next.js production build passed on Node.js 24.
 - A live Go API smoke test with PostgreSQL 16 and Redis 7 passed for all four products, concurrent idempotent replay, conflicting run IDs, deterministic results across run IDs, event ordering, duplicate PSP retries, shared Wi-Fi, rotating ring IPs, isolated labels, exact-domain policy, missing token and mock timeout. A Redis outage returned 503 and left no completed run.
 - Chrome smoke checks exercised the setup, decisions and offline QA for normal e-commerce and mixed OTA, including the mobile layout. The default mixed run produced 24 decisions, deduplicated 12 PSP retries and scored 12 synthetic payment samples.
-- The [Google Drive System Handbook](https://docs.google.com/document/d/1RtzQI1VIRXabDKUBPGcfQM8NxJZs1u_geFWFYC8Hq_I/edit) records the implemented local scope in section 12. Production rollout, merchant authentication, live Jev and payment integrations are future work.
+- The [Google Drive System Handbook](https://docs.google.com/document/d/1RtzQI1VIRXabDKUBPGcfQM8NxJZs1u_geFWFYC8Hq_I/edit) records the original local scope in section 12. Production rollout, production merchant authentication, live Jev, and production payment integration are future work.

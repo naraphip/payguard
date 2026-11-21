@@ -66,7 +66,15 @@ func main() {
 	}
 	cache := redis.NewClient(options)
 	defer cache.Close()
+	enrichment, err := newEnrichmentHandler(bookingAuth, db, options)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if enrichment.cache != nil {
+		defer enrichment.cache.Close()
+	}
 	a := app{repository{db}, cache, []byte(env("ENTITY_KEY_SECRET", "payguard-local-synthetic-v1"))}
+	checkout := newOmiseCheckout(a.repo, os.Getenv("OMISE_PUBLIC_KEY"), os.Getenv("OMISE_SECRET_KEY"))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("POST /api/v1/booking/events", bookingHandler{a.repo, bookingAuth}.create)
@@ -85,10 +93,13 @@ func main() {
 	registerBookingDossiers(mux, a.repo, bookingAuth)
 	registerBookingGovernance(mux, a.repo, bookingAuth)
 	go a.repo.runBookingDossiers(ctx)
+	mux.HandleFunc("POST /api/v1/enrichment", enrichment.lookup)
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)
 	a.registerTenantSimulation(mux, bookingAuth)
+	mux.HandleFunc("GET /api/v1/simulation/checkout/config", checkout.config)
+	mux.HandleFunc("POST /api/v1/simulation/checkout/charges", checkout.create)
 	mux.HandleFunc("GET /api/v1/system/rules", a.readRules)
 	mux.HandleFunc("POST /api/v1/system/rules", a.createRule)
 	mux.HandleFunc("PUT /api/v1/system/rules/{id}", a.updateRule)

@@ -13,6 +13,6 @@ export default async function OperationsPage() {
       <h1 className="text-[30px] leading-tight font-semibold tracking-tight sm:text-[36px]">Risk operations</h1>
       <p className="mt-2 text-sm text-slate-600">Inspect synthetic booking assessments and work the manual review queue.</p>
     </header>
-    <OperationsWorkspace />
+    <div id="transactions"><OperationsWorkspace /></div>
   </main>;
 }

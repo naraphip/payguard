@@ -185,16 +185,24 @@ func (s mockMerchantService) listMerchants(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	merchants, err := s.repo.listMockMerchants(r.Context(), actor.MerchantID)
+	if !actor.Admin {
+		merchant := mockMerchant{ID: actor.MerchantID, Scenarios: []mockScenario{}}
+		err := s.repo.db.QueryRow(r.Context(), `
+			SELECT name FROM merchant_demo_merchants WHERE id=$1::text::uuid AND deleted_at IS NULL
+		`, actor.MerchantID).Scan(&merchant.Name)
+		if err != nil {
+			demoWriteError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, map[string]any{"merchants": []mockMerchant{merchant}, "role": "merchant"})
+		return
+	}
+	merchants, err := s.repo.listMockMerchants(r.Context(), "")
 	if err != nil {
 		demoWriteError(w, err)
 		return
 	}
-	role := "merchant"
-	if actor.Admin {
-		role = "admin"
-	}
-	respond(w, http.StatusOK, map[string]any{"merchants": merchants, "role": role})
+	respond(w, http.StatusOK, map[string]any{"merchants": merchants, "role": "admin"})
 }
 
 func (s mockMerchantService) createMerchant(w http.ResponseWriter, r *http.Request) {
@@ -314,7 +322,7 @@ func (s mockMerchantService) listTransactions(w http.ResponseWriter, r *http.Req
 }
 
 func (s mockMerchantService) createTransaction(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, false); !ok {
+	if _, ok := s.authorize(w, r, true); !ok {
 		return
 	}
 	id, ok := demoPathID(w, r, "merchantId")
@@ -362,8 +370,7 @@ func (s mockMerchantService) getTransaction(w http.ResponseWriter, r *http.Reque
 }
 
 func (s mockMerchantService) decideTransaction(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.authorize(w, r, false)
-	if !ok {
+	if _, ok := s.authorize(w, r, true); !ok {
 		return
 	}
 	merchantID, ok := demoPathID(w, r, "merchantId")
@@ -384,11 +391,7 @@ func (s mockMerchantService) decideTransaction(w http.ResponseWriter, r *http.Re
 		problem(w, http.StatusUnprocessableEntity, "Choose cleared or rejected.")
 		return
 	}
-	decidedBy := "merchant"
-	if actor.Admin {
-		decidedBy = "administrator"
-	}
-	result, err := s.repo.decideMockTransaction(r.Context(), merchantID, transactionID, input.Decision, decidedBy)
+	result, err := s.repo.decideMockTransaction(r.Context(), merchantID, transactionID, input.Decision, "administrator")
 	if err != nil {
 		demoWriteError(w, err)
 		return

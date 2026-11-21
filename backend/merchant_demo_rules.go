@@ -10,20 +10,20 @@ import (
 
 func (s mockMerchantService) registerRules(mux *http.ServeMux) {
 	platform := merchantDemoPath + "/{merchantId}/platform/rules"
-	mux.HandleFunc("GET "+platform, s.ruleHandler(false, app.readTenantRules))
-	mux.HandleFunc("POST "+platform, s.ruleHandler(true, app.createTenantRule))
-	mux.HandleFunc("PUT "+platform+"/{id}", s.ruleHandler(true, app.updateTenantRule))
-	mux.HandleFunc("POST "+platform+"/preview", s.ruleHandler(false, app.previewTenantRules))
+	mux.HandleFunc("GET "+platform, s.ruleHandler(app.readTenantRules))
+	mux.HandleFunc("POST "+platform, s.ruleHandler(app.createTenantRule))
+	mux.HandleFunc("PUT "+platform+"/{id}", s.ruleHandler(app.updateTenantRule))
+	mux.HandleFunc("POST "+platform+"/preview", s.ruleHandler(app.previewTenantRules))
 
 	jev := merchantDemoPath + "/{merchantId}/jev/rules"
-	mux.HandleFunc("GET "+jev, s.ruleHandler(false, app.readMockJevRules))
-	mux.HandleFunc("POST "+jev, s.ruleHandler(true, app.publishMockJevRule))
-	mux.HandleFunc("POST "+jev+"/preview", s.ruleHandler(false, app.previewMockJevRule))
+	mux.HandleFunc("GET "+jev, s.ruleHandler(app.readMockJevRules))
+	mux.HandleFunc("POST "+jev, s.ruleHandler(app.publishMockJevRule))
+	mux.HandleFunc("POST "+jev+"/preview", s.ruleHandler(app.previewMockJevRule))
 }
 
-func (s mockMerchantService) ruleHandler(adminOnly bool, handle func(app, http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+func (s mockMerchantService) ruleHandler(handle func(app, http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.authorize(w, r, adminOnly); !ok {
+		if _, ok := s.authorize(w, r, true); !ok {
 			return
 		}
 		merchantID, ok := demoPathID(w, r, "merchantId")

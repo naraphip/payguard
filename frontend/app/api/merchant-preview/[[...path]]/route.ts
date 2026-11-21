@@ -59,8 +59,7 @@ async function proxy(request: NextRequest, { params }: RouteContext) {
       signal: request.signal,
     });
     const data = await response.json();
-    const payload = write && path.length === 0 && response.ok ? { merchant: data.merchant } : data;
-    return Response.json(payload, { status: response.status, headers: noStore });
+    return Response.json(data, { status: response.status, headers: noStore });
   } catch {
     return Response.json({ error: "The local merchant API is unavailable. Try again." }, { status: 502, headers: noStore });
   }

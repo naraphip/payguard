@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { JevRulesPanel } from "../jev-rules/panel";
 import { SystemRulesDashboard } from "../system-rules/dashboard";
 import type { FormEvent, ReactNode } from "react";
-import { getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, setMerchantDemoToken } from "../../merchant-demo";
+import { getMerchantDemoRole, getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, setMerchantDemoToken } from "../../merchant-demo";
 import type { DemoDirectory, DemoMerchant, DemoScenario } from "../../merchant-demo";
+import { useWorkspaceView } from "../../workspace-view";
 import { MerchantTransactions } from "./transactions";
 import { isBusinessModel } from "../merchant-setup/contracts";
 import type { BusinessModel, MerchantSetup } from "../merchant-setup/contracts";
@@ -35,6 +36,19 @@ const workspaceViews = {
 type WorkspaceView = keyof typeof workspaceViews;
 
 export function MerchantDirectory() {
+  const merchantView = useWorkspaceView() === "merchant";
+  return <>
+    <header className="mb-6">
+      <h1 className="text-[30px] leading-tight font-semibold tracking-tight sm:text-[36px]">{merchantView ? "Your transactions" : "Merchants"}</h1>
+      <p className="mt-2 text-sm text-slate-600">{merchantView
+        ? "Review bookings and decisions for your merchant."
+        : "Manage demo merchants, configure their scenarios, and review mock Jev decisions."}</p>
+    </header>
+    <MerchantDirectoryContents merchantView={merchantView} />
+  </>;
+}
+
+function MerchantDirectoryContents({ merchantView }: { merchantView: boolean }) {
   const [credential, setCredential] = useState("");
   const [token, setToken] = useState("");
   const [directory, setDirectory] = useState<DemoDirectory | null>(null);
@@ -44,9 +58,12 @@ export function MerchantDirectory() {
   const [issuedToken, setIssuedToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
-  const [requiresToken, setRequiresToken] = useState(false);
+  const [requiresToken, setRequiresToken] = useState(merchantView);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [error, setError] = useState("");
+  const signInRequest = useRef<AbortController | null>(null);
+
+  useEffect(() => () => signInRequest.current?.abort(), []);
 
   useEffect(() => {
     let ignore = false;
@@ -54,13 +71,15 @@ export function MerchantDirectory() {
     setError("");
     async function load() {
       try {
-        const local = await loadLocalMerchantDirectory();
+        const local = merchantView ? null : await loadLocalMerchantDirectory();
         if (ignore) return;
-        const saved = local ? "" : getMerchantDemoToken();
+        const saved = local || (merchantView && getMerchantDemoRole() !== "merchant") ? "" : getMerchantDemoToken();
         setRequiresToken(!local);
         if (!local) setCredential(saved);
         const result = local ?? (saved ? await merchantDemoRequest<DemoDirectory>("", saved) : null);
         if (ignore || !result) return;
+        if (merchantView && result.role !== "merchant") throw new Error("Use the access token issued for your merchant.");
+        if (saved) setMerchantDemoToken(saved, result.role);
         setToken(saved);
         setDirectory(result);
         selectMerchant(new URLSearchParams(window.location.search).get("merchant") ?? result.merchants[0]?.id ?? "");
@@ -72,24 +91,29 @@ export function MerchantDirectory() {
     }
     void load();
     return () => { ignore = true; };
-  }, [previewAttempt]);
+  }, [merchantView, previewAttempt]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextToken = credential.trim();
     if (!nextToken) return;
+    signInRequest.current?.abort();
+    const request = new AbortController();
+    signInRequest.current = request;
     setLoading(true);
     setError("");
     try {
-      const result = await merchantDemoRequest<DemoDirectory>("", nextToken);
-      setMerchantDemoToken(nextToken);
+      const result = await merchantDemoRequest<DemoDirectory>("", nextToken, { signal: request.signal });
+      if (request.signal.aborted) return;
+      if (merchantView && result.role !== "merchant") throw new Error("Use the access token issued for your merchant.");
+      setMerchantDemoToken(nextToken, result.role);
       setToken(nextToken);
       setDirectory(result);
       selectMerchant(new URLSearchParams(window.location.search).get("merchant") ?? result.merchants[0]?.id ?? "");
     } catch (failure) {
-      setError(errorMessage(failure));
+      if (!request.signal.aborted) setError(errorMessage(failure));
     } finally {
-      setLoading(false);
+      if (!request.signal.aborted) setLoading(false);
     }
   }
 
@@ -147,14 +171,30 @@ export function MerchantDirectory() {
   if (!directory) {
     return (
       <form onSubmit={signIn} className={`${card} max-w-lg space-y-3`}>
-        <Field label="Demo access token">
+        <Field label={merchantView ? "Merchant access token" : "Demo access token"}>
           <input className={input} type="password" autoComplete="off" value={credential} onChange={(event) => setCredential(event.target.value)} required />
         </Field>
-        <p className="text-sm text-slate-600">Use the configured administrator token or a merchant access token.</p>
+        <p className="text-sm text-slate-600">{merchantView
+          ? "Enter the access token issued for your merchant."
+          : "Use the configured administrator token or a merchant access token."}</p>
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         <button className={action} disabled={loading || !credential.trim()}>{loading ? "Connecting…" : "Connect"}</button>
       </form>
     );
+  }
+
+  if (merchantView || directory.role === "merchant") {
+    if (directory.role !== "merchant" || !token) return null;
+    const ownMerchant = directory.merchants[0];
+    return <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {ownMerchant && <p className="text-sm font-semibold">{ownMerchant.name}</p>}
+        <button className={secondary} onClick={signOut}>Sign out</button>
+      </div>
+      {ownMerchant
+        ? <MerchantTransactions key={ownMerchant.id} token={token} merchant={ownMerchant} canDecide={false} />
+        : <p className="text-sm text-slate-600">No transactions are available.</p>}
+    </div>;
   }
 
   return (
@@ -195,7 +235,7 @@ export function MerchantDirectory() {
           }} />
         ) : selected && (
           <>
-            {token && issuedToken && (
+            {issuedToken && (
               <div role="status" className={`${card} space-y-2`}>
                 <h2 className="font-semibold">Merchant access token</h2>
                 <p className="text-sm text-slate-600">Copy this token to sign in as {selected.name}. It is shown once.</p>
@@ -209,7 +249,7 @@ export function MerchantDirectory() {
               ))}
             </nav>
             {view === "workspace" && <MerchantWorkspace key={`workspace-${selected.id}`} token={token} merchant={selected} admin={admin} onSave={upsert} onDelete={removeMerchant} />}
-            {(view === "workspace" || view === "transactions") && <MerchantTransactions key={`transactions-${selected.id}`} token={token} merchant={selected} />}
+            {(view === "workspace" || view === "transactions") && <MerchantTransactions key={`transactions-${selected.id}`} token={token} merchant={selected} canDecide />}
             {view === "jev" && <JevRulesPanel key={`jev-${selected.id}`} merchant={{ id: selected.id, name: selected.name, token, canEdit: admin }} />}
             {view === "platform" && <SystemRulesDashboard key={`platform-${selected.id}`} request={requestPlatformRules} merchantName={selected.name} canEdit={admin} />}
           </>
@@ -371,7 +411,7 @@ function MerchantWorkspace({ merchant, token, admin, onSave, onDelete }: {
               <p className="text-sm">Send to review at {count.format(item.thresholdMinor)} minor units or above.</p>
               <div className="flex flex-wrap gap-2">
                 <Link className={secondary} href={`/settings/mock-checkout?${params}`}>Mock checkout</Link>
-                <Link className={secondary} href={`/?${params}`}>Simulation Lab</Link>
+                <Link className={secondary} href={`/simulation-lab?${params}`}>Simulation Lab</Link>
               </div>
             </div>
           );

@@ -22,7 +22,7 @@ function formatTime(value: string) {
   return time.format(new Date(value));
 }
 
-export function MerchantTransactions({ token, merchant }: { token: string; merchant: DemoMerchant }) {
+export function MerchantTransactions({ token, merchant, canDecide }: { token: string; merchant: DemoMerchant; canDecide: boolean }) {
   const [transactions, setTransactions] = useState<DemoTransaction[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [needsDecision, setNeedsDecision] = useState(false);
@@ -54,6 +54,7 @@ export function MerchantTransactions({ token, merchant }: { token: string; merch
   const selected = transactions.find(({ id }) => id === selectedId);
 
   async function decide(transaction: DemoTransaction, decision: "cleared" | "rejected") {
+    if (!canDecide) return;
     setSaving(true);
     setError("");
     setUpdated(false);
@@ -83,7 +84,9 @@ export function MerchantTransactions({ token, merchant }: { token: string; merch
       </div>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {loading && <p role="status" className="text-sm text-slate-600">Loading transactions…</p>}
-      {!loading && !visible.length && <p className="text-sm text-slate-600">{needsDecision ? "No transactions need a decision." : "No transactions yet. Submit a mock checkout or simulation with one of this merchant’s scenarios."}</p>}
+      {!loading && !visible.length && <p className="text-sm text-slate-600">{needsDecision
+        ? "No transactions need a decision."
+        : canDecide ? "No transactions yet. Submit a mock checkout or simulation with one of this merchant’s scenarios." : "No transactions yet."}</p>}
       {!!visible.length && (
         <ul className="divide-y divide-line rounded-lg border border-line">
           {visible.map((item) => (
@@ -130,7 +133,7 @@ export function MerchantTransactions({ token, merchant }: { token: string; merch
             {selected.decidedBy && ` · ${selected.decidedBy}`}
             {selected.decidedAt && ` · ${formatTime(selected.decidedAt)}`}
           </p>}
-          {selected.reviewState === "NEEDS_DECISION" && (
+          {canDecide && selected.reviewState === "NEEDS_DECISION" && (
             <div className="flex flex-wrap gap-2">
               <button className={button} type="button" disabled={saving} onClick={() => void decide(selected, "cleared")}>Clear transaction</button>
               <button className={button} type="button" disabled={saving} onClick={() => void decide(selected, "rejected")}>Reject transaction</button>

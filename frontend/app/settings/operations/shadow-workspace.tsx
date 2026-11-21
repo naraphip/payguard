@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useWorkspaceView } from "../../workspace-view";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
@@ -54,6 +55,7 @@ function percent(value: number | null) {
 }
 
 export function ShadowWorkspace({ token, onReport }: { token: string; onReport: (report: ShadowReport | null) => void }) {
+  const view = useWorkspaceView();
   const [dates, setDates] = useState(() => {
     const now = Date.now();
     const end = localTimestamp(new Date(now));
@@ -110,7 +112,7 @@ export function ShadowWorkspace({ token, onReport }: { token: string; onReport: 
           <h2 id="shadow-heading" className="text-lg font-semibold">Booking rule evaluation</h2>
           <p className="mt-1 text-sm text-slate-600">Compare the recorded decisions with a candidate velocity rule on a fixed window.</p>
         </div>
-        <Link href="/settings/system-rules" className="text-sm font-semibold text-indigo-700 hover:underline">Open visual rule builder</Link>
+        {view === "platform" && <Link href="/settings/system-rules" className="text-sm font-semibold text-indigo-700 hover:underline">Open visual rule builder</Link>}
       </div>
       <form className="mt-4 space-y-4" onSubmit={evaluate}>
         <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

@@ -45,13 +45,29 @@ export type DemoTransaction = {
 };
 
 let sessionToken = "";
+let sessionRole: DemoDirectory["role"] | null = null;
+const sessionEvent = "payguard-merchant-demo-session-change";
 
 export function getMerchantDemoToken() {
   return sessionToken;
 }
 
-export function setMerchantDemoToken(value: string) {
-  sessionToken = value.trim();
+export function getMerchantDemoRole() {
+  return sessionRole;
+}
+
+export function subscribeMerchantDemoSession(listener: () => void) {
+  window.addEventListener(sessionEvent, listener);
+  return () => window.removeEventListener(sessionEvent, listener);
+}
+
+export function setMerchantDemoToken(value: string, role: DemoDirectory["role"] | null = null) {
+  const token = value.trim();
+  const nextRole = token ? role : null;
+  if (sessionToken === token && sessionRole === nextRole) return;
+  sessionToken = token;
+  sessionRole = nextRole;
+  window.dispatchEvent(new Event(sessionEvent));
 }
 
 export async function merchantDemoRequest<T>(path: string, token: string, init?: RequestInit): Promise<T> {

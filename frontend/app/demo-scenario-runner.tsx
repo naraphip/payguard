@@ -93,7 +93,7 @@ export function useDemoScenario() {
         : selected?.scenarios.length === 1 ? selected.scenarios[0] : undefined;
       setDirectory(connected);
       setAccessToken(currentToken);
-      if (currentToken) setMerchantDemoToken(currentToken);
+      if (currentToken) setMerchantDemoToken(currentToken, connected.role);
       setCredential("");
       setMerchantId(selected?.id ?? "");
       setScenarioId(selectedScenario?.id ?? "");

@@ -295,7 +295,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, request = glo
                 {task === "preview" && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 {task === "preview" ? "Previewing…" : "Preview"}
               </button>
-            </div> : <Link href="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-700 hover:underline">
+            </div> : <Link href="/simulation-lab" className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-700 hover:underline">
               Save a run in Simulation Lab <ArrowUpRight className="size-4" aria-hidden="true" />
             </Link>}
             {previewError && <Message>{previewError}</Message>}
