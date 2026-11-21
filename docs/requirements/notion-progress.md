@@ -1,6 +1,6 @@
 # GitHub progress monitoring in Notion
 
-**Status** — Activity database created. Workflow implementation and activation are in progress.
+**Status** — Implemented and verified locally. The GitHub Actions schedule is inactive pending workflow publication.
 
 The team needs GitHub delivery evidence in Notion on a ten-minute polling schedule. The [PayGuard Progress Monitoring Plan](https://app.notion.com/p/41f4da4de98381cb82e6c26dca52613e?pvs=204) describes the scope. Milestones and approval status come from the [Drive action plan](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260117) and [decision register](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260116).
 
@@ -29,4 +29,6 @@ The local `.env` file is ignored by Git. The runner reads the token from the rep
 
 ## Verified so far
 
-The activity database was created with the agreed schema. The local token returned HTTP 200 for the integration identity and the monitoring plan page. Activity-database write access and end-to-end GitHub Actions execution are pending.
+The activity database was created with the agreed schema. The local token returned HTTP 200 for the integration identity and the monitoring plan page. Independent fixture and workflow YAML checks passed. A live local sync changed 18 activity records, confirming that the integration can write to the database. The GitHub Actions repository secret and variable are configured.
+
+Local commit `1d93024` contains the workflow. GitHub rejected the push because the personal access token lacks the `workflow` scope. After publishing the workflow to the default branch with workflow write access, verify the first manual run and two scheduled runs against the Notion health row.

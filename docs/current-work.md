@@ -2,10 +2,10 @@
 
 ## GitHub progress monitoring in Notion
 
-Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4de98381dcac67fb442ef0c35b) under the monitoring plan. The local integration token authenticated and returned HTTP 200 for the plan page. See the [monitoring requirements](requirements/notion-progress.md) for repository configuration and rollout checks.
+Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4de98381dcac67fb442ef0c35b) under the monitoring plan. The sync is implemented in local commit `1d93024`. See the [monitoring requirements](requirements/notion-progress.md) for repository configuration and rollout checks.
 
-- Pending verification of the workflow and of integration write access to the activity database.
-- Activation remains pending until the repository secret and variable are configured, the workflow is on the default branch, and manual and scheduled runs are verified.
+- Independent fixture and workflow YAML checks passed. A live local sync changed 18 activity records in Notion. The GitHub Actions repository secret and variable are configured.
+- The schedule is inactive. GitHub rejected the push because the personal access token lacks the `workflow` scope. Publishing with workflow write access and verifying manual and scheduled runs remain pending.
 
 ## PG-01 booking intake
 
