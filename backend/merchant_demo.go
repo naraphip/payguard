@@ -79,6 +79,7 @@ type mockTransactionInput struct {
 	SimulateTimeout       bool                       `json:"simulateTimeout"`
 	CustomerEmailDomain   string                     `json:"customerEmailDomain,omitempty"`
 	CustomerMailboxDigest string                     `json:"customerMailboxDigest,omitempty"`
+	CustomerID            string                     `json:"customerId,omitempty"`
 	AccountAgeDays        *int64                     `json:"accountAgeDays,omitempty"`
 	CustomSignals         map[string]json.RawMessage `json:"customSignals,omitempty"`
 }
@@ -112,6 +113,7 @@ type mockTransaction struct {
 	JevConfigurationVersion int64      `json:"jevConfigurationVersion,omitempty"`
 	simulateTimeout         bool
 	customerMailboxRef      string
+	customerIDRef           string
 	AccountAgeDays          *int64                     `json:"accountAgeDays,omitempty"`
 	CustomSignals           map[string]json.RawMessage `json:"customSignals,omitempty"`
 	CustomerEmailDomain     string                     `json:"-"`
@@ -441,6 +443,17 @@ func (s mockMerchantService) createTransaction(w http.ResponseWriter, r *http.Re
 	if !validMockTransaction(input) {
 		problem(w, http.StatusUnprocessableEntity, "Enter a valid transaction ID, source, product, and optional evidence.")
 		return
+	}
+	input.CustomerID = strings.TrimSpace(input.CustomerID)
+	if input.CustomerID != "" {
+		if !merchantCustomerIDPattern.MatchString(input.CustomerID) {
+			problem(w, http.StatusUnprocessableEntity, "Enter a customer ID of 1 to 128 letters, digits, dots, underscores, colons, or hyphens, starting with a letter or digit.")
+			return
+		}
+		if input.ScenarioID != "" {
+			problem(w, http.StatusUnprocessableEntity, "Choose a merchant without a legacy scenario to submit a customer ID.")
+			return
+		}
 	}
 	if input.CustomerMailboxDigest != "" && !validMailboxDigest(input.CustomerMailboxDigest) {
 		problem(w, http.StatusUnprocessableEntity, "Enter a valid customer mailbox digest.")

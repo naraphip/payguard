@@ -9,7 +9,7 @@ func TestMerchantRiskScoreObservedSignals(t *testing.T) {
 	age := int64(7)
 	input := mockTransactionInput{AccountAgeDays: &age, CustomerEmailDomain: "mailinator.com"}
 	result := mockTransaction{PolicyDecision: &transactionPolicyDecision{}, JevStatus: "LIVE", JevAnswer: "LOW_RISK"}
-	score := calculateMerchantRiskScore(input, result)
+	score := calculateMerchantRiskScore(input, result, false)
 	if score.Value == nil || *score.Value != 45 || score.Partial || score.Version != merchantRiskScoreVersion {
 		t.Fatalf("score with observed account age and disposable domain: %+v", score)
 	}
@@ -24,7 +24,7 @@ func TestMerchantRiskScoreObservedSignals(t *testing.T) {
 	}
 	age++
 	input.CustomerEmailDomain = "gmail.com"
-	score = calculateMerchantRiskScore(input, result)
+	score = calculateMerchantRiskScore(input, result, false)
 	if score.Value == nil || *score.Value != 20 || score.Partial ||
 		!slices.Contains(score.Factors, merchantRiskFactor{Code: "EMAIL_DOMAIN_NOT_LISTED"}) {
 		t.Fatalf("a non-listed domain must be neutral: %+v", score)
@@ -41,7 +41,7 @@ func TestMerchantRiskScoreRuleFloorsAndJev(t *testing.T) {
 			Merchant: policyDecisionPart{Action: "BLOCK", MatchedRuleIDs: []string{"merchant-1"}},
 		},
 	}
-	score := calculateMerchantRiskScore(input, result)
+	score := calculateMerchantRiskScore(input, result, false)
 	for _, factor := range []merchantRiskFactor{
 		{Code: "PLATFORM_CHALLENGE"},
 		{Code: "MERCHANT_BLOCK", Points: 40},
@@ -59,7 +59,7 @@ func TestMerchantRiskScoreRuleFloorsAndJev(t *testing.T) {
 	result.RuleHits = nil
 	for _, status := range []string{"LIVE", "MOCKED"} {
 		result.JevStatus = status
-		score = calculateMerchantRiskScore(input, result)
+		score = calculateMerchantRiskScore(input, result, false)
 		if score.Value == nil || *score.Value != 55 || score.Partial ||
 			!slices.Contains(score.Factors, merchantRiskFactor{Code: "JEV_" + status + "_REVIEW", Points: 10}) {
 			t.Fatalf("%s review did not contribute its floor: %+v", status, score)
@@ -69,13 +69,13 @@ func TestMerchantRiskScoreRuleFloorsAndJev(t *testing.T) {
 
 func TestMerchantRiskScoreIncompleteEvidence(t *testing.T) {
 	result := mockTransaction{PolicyDecision: &transactionPolicyDecision{}, JevStatus: "TIMEOUT", JevAnswer: "LOW_RISK"}
-	missing := calculateMerchantRiskScore(mockTransactionInput{}, result)
+	missing := calculateMerchantRiskScore(mockTransactionInput{}, result, false)
 	if missing.Value != nil || !missing.Partial ||
 		!slices.Contains(missing.Factors, merchantRiskFactor{Code: "JEV_TIMEOUT"}) {
 		t.Fatalf("an unanswered transaction without evidence had a numerical score: %+v", missing)
 	}
 	result.PolicyDecision.Merchant.ReasonCodes = []string{merchantJevUnresolved}
-	score := calculateMerchantRiskScore(mockTransactionInput{CustomerEmailDomain: "mailinator.com"}, result)
+	score := calculateMerchantRiskScore(mockTransactionInput{CustomerEmailDomain: "mailinator.com"}, result, false)
 	if score.Value == nil || *score.Value != 35 || !score.Partial ||
 		!slices.Contains(score.Factors, merchantRiskFactor{Code: "MERCHANT_EVIDENCE_INCOMPLETE"}) {
 		t.Fatalf("available evidence should be scored and marked partial: %+v", score)

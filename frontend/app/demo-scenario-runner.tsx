@@ -24,6 +24,7 @@ type ScenarioInputs = {
   product?: SimulationProduct;
   amountMinor?: number;
   customerEmail?: string;
+  customerId?: string;
   accountAgeDays?: string;
   customSignals?: DemoCustomSignalValues;
   simulateTimeout: boolean;
@@ -88,6 +89,15 @@ function readAccountAge(input?: string) {
   const value = readDemoAmount(input ?? "");
   if (value !== undefined && (Number.isNaN(value) || value > 36500)) {
     throw new Error("Enter a whole account age from 0 to 36,500 days or leave it empty.");
+  }
+  return value;
+}
+
+function readCustomerId(input?: string) {
+  const value = input?.trim();
+  if (!value) return undefined;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+    throw new Error("Enter a Customer ID that starts with a letter or digit and uses up to 128 characters, including letters, digits, dots, underscores, colons, or hyphens.");
   }
   return value;
 }
@@ -286,7 +296,7 @@ export function useDemoScenario(source: ScenarioSource) {
     setContextRevision(value => value + 1);
   }
 
-  async function submit({ customerEmail, accountAgeDays, customSignals, ...inputs }: ScenarioInputs) {
+  async function submit({ customerEmail, customerId, accountAgeDays, customSignals, ...inputs }: ScenarioInputs) {
     if (!ready || !merchant || !product || inputs.source !== source ||
         (inputs.product && inputs.product !== product) || submittingRef.current || getMerchantDemoRole() === "merchant") return;
     const email = parseScenarioEmail(customerEmail);
@@ -305,6 +315,7 @@ export function useDemoScenario(source: ScenarioSource) {
         product,
         id: crypto.randomUUID(),
         customerEmailDomain: email.domain,
+        customerId: readCustomerId(customerId),
         accountAgeDays: readAccountAge(accountAgeDays),
         customSignals: readCustomSignals(context, product, customSignals),
         customerMailboxDigest: email.mailbox ? await merchantMailboxDigest(merchant.id, email.mailbox) : undefined,
@@ -405,6 +416,17 @@ export function DemoScenarioAccountAgeField({ value, onChange }: { value: string
     <input className="control mt-1.5" inputMode="numeric" value={value} maxLength={5} placeholder="Optional"
       autoComplete="off" onChange={event => onChange(event.currentTarget.value)} />
   </label>;
+}
+
+export function DemoScenarioCustomerIdField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const id = useId();
+  return <div className="min-w-0">
+    <label htmlFor={id} className="block text-sm font-semibold">Customer ID</label>
+    <input id={id} className="control mt-1.5" value={value} placeholder="customer-a (optional)"
+      autoComplete="off" autoCapitalize="none" spellCheck={false} aria-describedby={`${id}-help`}
+      onChange={event => onChange(event.currentTarget.value)} />
+    <p id={`${id}-help`} className="mt-1.5 text-xs text-muted">Use the same customer ID for this merchant on each booking. Full synthetic addresses also detect changes within one domain.</p>
+  </div>;
 }
 
 export function DemoScenarioCustomSignals({ flow, values, onChange }: {
@@ -558,6 +580,7 @@ export function DemoScenarioSimulation() {
 function ScenarioSimulationForm({ flow }: { flow: DemoScenarioState }) {
   const [amount, setAmount] = useState("50000");
   const [email, setEmail] = useState("");
+  const [customerId, setCustomerId] = useState("");
   const [accountAgeDays, setAccountAgeDays] = useState("");
   const [customSignals, setCustomSignals] = useState<DemoCustomSignalValues>({});
   const [simulateTimeout, setSimulateTimeout] = useState(false);
@@ -571,7 +594,7 @@ function ScenarioSimulationForm({ flow }: { flow: DemoScenarioState }) {
       setAmountError(invalidDemoAmount);
       return;
     }
-    void flow.submit({ source: "simulation", amountMinor, customerEmail: email, accountAgeDays, customSignals, simulateTimeout });
+    void flow.submit({ source: "simulation", amountMinor, customerEmail: email, customerId, accountAgeDays, customSignals, simulateTimeout });
   }
 
   return <form onSubmit={submit} noValidate className="space-y-3">
@@ -584,6 +607,10 @@ function ScenarioSimulationForm({ flow }: { flow: DemoScenarioState }) {
       <DemoScenarioEmailField value={email} onChange={value => {
         flow.clearAttempt();
         setEmail(value);
+      }} />
+      <DemoScenarioCustomerIdField value={customerId} onChange={value => {
+        flow.clearAttempt();
+        setCustomerId(value);
       }} />
       <DemoScenarioAccountAgeField value={accountAgeDays} onChange={value => {
         flow.clearAttempt();

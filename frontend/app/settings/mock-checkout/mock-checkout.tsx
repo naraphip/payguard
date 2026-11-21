@@ -4,7 +4,7 @@ import { Hotel, Package, Plane, ShoppingBag, TabletSmartphone } from "lucide-rea
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  DemoScenarioAccountAgeField, DemoScenarioCustomSignals, DemoScenarioEmailField, DemoScenarioPicker,
+  DemoScenarioAccountAgeField, DemoScenarioCustomerIdField, DemoScenarioCustomSignals, DemoScenarioEmailField, DemoScenarioPicker,
   DemoScenarioPolicyContext, DemoScenarioResult,
   invalidDemoAmount, readDemoAmount, useDemoScenario,
 } from "../../demo-scenario-runner";
@@ -75,6 +75,7 @@ function CheckoutForm({ flow }: { flow?: ReturnType<typeof useDemoScenario> }) {
   const [accountAgeDays, setAccountAgeDays] = useState("");
   const [customSignals, setCustomSignals] = useState<DemoCustomSignalValues>({});
   const [email, setEmail] = useState("");
+  const [customerId, setCustomerId] = useState("");
   const [sdkStatus, setSDKStatus] = useState<SDKStatus>("observed");
   const [mode, setMode] = useState<JevMode>("mock");
   const [token, setToken] = useState("");
@@ -147,7 +148,7 @@ function CheckoutForm({ flow }: { flow?: ReturnType<typeof useDemoScenario> }) {
     }
     if (flow) {
       await flow.submit({
-        source: "checkout", amountMinor, product, customerEmail: email, accountAgeDays, customSignals,
+        source: "checkout", amountMinor, product, customerEmail: email, customerId, accountAgeDays, customSignals,
         simulateTimeout: mode === "timeout",
       });
       return;
@@ -220,6 +221,10 @@ function CheckoutForm({ flow }: { flow?: ReturnType<typeof useDemoScenario> }) {
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               {flow && <DemoScenarioEmailField value={email} onChange={value => {
                 setEmail(value);
+                flow.clearAttempt();
+              }} />}
+              {flow && <DemoScenarioCustomerIdField value={customerId} onChange={value => {
+                setCustomerId(value);
                 flow.clearAttempt();
               }} />}
               {flow && <DemoScenarioAccountAgeField value={accountAgeDays} onChange={value => {

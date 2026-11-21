@@ -2,7 +2,7 @@ package main
 
 import "slices"
 
-const merchantRiskScoreVersion = "merchant-risk-v1"
+const merchantRiskScoreVersion = "merchant-risk-v2"
 
 type merchantRiskFactor struct {
 	Code   string `json:"code"`
@@ -16,7 +16,7 @@ type merchantRiskScore struct {
 	Factors []merchantRiskFactor `json:"factors"`
 }
 
-func calculateMerchantRiskScore(input mockTransactionInput, result mockTransaction) *merchantRiskScore {
+func calculateMerchantRiskScore(input mockTransactionInput, result mockTransaction, changedEmail bool) *merchantRiskScore {
 	score := &merchantRiskScore{Version: merchantRiskScoreVersion}
 	total := 0
 	observed := false
@@ -70,6 +70,10 @@ func calculateMerchantRiskScore(input mockTransactionInput, result mockTransacti
 		}
 	} else {
 		missing("EMAIL_DOMAIN_UNAVAILABLE")
+	}
+	if changedEmail {
+		observed = true
+		add("CUSTOMER_EMAIL_CHANGED_AFTER_DISPOSABLE", 15)
 	}
 
 	policy := result.PolicyDecision

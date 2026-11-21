@@ -9,6 +9,7 @@ const factorLabels: Record<string, string> = {
   EMAIL_DOMAIN_NOT_LISTED: "Email domain absent from the disposable list",
   EMAIL_DOMAIN_MISSING: "Email domain missing",
   EMAIL_DOMAIN_UNAVAILABLE: "Disposable email check unavailable",
+  CUSTOMER_EMAIL_CHANGED_AFTER_DISPOSABLE: "Same customer ID · email changed after a disposable email booking",
   PLATFORM_CHALLENGE: "Platform rule matched · Challenge",
   PLATFORM_REVIEW: "Platform rule matched · Review",
   PLATFORM_BLOCK: "Platform rule matched · Block",

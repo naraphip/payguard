@@ -28,7 +28,11 @@ func validMailboxDigest(value string) bool {
 // The browser submits a digest of the normalized mailbox. Use a different
 // reference for each merchant and keep the browser digest out of storage.
 func merchantMailboxRef(ctx context.Context, db mockMerchantQueryer, merchant, digest string) (string, error) {
-	if digest == "" {
+	return merchantScopedRef(ctx, db, merchant, digest)
+}
+
+func merchantScopedRef(ctx context.Context, db mockMerchantQueryer, merchant, value string) (string, error) {
+	if value == "" {
 		return "", nil
 	}
 	var key string
@@ -37,6 +41,6 @@ func merchantMailboxRef(ctx context.Context, db mockMerchantQueryer, merchant, d
 		return "", err
 	}
 	mac := hmac.New(sha256.New, []byte(key))
-	mac.Write([]byte(digest))
+	mac.Write([]byte(value))
 	return hex.EncodeToString(mac.Sum(nil)), nil
 }
