@@ -30,6 +30,7 @@ export type DemoTransaction = {
   thresholdMinor: number;
   jevStatus: "MOCKED" | "TIMEOUT";
   jevVersion: "mock-jev-v1";
+  jevRuleVersion?: string;
   outcome: "LOW_RISK" | "REVIEW" | "UNRESOLVED";
   reason: string;
   ruleHits: string[];
@@ -52,12 +53,28 @@ export function setMerchantDemoToken(value: string) {
 
 export async function merchantDemoRequest<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${token.trim()}`);
+  const bearer = token.trim();
+  if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
   if (init?.body) headers.set("Content-Type", "application/json");
-  const response = await fetch(`/api/v1/booking/demo/merchants${path}`, { ...init, headers, cache: "no-store" });
+  const base = bearer ? "/api/v1/booking/demo/merchants" : "/api/merchant-preview";
+  const response = await fetch(`${base}${path}`, { ...init, headers, cache: "no-store" });
   const result = await response.json().catch(() => null);
+  if (!bearer && response.status === 404 && result?.code === "MERCHANT_PREVIEW_DISABLED") {
+    throw new LocalMerchantPreviewDisabled();
+  }
   if (!response.ok || result === null) {
     throw new Error(result?.error ?? `Merchant demo request failed (${response.status}).`);
   }
   return result as T;
+}
+
+class LocalMerchantPreviewDisabled extends Error {}
+
+export async function loadLocalMerchantDirectory(): Promise<DemoDirectory | null> {
+  try {
+    return await merchantDemoRequest<DemoDirectory>("", "");
+  } catch (error) {
+    if (error instanceof LocalMerchantPreviewDisabled) return null;
+    throw error;
+  }
 }

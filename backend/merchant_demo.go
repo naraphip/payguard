@@ -62,6 +62,7 @@ type mockTransaction struct {
 	ScenarioName    string     `json:"scenarioName"`
 	ScenarioVersion int        `json:"scenarioVersion"`
 	RuleVersion     string     `json:"ruleVersion"`
+	JevRuleVersion  string     `json:"jevRuleVersion,omitempty"`
 	ThresholdMinor  int64      `json:"thresholdMinor"`
 	Source          string     `json:"source"`
 	Product         string     `json:"product,omitempty"`
@@ -89,6 +90,7 @@ func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string
 	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/transactions", service.createTransaction)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/transactions/{transactionId}", service.getTransaction)
 	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/transactions/{transactionId}/decision", service.decideTransaction)
+	service.registerRules(mux)
 }
 
 func (s mockMerchantService) authorize(w http.ResponseWriter, r *http.Request, adminOnly bool) (mockMerchantActor, bool) {

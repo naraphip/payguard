@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS merchant_demo_transactions (
 );
 CREATE INDEX IF NOT EXISTS merchant_demo_transactions_created_idx
   ON merchant_demo_transactions(merchant_id, created_at DESC, id DESC);
+ALTER TABLE merchant_demo_transactions ADD COLUMN IF NOT EXISTS jev_rule_version text NOT NULL DEFAULT '';
 `
 
 type mockMerchantQueryer interface {
@@ -207,7 +208,7 @@ func (r repository) saveMockScenario(ctx context.Context, merchantID, scenarioID
 const mockTransactionReadQuery = `
 SELECT t.id::text, t.merchant_id::text, t.scenario_id::text, s.name, t.scenario_revision,
 	s.threshold_minor, t.source, t.product, t.amount_minor, t.outcome, t.reason, t.rule_hits, t.jev_status,
-	t.jev_version, t.created_at, t.disposition, t.decided_by, t.decided_at
+	t.jev_version, t.jev_rule_version, t.created_at, t.disposition, t.decided_by, t.decided_at
 FROM merchant_demo_transactions t
 JOIN merchant_demo_scenarios s ON s.merchant_id=t.merchant_id AND s.id=t.scenario_id AND s.revision=t.scenario_revision
 WHERE t.merchant_id=$1::text::uuid`
@@ -216,7 +217,7 @@ func scanMockTransaction(row pgx.Row) (mockTransaction, error) {
 	var result mockTransaction
 	err := row.Scan(&result.ID, &result.MerchantID, &result.ScenarioID, &result.ScenarioName, &result.ScenarioVersion,
 		&result.ThresholdMinor, &result.Source, &result.Product, &result.AmountMinor, &result.Outcome,
-		&result.Reason, &result.RuleHits, &result.JevStatus, &result.JevVersion, &result.CreatedAt,
+		&result.Reason, &result.RuleHits, &result.JevStatus, &result.JevVersion, &result.JevRuleVersion, &result.CreatedAt,
 		&result.Disposition, &result.DecidedBy, &result.DecidedAt)
 	if err != nil {
 		return result, err
@@ -313,16 +314,22 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		if err != nil {
 			return err
 		}
+		jevRules, err := readJevRules(ctx, tx, merchantID)
+		if err != nil {
+			return err
+		}
 		result = evaluateMockJev(input, scenario)
+		result.applyMerchantJevRules(jevRules)
 		result.MerchantID = merchantID
 		err = tx.QueryRow(ctx, `
 			INSERT INTO merchant_demo_transactions
 				(merchant_id, id, scenario_id, scenario_revision, source, product, amount_minor, simulate_timeout,
-				 outcome, reason, rule_hits, jev_status, jev_version)
-			VALUES ($1::text::uuid, $2::text::uuid, $3::text::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+				 outcome, reason, rule_hits, jev_status, jev_version, jev_rule_version)
+			VALUES ($1::text::uuid, $2::text::uuid, $3::text::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING created_at`,
 			merchantID, input.ID, input.ScenarioID, result.ScenarioVersion, input.Source, input.Product, input.AmountMinor,
-			input.SimulateTimeout, result.Outcome, result.Reason, result.RuleHits, result.JevStatus, result.JevVersion).Scan(&result.CreatedAt)
+			input.SimulateTimeout, result.Outcome, result.Reason, result.RuleHits, result.JevStatus, result.JevVersion,
+			result.JevRuleVersion).Scan(&result.CreatedAt)
 		created = err == nil
 		return err
 	})

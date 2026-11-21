@@ -120,6 +120,7 @@ export function MerchantTransactions({ token, merchant }: { token: string; merch
             <div><dt className="font-medium">Automated result</dt><dd className="text-slate-600">{outcomes[selected.outcome]}</dd></div>
             <div><dt className="font-medium">Review state</dt><dd className="text-slate-600">{reviewStates[selected.reviewState]}</dd></div>
             <div><dt className="font-medium">Jev response</dt><dd className="text-slate-600">{selected.jevStatus === "TIMEOUT" ? "Simulated timeout" : "Mock response"} · {selected.jevVersion}</dd></div>
+            {selected.jevRuleVersion && <div><dt className="font-medium">Merchant Jev rules</dt><dd className="text-slate-600">{selected.jevRuleVersion}</dd></div>}
             <div><dt className="font-medium">Review threshold</dt><dd className="text-slate-600">{count.format(selected.thresholdMinor)} minor units</dd></div>
           </dl>
           <p className="break-words text-sm">{selected.reason}</p>

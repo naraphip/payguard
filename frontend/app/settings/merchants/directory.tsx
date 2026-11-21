@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { JevRulesPanel } from "../jev-rules/panel";
+import { SystemRulesDashboard } from "../system-rules/dashboard";
 import type { FormEvent, ReactNode } from "react";
-import { getMerchantDemoToken, merchantDemoRequest, setMerchantDemoToken } from "../../merchant-demo";
+import { getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, setMerchantDemoToken } from "../../merchant-demo";
 import type { DemoDirectory, DemoMerchant, DemoScenario } from "../../merchant-demo";
 import { MerchantTransactions } from "./transactions";
 
@@ -21,34 +23,52 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block min-w-0 text-sm font-medium">{label}{children}</label>;
 }
 
+const workspaceViews = {
+  workspace: "Overview",
+  transactions: "Transactions",
+  jev: "Jev Rules",
+  platform: "Platform Rules",
+} as const;
+type WorkspaceView = keyof typeof workspaceViews;
+
 export function MerchantDirectory() {
   const [credential, setCredential] = useState("");
   const [token, setToken] = useState("");
   const [directory, setDirectory] = useState<DemoDirectory | null>(null);
   const [selectedId, selectMerchant] = useState("");
+  const [view, setView] = useState<WorkspaceView>("workspace");
   const [createMode, setCreateMode] = useState(false);
   const [issuedToken, setIssuedToken] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [requiresToken, setRequiresToken] = useState(false);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const saved = getMerchantDemoToken();
-    if (!saved) return;
     let ignore = false;
-    setCredential(saved);
     setLoading(true);
-    merchantDemoRequest<DemoDirectory>("", saved).then((result) => {
-      if (ignore) return;
-      setToken(saved);
-      setDirectory(result);
-      selectMerchant(new URLSearchParams(window.location.search).get("merchant") ?? result.merchants[0]?.id ?? "");
-    }).catch((failure: unknown) => {
-      if (!ignore) setError(errorMessage(failure));
-    }).finally(() => {
-      if (!ignore) setLoading(false);
-    });
+    setError("");
+    async function load() {
+      try {
+        const local = await loadLocalMerchantDirectory();
+        if (ignore) return;
+        const saved = local ? "" : getMerchantDemoToken();
+        setRequiresToken(!local);
+        if (!local) setCredential(saved);
+        const result = local ?? (saved ? await merchantDemoRequest<DemoDirectory>("", saved) : null);
+        if (ignore || !result) return;
+        setToken(saved);
+        setDirectory(result);
+        selectMerchant(new URLSearchParams(window.location.search).get("merchant") ?? result.merchants[0]?.id ?? "");
+      } catch (failure) {
+        if (!ignore) setError(errorMessage(failure));
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+    void load();
     return () => { ignore = true; };
-  }, []);
+  }, [previewAttempt]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,6 +112,26 @@ export function MerchantDirectory() {
   const selected = directory?.merchants.find(({ id }) => id === selectedId) ?? directory?.merchants[0];
   const admin = directory?.role === "admin";
 
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search);
+    const requested = search.get("view");
+    if (requested === "transactions" || requested === "jev" || requested === "platform") setView(requested);
+  }, []);
+
+  const requestPlatformRules = useCallback(<T,>(suffix: string, init?: RequestInit) => {
+    if (!selected) return Promise.reject(new Error("Choose a merchant to load its platform rules."));
+    return merchantDemoRequest<T>(`/${selected.id}/platform/rules${suffix}`, token, init);
+  }, [selected?.id, token]);
+
+  if (!directory && !requiresToken) {
+    return <div className={`${card} max-w-lg space-y-3`}>
+      {loading ? <p role="status" className="text-sm text-slate-600">Loading merchants…</p> : <>
+        <p role="alert" className="text-sm text-red-700">{error}</p>
+        <button type="button" className={secondary} onClick={() => setPreviewAttempt(attempt => attempt + 1)}>Retry</button>
+      </>}
+    </div>;
+  }
+
   if (!directory) {
     return (
       <form onSubmit={signIn} className={`${card} max-w-lg space-y-3`}>
@@ -109,8 +149,8 @@ export function MerchantDirectory() {
     <div className="grid items-start gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]">
       <aside className={`${card} space-y-4`} aria-label="Merchant directory">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm text-slate-600">{admin ? "Administrator" : "Merchant access"}</span>
-          <button className={secondary} onClick={signOut}>Sign out</button>
+          <span className="text-sm text-slate-600">{!token ? "Local demo" : admin ? "Administrator" : "Merchant access"}</span>
+          {token && <button className={secondary} onClick={signOut}>Sign out</button>}
         </div>
         <div className="space-y-2">
           {directory.merchants.map((merchant) => (
@@ -142,7 +182,7 @@ export function MerchantDirectory() {
           }} />
         ) : selected && (
           <>
-            {issuedToken && (
+            {token && issuedToken && (
               <div role="status" className={`${card} space-y-2`}>
                 <h2 className="font-semibold">Merchant access token</h2>
                 <p className="text-sm text-slate-600">Copy this token to sign in as {selected.name}. It is shown once.</p>
@@ -150,8 +190,15 @@ export function MerchantDirectory() {
                 <button className={secondary} onClick={() => setIssuedToken("")}>Hide token</button>
               </div>
             )}
-            <MerchantWorkspace key={`workspace-${selected.id}`} token={token} merchant={selected} admin={admin} onSave={upsert} />
-            <MerchantTransactions key={`transactions-${selected.id}`} token={token} merchant={selected} />
+            <nav aria-label="Merchant workspace" className="flex flex-wrap gap-2">
+              {(Object.entries(workspaceViews) as [WorkspaceView, string][]).map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={view === id} className={view === id ? action : secondary} onClick={() => setView(id)}>{label}</button>
+              ))}
+            </nav>
+            {view === "workspace" && <MerchantWorkspace key={`workspace-${selected.id}`} token={token} merchant={selected} admin={admin} onSave={upsert} />}
+            {(view === "workspace" || view === "transactions") && <MerchantTransactions key={`transactions-${selected.id}`} token={token} merchant={selected} />}
+            {view === "jev" && <JevRulesPanel key={`jev-${selected.id}`} merchant={{ id: selected.id, name: selected.name, token, canEdit: admin }} />}
+            {view === "platform" && <SystemRulesDashboard key={`platform-${selected.id}`} request={requestPlatformRules} merchantName={selected.name} canEdit={admin} />}
           </>
         )}
       </div>

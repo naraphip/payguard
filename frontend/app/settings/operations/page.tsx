@@ -1,9 +1,13 @@
+import { connection } from "next/server";
+import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { OperationsWorkspace } from "./workspace";
 
 export const metadata: Metadata = { title: "Risk operations | PayGuard" };
 
-export default function OperationsPage() {
+export default async function OperationsPage() {
+  await connection();
+  if (process.env.PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN?.trim()) redirect("/settings/merchants?view=transactions");
   return <main className="mx-auto max-w-[1400px] px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <header className="mb-6">
       <h1 className="text-[30px] leading-tight font-semibold tracking-tight sm:text-[36px]">Risk operations</h1>

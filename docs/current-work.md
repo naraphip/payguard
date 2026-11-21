@@ -8,10 +8,15 @@ Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab s
 
 The [local preview](http://127.0.0.1:3001/settings/merchants) uses a structured threshold form and direct demo review. AI-assisted draft generation, a fully configurable rule set, the full HOLD lifecycle in this merchant workspace, and live Jev integration remain open.
 
+The opt-in loopback preview opens the Merchants workspace and scenario pickers as a demo administrator. Set the Next server’s `PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN` to the API’s demo administrator token to enable it. The old Risk Operations route redirects to **Merchants → Transactions** in this preview. Standalone routes and the ordinary authenticated flow remain available when the opt-in is disabled.
+
+The selected merchant has **Jev Rules** and **Platform Rules** tabs. Demo administrators manage that merchant’s rules, and authorized merchant users can view their own. Published amount-based Jev rules apply to Mock Checkout and the single-booking merchant scenario simulation, with the supplemental ruleset version pinned in the result. Platform built-ins remain read-only, and Platform drafts are for testing. A Platform draft preview requires a compatible saved Simulation Lab run for the selected merchant.
+
 - Live API checks verified the administrator directory and merchant-scoped access. In both Mock Checkout and Simulation Lab, an amount of 50,000 minor units returned **Low risk** at a threshold of 100,000 and **Review** at a threshold of 50,000.
 - Live API checks verified missing amount versus zero, timeout and review resolution, replay pinned to an earlier revision, and cross-merchant denial.
 - Go tests, race tests, and vet passed. The isolated frontend production build, TypeScript checks, and existing booking smoke checks also passed.
 - Independent browser checks verified merchant creation, one-time token display, and saving two scenario drafts. The browser showed a **Low risk** checkout, a **Review** simulation with a matching rule, and an **Unresolved** simulation after a mock timeout. The merchant’s ledger contained exactly three transactions with the expected sources and outcomes. A direct link opened the saved transaction, and sign-in with the issued token showed only the merchant’s own workspace with merchant creation and editing unavailable.
+- A fresh Chrome session verified the automatic loopback path. It created a merchant and scenario, followed a deep link to checkout, and reopened its saved transaction after refreshing the ledger. The browser trace and storage contained no authorization header, administrator token, or issued merchant token. Final verification of the scoped rule tabs is pending.
 
 ## PG-11 through PG-19 local evaluation
 

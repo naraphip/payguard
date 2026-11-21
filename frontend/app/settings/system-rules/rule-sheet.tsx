@@ -1,12 +1,14 @@
 "use client";
 
+import type { RuleTransport } from "./contracts";
+
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpRight, CircleAlert, FlaskConical, LoaderCircle, LockKeyhole, Plus, Trash2, X } from "lucide-react";
 import {
   actions, fieldControl, formatDate, operators, outlineButton, primaryButton,
-  ruleRequest, rulesEndpoint, stages,
+  globalRuleTransport, stages,
 } from "./contracts";
 import type { Action, Condition, Operator, Preview, PreviewRun, Rule, RuleInput, Signal, Stage } from "./contracts";
 
@@ -57,10 +59,12 @@ type Props = {
   runs: PreviewRun[];
   onClose: () => void;
   onSaved: (rule: Rule) => void;
+  request?: RuleTransport;
+  canEdit?: boolean;
 };
 
-export function RuleSheet({ rule, signals, runs, onClose, onSaved }: Props) {
-  const readOnly = rule?.status === "ACTIVE";
+export function RuleSheet({ rule, signals, runs, onClose, onSaved, request = globalRuleTransport, canEdit = true }: Props) {
+  const readOnly = !!rule && (!canEdit || rule.status === "ACTIVE");
   const dialog = useRef<HTMLDialogElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<RuleInput>(() => rule
@@ -124,7 +128,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved }: Props) {
     setTask("save");
     try {
       const isEdit = Boolean(rule);
-      const result = await ruleRequest<Rule>(isEdit ? `${rulesEndpoint}/${rule?.id}` : rulesEndpoint, {
+      const result = await request<Rule>(isEdit ? `/${rule?.id}` : "", {
         method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(rule ? { version: rule.version, ...form } : form),
@@ -147,7 +151,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved }: Props) {
     setPreview(null);
     setTask("preview");
     try {
-      setPreview(await ruleRequest<Preview>(`${rulesEndpoint}/preview`, {
+      setPreview(await request<Preview>("/preview", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ runId, rule: form }),
       }));
@@ -174,7 +178,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved }: Props) {
         <div className="min-w-0">
           <h2 id="rule-sheet-title" className="wrap-anywhere text-xl font-semibold tracking-tight">{readOnly ? rule.name : rule ? "Edit draft" : "New draft"}</h2>
           <p id="rule-sheet-description" className="mt-1.5 text-sm text-slate-600">
-            {readOnly ? "Active built-in platform rule" : draftLabel}
+            {readOnly ? rule.status === "ACTIVE" ? "Active built-in platform rule" : "Merchant draft" : draftLabel}
           </p>
         </div>
         <button type="button" className="grid size-8 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50" aria-label="Close rule editor" onClick={onClose} disabled={task === "save"}>
@@ -202,7 +206,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved }: Props) {
             </ul>
           </section>
           <p className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
-            <LockKeyhole className="size-4 shrink-0 text-slate-500" aria-hidden="true" />Built-in rules are managed by the simulation engine.
+            <LockKeyhole className="size-4 shrink-0 text-slate-500" aria-hidden="true" />{rule.status === "ACTIVE" ? "Built-in rules are managed by the simulation engine." : "An administrator can edit merchant drafts."}
           </p>
         </div> : <fieldset disabled={task !== null} className="min-w-0 space-y-6">
           <div className="space-y-4">

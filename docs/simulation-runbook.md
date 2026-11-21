@@ -60,14 +60,27 @@ python3 scripts/booking-smoke.py --base http://127.0.0.1:8081 --threshold 3
 
 ## Merchant scenarios and mock Jev
 
-Set `PAYGUARD_DEMO_ADMIN_TOKEN` to a local demo value before starting or rebuilding Compose. Open `/settings/merchants` and enter that value as the **Demo access token**. The page supports administrator access across merchants and merchant access scoped to one record.
+Set `PAYGUARD_DEMO_ADMIN_TOKEN` to a local demo value before starting or rebuilding Compose. The page supports administrator access across merchants and merchant access scoped to one record.
 
-1. Select **Create merchant**, enter a merchant name, and save it. Copy the merchant access token when it appears. The directory shows it once, at creation.
+For the host-run Next preview on loopback, set the Next server’s `PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN` to the same value as the API’s `PAYGUARD_DEMO_ADMIN_TOKEN`. Start Next and open `/settings/merchants` on the loopback preview. Merchants and the scenario pickers in Mock Checkout and Simulation Lab connect automatically as the demo administrator. The old `/settings/operations` route opens the merchant Transactions view. Set this variable only for the local preview.
+
+For the standard token flow, leave the Next preview variable unset. Open `/settings/merchants` and enter the administrator or merchant credential as the **Demo access token**. Use this flow for the merchant-scoped access check.
+
+1. Select **Create merchant**, enter a merchant name, and save it. In the standard token flow, copy the merchant access token when it appears. The directory shows it once, at creation. The automatic preview opens the new merchant workspace directly.
 2. Select **Add scenario**. Create **Everyday bookings** with a review threshold of **100000** minor units, select **Generate rule preview**, and select **Save scenario and rules**. Repeat for **High-value bookings** with a threshold of **50000**. Editing a scenario and saving a new threshold creates a new revision.
-3. In **Mock Checkout**, select **Connect merchant directory** using the administrator token or the new merchant token. Select the merchant and **Everyday bookings**, set the booking amount to **50000** minor units, and submit. Expect **Low risk**. Repeat with **High-value bookings** and expect **Review**. Confirm that the result identifies the scenario, rule revision, and checkout source.
-4. In **Simulation Lab**, use **Merchant scenario simulation** to connect and repeat the same selections and amount. Confirm the same outcomes and versions, with Simulation Lab recorded as the source. The existing batch simulation remains available on the same page.
-5. Run either tool with a simulated Jev timeout for **High-value bookings**. Expect **Unresolved** and **Needs decision**. Open **Merchants** with the merchant token, select **Needs decision**, and open the transaction. Clear or reject it to verify that the manual disposition appears separately from the saved mock decision.
-6. Create a second merchant and connect with its token to verify that it cannot view the first merchant’s scenarios or transactions. Reopen a saved test after changing its scenario’s rule to verify that the previous result still shows the original revision.
+3. In **Mock Checkout**, select the merchant and **Everyday bookings**, set the booking amount to **50000** minor units, and submit. Expect **Low risk**. Repeat with **High-value bookings** and expect **Review**. Confirm that the result identifies the scenario, rule revision, and checkout source. In the standard token flow, use **Connect merchant directory** before selecting a merchant.
+4. In **Simulation Lab**, use **Merchant scenario simulation** and repeat the same selections and amount. Confirm the same outcomes and versions, with Simulation Lab recorded as the source. The existing batch simulation remains available on the same page.
+5. Run either tool with a simulated Jev timeout for **High-value bookings**. Expect **Unresolved** and **Needs decision**. Open **Merchants**, select **Needs decision**, and open the transaction. Clear or reject it to verify that the manual disposition appears separately from the saved mock decision.
+6. Create a second merchant and use its token in the standard token flow to verify that it cannot view the first merchant’s scenarios or transactions. Reopen a saved test after changing its scenario’s rule to verify that the previous result still shows the original revision.
+
+### Rules for the selected merchant
+
+Open **Jev Rules** or **Platform Rules** from the selected merchant’s workspace. Administrators manage the selected merchant’s rules. A merchant user can view its own rules.
+
+- In **Jev Rules**, create a rule using the booking amount, preview it against saved merchant transactions, and publish it. A new Mock Checkout or single-booking merchant scenario simulation uses the published rule and records the supplemental Jev ruleset version. Earlier results retain their recorded versions.
+- In **Platform Rules**, inspect the read-only built-ins or create a test draft. To preview a draft, use a compatible saved Simulation Lab batch run for that merchant. The single-booking scenario simulator supplies mock Jev evidence only and cannot provide the batch evidence required for Platform draft preview.
+
+The standalone rule and Risk Operations routes remain available with the automatic preview disabled.
 
 This path uses synthetic transactions, one structured threshold rule per scenario, and mocked Jev responses. The local review records a disposition without taking a payment action.
 

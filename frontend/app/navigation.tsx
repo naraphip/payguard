@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, ClipboardCheck, FlaskConical, ListChecks, ShoppingBag, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Building2, ClipboardCheck, FlaskConical, ShoppingBag } from "lucide-react";
 import { PayGuardLogo } from "./payguard-logo";
 
 const destinations = [
@@ -11,9 +11,6 @@ const destinations = [
   { href: "/settings/merchants", label: "Merchants", Icon: Building2 },
   { href: "/settings/merchant-setup", label: "Merchant setup", Icon: Building2 },
   { href: "/settings/booking-assessment", label: "Booking assessment", Icon: ClipboardCheck },
-  { href: "/settings/operations", label: "Risk operations", Icon: ListChecks },
-  { href: "/settings/jev-rules", label: "Jev Rules", Icon: Sparkles },
-  { href: "/settings/system-rules", label: "Platform Rules", Icon: SlidersHorizontal },
 ];
 
 export function AppNavigation() {

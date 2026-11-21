@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  getMerchantDemoToken, merchantDemoRequest, setMerchantDemoToken,
+  getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, setMerchantDemoToken,
 } from "./merchant-demo";
 import type { DemoDirectory, DemoTransaction } from "./merchant-demo";
 import type { SimulationProduct } from "./types";
@@ -36,7 +36,8 @@ export function useDemoScenario() {
   const [accessToken, setAccessToken] = useState("");
   const [merchantId, setMerchantId] = useState("");
   const [scenarioId, setScenarioId] = useState("");
-  const [connecting, setConnecting] = useState(false);
+  const [connecting, setConnecting] = useState(true);
+  const [requiresToken, setRequiresToken] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [selectionError, setSelectionError] = useState("");
   const [requestedSelection, setRequestedSelection] = useState(false);
@@ -59,9 +60,10 @@ export function useDemoScenario() {
     setSubmissionError("");
   }
 
-  async function connect(token: string) {
-    const currentToken = token.trim();
-    if (!currentToken) return;
+  async function connect(token?: string) {
+    const automatic = token === undefined;
+    let currentToken = token?.trim() ?? "";
+    if (!automatic && !currentToken) return;
     const generation = ++connectionGeneration.current;
     setConnecting(true);
     setConnectionError("");
@@ -73,7 +75,12 @@ export function useDemoScenario() {
     setScenarioId("");
 
     try {
-      const connected = await merchantDemoRequest<DemoDirectory>("", currentToken);
+      const local = automatic ? await loadLocalMerchantDirectory() : null;
+      if (connectionGeneration.current !== generation) return;
+      setRequiresToken(!local);
+      if (automatic && !local) currentToken = getMerchantDemoToken();
+      if (!local && !currentToken) return;
+      const connected = local ?? await merchantDemoRequest<DemoDirectory>("", currentToken);
       if (connectionGeneration.current !== generation) return;
       const search = new URLSearchParams(window.location.search);
       const targetMerchant = search.get("merchant");
@@ -86,7 +93,7 @@ export function useDemoScenario() {
         : selected?.scenarios.length === 1 ? selected.scenarios[0] : undefined;
       setDirectory(connected);
       setAccessToken(currentToken);
-      setMerchantDemoToken(currentToken);
+      if (currentToken) setMerchantDemoToken(currentToken);
       setCredential("");
       setMerchantId(selected?.id ?? "");
       setScenarioId(selectedScenario?.id ?? "");
@@ -104,8 +111,7 @@ export function useDemoScenario() {
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     setRequestedSelection(query.has("merchant") || query.has("scenario"));
-    const token = getMerchantDemoToken();
-    if (token) void connect(token);
+    void connect();
 
     return () => {
       requestGeneration.current++;
@@ -142,7 +148,7 @@ export function useDemoScenario() {
   }
 
   async function submit(inputs: ScenarioInputs) {
-    if (!accessToken || !merchant || !scenario || submittingRef.current) return;
+    if (!directory || !merchant || !scenario || submittingRef.current) return;
     const attempt = pending ?? { ...inputs, id: crypto.randomUUID(), scenarioId: scenario.id };
     const request = ++requestGeneration.current;
     submittingRef.current = true;
@@ -172,7 +178,7 @@ export function useDemoScenario() {
 
   return {
     credential, setCredential, directory, merchantId, scenarioId, merchant, scenario,
-    connecting, connectionError, selectionError, requestedSelection,
+    connecting, connectionError, selectionError, requestedSelection, requiresToken,
     connect, disconnect, selectMerchant, selectScenario,
     pending, submitting, result, submissionError, submit, clearAttempt,
   };
@@ -183,7 +189,12 @@ type DemoScenarioState = ReturnType<typeof useDemoScenario>;
 export function DemoScenarioPicker({ flow, allowLegacy = false }: { flow: DemoScenarioState; allowLegacy?: boolean }) {
   const tokenId = useId();
   return <div className="space-y-3">
-    {!flow.directory && <>
+    {!flow.directory && !flow.requiresToken && (flow.connecting
+      ? <p role="status" className="text-xs text-muted">Loading merchants…</p>
+      : <button type="button" className={secondary} onClick={() => void flow.connect()}>
+        {flow.connectionError ? "Retry merchant directory" : "Use a merchant scenario"}
+      </button>)}
+    {!flow.directory && flow.requiresToken && <>
       <p className="text-xs leading-relaxed text-muted">
         Connect with an administrator or merchant token to select a saved scenario.
         <Link href="/settings/merchants" className="ml-1 font-semibold text-accent underline underline-offset-2">Open Merchants</Link>
@@ -202,10 +213,10 @@ export function DemoScenarioPicker({ flow, allowLegacy = false }: { flow: DemoSc
           disabled={!flow.credential.trim() || flow.connecting}>
           {flow.connecting ? "Connecting…" : "Connect merchant directory"}
         </button>
-        {allowLegacy && flow.requestedSelection && <button type="button" className={secondary}
-          onClick={flow.disconnect}>Use standalone checkout</button>}
       </div>
     </>}
+    {!flow.directory && allowLegacy && flow.requestedSelection && !flow.connecting &&
+      <button type="button" className={secondary} onClick={flow.disconnect}>Use standalone checkout</button>}
     {flow.connectionError && <p role="alert" className="text-sm text-red-800">{flow.connectionError}</p>}
     {flow.directory && <>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -224,14 +235,14 @@ export function DemoScenarioPicker({ flow, allowLegacy = false }: { flow: DemoSc
         </label>
       </div>
       {flow.selectionError && <p role="alert" className="text-sm text-red-800">{flow.selectionError}</p>}
-      {flow.scenario && <p className="text-xs text-muted">Scenario v{flow.scenario.scenarioVersion} · Rules v{flow.scenario.ruleVersion} · Review at {flow.scenario.thresholdMinor.toLocaleString()} minor units</p>}
+      {flow.scenario && <p className="text-xs text-muted">Scenario v{flow.scenario.scenarioVersion} · {flow.scenario.ruleVersion} · Review at {flow.scenario.thresholdMinor.toLocaleString()} minor units</p>}
       {(!flow.directory.merchants.length || (flow.merchant && !flow.merchant.scenarios.length)) &&
         <p className="text-sm text-muted">
           {flow.merchant ? "This merchant has no saved scenarios." : "No merchants are available."} <Link href="/settings/merchants" className="font-semibold text-accent underline underline-offset-2">Open Merchants</Link>
         </p>}
-      <button type="button" className={secondary} onClick={flow.disconnect}>
+      {(allowLegacy || flow.requiresToken) && <button type="button" className={secondary} onClick={flow.disconnect}>
         {allowLegacy ? "Use standalone checkout" : "Disconnect merchant directory"}
-      </button>
+      </button>}
     </>}
   </div>;
 }
@@ -251,7 +262,8 @@ export function DemoScenarioResult({ transaction, merchantName }: { transaction:
     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
       <div className="min-w-0"><dt className="text-xs text-muted">Merchant</dt><dd className="break-words font-semibold">{merchantName}</dd></div>
       <div className="min-w-0"><dt className="text-xs text-muted">Scenario</dt><dd className="break-words font-semibold">{transaction.scenarioName} · v{transaction.scenarioVersion}</dd></div>
-      <div><dt className="text-xs text-muted">Rule set</dt><dd className="font-semibold">v{transaction.ruleVersion}</dd></div>
+      <div><dt className="text-xs text-muted">Rule set</dt><dd className="font-semibold">{transaction.ruleVersion}</dd></div>
+      {transaction.jevRuleVersion && <div><dt className="text-xs text-muted">Merchant Jev rules</dt><dd className="font-semibold">{transaction.jevRuleVersion}</dd></div>}
       <div><dt className="text-xs text-muted">Booking amount</dt><dd className="font-semibold">{transaction.amountMinor === null ? "Unavailable" : `${transaction.amountMinor.toLocaleString()} minor units`}</dd></div>
       <div className="min-w-0"><dt className="text-xs text-muted">Rule hits</dt><dd className="break-words font-semibold">{transaction.ruleHits.join(", ") || "None"}</dd></div>
       <div><dt className="text-xs text-muted">Transaction state</dt><dd className="font-semibold">{reviewLabels[transaction.reviewState]}</dd></div>
