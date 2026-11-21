@@ -4,3 +4,5 @@ Add a note for each feature or screen with its status, user flow, interaction st
 
 - [Simulation Lab](simulation-lab.md)
 - [System Rules dashboard](system-rules.md)
+- [Merchant setup](merchant-setup.md)
+- [Booking assessment](booking-assessment.md)

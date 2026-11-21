@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { ArrowRight, ChevronRight, CircleAlert, FilePenLine, FlaskConical, Layers3, LoaderCircle, Plus, Search, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, ChevronRight, CircleAlert, FilePenLine, Layers3, LoaderCircle, Plus, Search, ShieldCheck } from "lucide-react";
 import { PayGuardLogo } from "../../payguard-logo";
+import { SettingsNavigation } from "../navigation";
 import { RuleSheet } from "./rule-sheet";
 import { actions, outlineButton, primaryButton, ruleRequest, rulesEndpoint, stages } from "./contracts";
 import type { Rule, RuleCatalogue } from "./contracts";
@@ -24,17 +24,6 @@ export function StatusBadge({ status }: { status: Rule["status"] }) {
 export function ActionBadge({ action }: { action: Rule["action"] }) {
   const color = action === "REVIEW" ? "bg-amber-50 text-amber-900 ring-amber-200" : "bg-indigo-50 text-indigo-800 ring-indigo-200";
   return <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${color}`}>{actions[action]}</span>;
-}
-
-function Navigation() {
-  return <nav aria-label="PayGuard" className="flex flex-wrap gap-1 md:flex-col">
-    <Link href="/" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900">
-      <FlaskConical className="size-4" aria-hidden="true" />Simulation Lab
-    </Link>
-    <Link href="/settings/system-rules" aria-current="page" className="flex items-center gap-2.5 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-800 ring-1 ring-inset ring-indigo-100">
-      <SlidersHorizontal className="size-4" aria-hidden="true" />Platform Rules
-    </Link>
-  </nav>;
 }
 
 export function SystemRulesDashboard() {
@@ -98,7 +87,7 @@ export function SystemRulesDashboard() {
         <PayGuardLogo />
       </div>
       <div className="px-4 pb-3 md:px-3 md:py-5">
-        <Navigation />
+        <SettingsNavigation current="/settings/system-rules" />
       </div>
     </aside>
 

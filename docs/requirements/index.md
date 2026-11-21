@@ -4,3 +4,5 @@ Add a note for each feature with its status, user need, scope, constraints, and 
 
 - [Simulation Lab](simulation-lab.md)
 - [System Rules dashboard](system-rules.md)
+- [Merchant setup](merchant-setup.md)
+- [Booking assessment](booking-assessment.md)

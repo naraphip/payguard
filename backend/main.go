@@ -56,6 +56,10 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("POST /api/v1/booking/events", bookingHandler{a.repo, bookingAuth}.create)
+	bookingRisk := bookingRiskHandler{repo: a.repo, auth: bookingAuth, redis: cache}
+	mux.HandleFunc("POST /api/v1/booking/profiles/proposal", bookingRisk.proposeProfile)
+	mux.HandleFunc("POST /api/v1/booking/profiles/approve", bookingRisk.approveProfile)
+	mux.HandleFunc("POST /api/v1/booking/events/{id}/assessment", bookingRisk.assessEvent)
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)

@@ -45,6 +45,29 @@ CREATE TABLE IF NOT EXISTS booking_events (
   PRIMARY KEY (merchant_id, event_id),
   UNIQUE (merchant_id, idempotency_key)
 );
+CREATE INDEX IF NOT EXISTS booking_event_velocity_idx ON booking_events (merchant_id, occurred_at, received_at);
+CREATE TABLE IF NOT EXISTS booking_profiles (
+  merchant_id text NOT NULL,
+  version text NOT NULL,
+  approved_profile jsonb NOT NULL,
+  approved_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (merchant_id, version)
+);
+CREATE TABLE IF NOT EXISTS booking_active_profiles (
+  merchant_id text PRIMARY KEY,
+  version text NOT NULL,
+  FOREIGN KEY (merchant_id, version) REFERENCES booking_profiles (merchant_id, version)
+);
+CREATE TABLE IF NOT EXISTS booking_assessments (
+  merchant_id text NOT NULL,
+  event_id uuid NOT NULL,
+  profile_version text NOT NULL,
+  jev_mode text NOT NULL CHECK (jev_mode IN ('mock', 'timeout')),
+  result jsonb NOT NULL,
+  PRIMARY KEY (merchant_id, event_id),
+  FOREIGN KEY (merchant_id, event_id) REFERENCES booking_events (merchant_id, event_id),
+  FOREIGN KEY (merchant_id, profile_version) REFERENCES booking_profiles (merchant_id, version)
+);
 `
 
 type redisVelocity struct {
@@ -58,12 +81,16 @@ redis.call('EXPIRE', KEYS[1], 600)
 return redis.call('ZCOUNT', KEYS[1], ARGV[3], ARGV[1])
 `)
 
+func (v redisVelocity) key(stage string, entity entity) string {
+	return v.prefix + ":" + stage + ":" + entity.Kind + ":" + entity.Key
+}
+
 func (v redisVelocity) count(ctx context.Context, e event) ([]feature, error) {
 	pipe := v.client.Pipeline()
 	defer pipe.Discard()
 	commands := make([]*redis.Cmd, 0, len(e.Entities))
 	for _, entity := range e.Entities {
-		key := v.prefix + ":" + e.Stage + ":" + entity.Kind + ":" + entity.Key
+		key := v.key(e.Stage, entity)
 		commands = append(commands, trackVelocity.Eval(ctx, pipe, []string{key}, e.At, e.OrderID, e.At-59))
 	}
 	if _, err := pipe.Exec(ctx); err != nil {

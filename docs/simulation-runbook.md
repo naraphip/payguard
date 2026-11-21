@@ -17,6 +17,24 @@ The API returns 201 on creation, 200 for an identical replay, 409 when either id
 | `PAYGUARD_ADDR` | `127.0.0.1:8081` |
 | `ENTITY_KEY_SECRET` | Built-in local fixture key. Keep the same key for deterministic generation. |
 | `PAYGUARD_API_URL` (Next.js) | `http://127.0.0.1:8081` |
+| `PAYGUARD_BOOKING_API_URL` (Next.js) | Uses `PAYGUARD_API_URL` by default. Set this to route booking calls to a separate local Go backend. |
+
+## Booking assessment
+
+PG-03 through PG-06 use the same configured demo merchant tokens as [booking intake](#booking-event-intake). Save the business model and booking signals in Merchant Setup. Open `/settings/booking-assessment` on the frontend, enter your local demo token, generate a proposal, and approve it. Then submit a synthetic booking with the normal mock Jev response or simulated timeout. [Requirements](requirements/booking-assessment.md) · [UI](ui/booking-assessment.md)
+
+The API uses the following request bodies. Send the same bearer credentials on each request, and include an idempotency key when creating the booking.
+
+| Method and path | Body and response |
+| --- | --- |
+| `POST /api/v1/booking/profiles/proposal` | Send `{schemaVersion, businessModel, stage, availableSignals}`. The response contains `{setup, candidate}`. The deterministic candidate contains `{schemaVersion, stage, signals}`. |
+| `POST /api/v1/booking/profiles/approve` | Send the returned `{setup, candidate}`. Approval activates the persisted profile version and returns `profileVersion`. |
+| `POST /api/v1/booking/events` | Create a booking as described above and keep its `eventId`. Omit `amountMinor` for missing and use `0` for explicit zero. |
+| `POST /api/v1/booking/events/{id}/assessment` | Send `{"jevMode":"mock"}` or `{"jevMode":"timeout"}` for a stored event belonging to the same merchant. The API returns 201 for the first assessment, 200 for a same-mode replay, or 409 if the event was already assessed with a different mode or no profile is active. The response carries the pinned lineage, feature evidence, baseline state, and mock Jev result. |
+
+To check lineage, assess a booking and save the response, approve a different profile, then resend the original assessment request. Check that the replay still returns the original profile version. To check timeout, assess a fresh booking with `jevMode` set to `timeout` and verify the `UNRESOLVED` result and `MANUAL_REVIEW` handoff.
+
+To check velocity, create five synthetic bookings for the same merchant with event timestamps less than 60 seconds apart. Assess the fifth booking and look for `bookingVelocity60s` equal to `5`, `BOOKING_VELOCITY_60S` in the rule hits, and Jev answer `ELEVATED` in mock mode. Use an unused event-time interval for a clean fixture history. Bookings exactly 60 seconds before the target, future bookings, and bookings received after the target are outside the count. An approved profile with `amountMinor` includes evidence with `presence` equal to `MISSING` and `value` equal to `null` for an omitted amount, or `OBSERVED` and `0` for an explicit zero.
 
 ## HTTP contract
 

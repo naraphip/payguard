@@ -62,6 +62,15 @@ func (a bookingAuth) merchant(headers []string) string {
 	return merchant
 }
 
+func (a bookingAuth) requireMerchant(w http.ResponseWriter, r *http.Request) string {
+	merchant := a.merchant(r.Header.Values("Authorization"))
+	if merchant == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		problem(w, http.StatusUnauthorized, "A valid demo merchant bearer token is required.")
+	}
+	return merchant
+}
+
 type bookingInput struct {
 	EventID       string    `json:"eventId"`
 	SchemaVersion int       `json:"schemaVersion"`
@@ -86,10 +95,8 @@ type bookingHandler struct {
 }
 
 func (h bookingHandler) create(w http.ResponseWriter, r *http.Request) {
-	merchant := h.auth.merchant(r.Header.Values("Authorization"))
+	merchant := h.auth.requireMerchant(w, r)
 	if merchant == "" {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		problem(w, http.StatusUnauthorized, "A valid demo merchant bearer token is required.")
 		return
 	}
 	keys := r.Header.Values("Idempotency-Key")
