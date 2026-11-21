@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS booking_events (
   PRIMARY KEY (merchant_id, event_id),
   UNIQUE (merchant_id, idempotency_key)
 );
+ALTER TABLE booking_events
+  ADD COLUMN IF NOT EXISTS product text NOT NULL DEFAULT '' CHECK (product IN ('', 'flight_ticket', 'hotel_room', 'physical', 'digital')),
+  ADD COLUMN IF NOT EXISTS sdk_status text NOT NULL DEFAULT '' CHECK (sdk_status IN ('', 'observed', 'unavailable'));
 CREATE INDEX IF NOT EXISTS booking_event_velocity_idx ON booking_events (merchant_id, occurred_at, received_at);
 CREATE TABLE IF NOT EXISTS booking_profiles (
   merchant_id text NOT NULL,

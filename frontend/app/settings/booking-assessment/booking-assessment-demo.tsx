@@ -5,49 +5,14 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { isMerchantSetup, merchantSetupStorageKey } from "../merchant-setup/contracts";
 import type { MerchantSetup } from "../merchant-setup/contracts";
+import { AssessmentResult, featureLabels } from "./assessment-result";
+import { bookingRequest, submitBookingAssessment } from "./booking-api";
+import type { Assessment, BookingAttempt, JevMode, Proposal } from "./booking-api";
 
-const endpoint = "/api/v1/booking";
 const primaryButton = "rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50";
 const secondaryButton = "rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50";
 const card = "min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:p-6";
-const featureLabels: Record<string, string> = {
-  occurredAt: "Booking timestamp",
-  amountMinor: "Booking amount",
-  bookingVelocity60s: "Distinct bookings in 60 seconds",
-};
-
-type Proposal = {
-  setup: MerchantSetup;
-  candidate: { schemaVersion: 1; stage: "booking"; signals: string[] };
-};
-type JevMode = "mock" | "timeout";
-type BookingAttempt = {
-  event: { eventId: string; schemaVersion: 1; stage: "booking"; occurredAt: string; amountMinor?: number };
-  jevMode: JevMode;
-};
-type Assessment = {
-  eventId: string;
-  profileVersion: string;
-  ruleVersion: string;
-  baseline: { state: string; version: string | null };
-  features: { name: string; value: number | string | null; presence: string; source: string }[];
-  jev: { status: string; answer: string; modelVersion: string; rubricVersion: string; question: string };
-  outcome: string;
-  handoff: string;
-  ruleHits: string[];
-};
 type Operation = "proposal" | "approve" | "assessment";
-
-async function bookingRequest<T>(path: string, token: string, body: unknown, idempotencyKey?: string): Promise<T> {
-  const headers = new Headers({ "Content-Type": "application/json", Authorization: `Bearer ${token}` });
-  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
-  const response = await fetch(`${endpoint}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
-  if (!response.ok) {
-    const problem = await response.json().catch(() => null);
-    throw new Error(typeof problem?.error === "string" ? problem.error : `Booking API returned HTTP ${response.status}.`);
-  }
-  return response.json() as Promise<T>;
-}
 
 export function BookingAssessmentDemo() {
   const [setup, setSetup] = useState<MerchantSetup | null>(null);
@@ -129,9 +94,8 @@ export function BookingAssessmentDemo() {
     setPending(attempt);
     setAssessment(null);
     void run("assessment", async () => {
-      await bookingRequest("/events", bearer, attempt.event, attempt.event.eventId);
-      const result = await bookingRequest<Assessment>(`/events/${attempt.event.eventId}/assessment`, bearer, { jevMode: attempt.jevMode });
-      setAssessment(result);
+      const { assessment } = await submitBookingAssessment(bearer, attempt);
+      setAssessment(assessment);
       setPending(null);
     });
   }
@@ -208,46 +172,5 @@ export function BookingAssessmentDemo() {
     </section>
 
     {assessment && <AssessmentResult assessment={assessment} />}
-  </div>;
-}
-
-function AssessmentResult({ assessment }: { assessment: Assessment }) {
-  const { baseline, eventId, features, handoff, jev, outcome, profileVersion, ruleHits, ruleVersion } = assessment;
-  const unresolved = outcome === "UNRESOLVED";
-  const resultLabel = unresolved ? "Unresolved" : outcome === "LOW_RISK" ? "Low risk" : "Review";
-  return <section className={card} aria-labelledby="assessment-result-heading">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 id="assessment-result-heading" className="text-lg font-semibold">Assessment result</h2>
-      <span role="status" className={`rounded-full px-3 py-1 text-xs font-semibold ${unresolved ? "bg-amber-100 text-amber-900" : "bg-indigo-100 text-indigo-900"}`}>{resultLabel}</span>
-    </div>
-    {handoff === "MANUAL_REVIEW" && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Manual review required. No payment action was taken.</p>}
-    <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-      <Detail label="Event ID" value={eventId} />
-      <Detail label="Profile version" value={profileVersion} />
-      <Detail label="Rule version" value={ruleVersion} />
-      <Detail label="Baseline" value={baseline.state === "COLD_START" ? "Cold start" : baseline.version ?? baseline.state} />
-      <Detail label="Jev status" value={jev.status === "TIMEOUT" ? "Timeout" : "Mock response"} />
-      <Detail label="Jev answer" value={jev.answer} />
-      <Detail label="Jev question" value={jev.question} />
-      <Detail label="Jev model and rubric" value={`${jev.modelVersion} · ${jev.rubricVersion}`} />
-      <Detail label="Rule hits" value={ruleHits.length ? ruleHits.join(", ") : "None"} />
-    </dl>
-    <h3 className="mt-6 text-sm font-semibold">Signal evidence</h3>
-    <dl className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200">
-      {features.map(feature => <div key={feature.name} className="grid gap-1 p-3 text-sm sm:grid-cols-[1fr_1fr] sm:gap-3">
-        <dt className="font-medium">{featureLabels[feature.name] ?? feature.name}</dt>
-        <dd className="min-w-0 text-slate-700 break-words">
-          <span>{feature.presence === "MISSING" ? "Missing" : feature.value ?? feature.presence}</span>
-          <span className="block text-xs text-slate-500">{feature.source}</span>
-        </dd>
-      </div>)}
-    </dl>
-  </section>;
-}
-
-function Detail({ label, value }: { label: string; value: string }) {
-  return <div className="min-w-0">
-    <dt className="text-xs font-medium text-slate-600">{label}</dt>
-    <dd className="mt-1 break-words">{value}</dd>
   </div>;
 }

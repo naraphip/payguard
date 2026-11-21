@@ -77,6 +77,22 @@ type bookingInput struct {
 	Stage         string    `json:"stage"`
 	OccurredAt    time.Time `json:"occurredAt"`
 	AmountMinor   *int64    `json:"amountMinor,omitempty"`
+	Product       string    `json:"product,omitempty"`
+	SDKStatus     string    `json:"sdkStatus,omitempty"`
+}
+
+func validBookingProduct(product string) bool {
+	switch product {
+	case "", "flight_ticket", "hotel_room", "physical", "digital":
+		return true
+	default:
+		return false
+	}
+}
+
+func validBookingTime(value time.Time) bool {
+	return !value.IsZero() && value.UTC().Year() >= 1 && value.UTC().Year() <= 9999 &&
+		value.Nanosecond()%1000 == 0
 }
 
 type bookingEvent struct {
@@ -111,10 +127,13 @@ func (h bookingHandler) create(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "Expected a valid booking event JSON object.")
 		return
 	}
-	if !validID.MatchString(input.EventID) || input.SchemaVersion != 1 || input.Stage != "booking" ||
-		input.OccurredAt.IsZero() || input.OccurredAt.UTC().Year() < 1 || input.OccurredAt.UTC().Year() > 9999 ||
-		input.OccurredAt.Nanosecond()%1000 != 0 || (input.AmountMinor != nil && *input.AmountMinor < 0) {
+	if !validID.MatchString(input.EventID) || input.SchemaVersion != 1 || input.Stage != bookingStage ||
+		!validBookingTime(input.OccurredAt) || (input.AmountMinor != nil && *input.AmountMinor < 0) {
 		problem(w, http.StatusBadRequest, "Expected a lowercase event UUID, schemaVersion 1, booking stage, an RFC3339 timestamp with microsecond precision, and an optional nonnegative integer amountMinor.")
+		return
+	}
+	if !validBookingProduct(input.Product) || (input.SDKStatus != "" && input.SDKStatus != "observed" && input.SDKStatus != "unavailable") {
+		problem(w, http.StatusBadRequest, "Expected a supported product and SDK status observed or unavailable when supplied.")
 		return
 	}
 	saved, created, err := h.store.saveBooking(r.Context(), merchant, keys[0], input)
@@ -135,11 +154,11 @@ func (r repository) saveBooking(ctx context.Context, merchant, key string, input
 	saved := bookingEvent{MerchantID: merchant, bookingInput: input}
 	saved.OccurredAt = input.OccurredAt.UTC()
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO booking_events (merchant_id, event_id, idempotency_key, schema_version, stage, occurred_at, amount_minor)
-		VALUES ($1, $2::text::uuid, $3, $4, $5, $6, $7)
+		INSERT INTO booking_events (merchant_id, event_id, idempotency_key, schema_version, stage, occurred_at, amount_minor, product, sdk_status)
+		VALUES ($1, $2::text::uuid, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT DO NOTHING
 		RETURNING received_at`,
-		merchant, input.EventID, key, input.SchemaVersion, input.Stage, input.OccurredAt, input.AmountMinor).Scan(&saved.ReceivedAt)
+		merchant, input.EventID, key, input.SchemaVersion, input.Stage, input.OccurredAt, input.AmountMinor, input.Product, input.SDKStatus).Scan(&saved.ReceivedAt)
 	if err == nil {
 		saved.ReceivedAt = saved.ReceivedAt.UTC()
 		return saved, true, nil
@@ -151,10 +170,10 @@ func (r repository) saveBooking(ctx context.Context, merchant, key string, input
 	// Use a new statement so a competing insert that won the unique constraint
 	// is visible. Matching both identifiers rules out changing the key on replay.
 	err = r.db.QueryRow(ctx, `
-		SELECT schema_version, stage, occurred_at, amount_minor, received_at
+		SELECT schema_version, stage, occurred_at, amount_minor, received_at, product, sdk_status
 		FROM booking_events
 		WHERE merchant_id = $1 AND event_id = $2::text::uuid AND idempotency_key = $3`,
-		merchant, input.EventID, key).Scan(&saved.SchemaVersion, &saved.Stage, &saved.OccurredAt, &saved.AmountMinor, &saved.ReceivedAt)
+		merchant, input.EventID, key).Scan(&saved.SchemaVersion, &saved.Stage, &saved.OccurredAt, &saved.AmountMinor, &saved.ReceivedAt, &saved.Product, &saved.SDKStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return bookingEvent{}, false, errBookingConflict
 	}
@@ -162,7 +181,8 @@ func (r repository) saveBooking(ctx context.Context, merchant, key string, input
 		return bookingEvent{}, false, err
 	}
 	if saved.SchemaVersion != input.SchemaVersion || saved.Stage != input.Stage ||
-		!saved.OccurredAt.Equal(input.OccurredAt) || !sameBookingAmount(saved.AmountMinor, input.AmountMinor) {
+		!saved.OccurredAt.Equal(input.OccurredAt) || !sameBookingAmount(saved.AmountMinor, input.AmountMinor) ||
+		saved.Product != input.Product || saved.SDKStatus != input.SDKStatus {
 		return bookingEvent{}, false, errBookingConflict
 	}
 	saved.OccurredAt = saved.OccurredAt.UTC()

@@ -236,6 +236,9 @@ export default function Home() {
             <span className="hidden border-l border-line pl-3 text-sm text-muted sm:inline">Simulation Lab</span>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <Link href="/settings/mock-checkout" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
+              <ShoppingBag size={14} aria-hidden /><span>Mock checkout</span>
+            </Link>
             <Link href="/settings/merchant-setup" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
               <Building2 size={14} aria-hidden /><span>Merchant setup</span>
             </Link>

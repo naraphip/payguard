@@ -33,6 +33,9 @@ func TestBookingEventHandler(t *testing.T) {
 		{"wrong token", "other", "request-1", testBookingBody, http.StatusUnauthorized, "", false},
 		{"missing key", "test-a", "", testBookingBody, http.StatusBadRequest, "", false},
 		{"invalid stage", "test-a", "request-1", strings.Replace(testBookingBody, `"booking"`, `"payment"`, 1), http.StatusBadRequest, "", false},
+		{"mock checkout metadata", "test-a", "request-1", strings.TrimSuffix(testBookingBody, "}") + `,"product":"hotel_room","sdkStatus":"unavailable"}`, http.StatusCreated, "demo-merchant-a", false},
+		{"invalid product", "test-a", "request-1", strings.TrimSuffix(testBookingBody, "}") + `,"product":"unknown"}`, http.StatusBadRequest, "", false},
+		{"invalid SDK status", "test-a", "request-1", strings.TrimSuffix(testBookingBody, "}") + `,"sdkStatus":"observedish"}`, http.StatusBadRequest, "", false},
 		{"client merchant is rejected", "test-a", "request-1", strings.TrimSuffix(testBookingBody, "}") + `,"merchantId":"demo-merchant-b"}`, http.StatusBadRequest, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,6 +69,13 @@ func TestBookingEventHandler(t *testing.T) {
 				amount, present := result["amountMinor"]
 				if result["merchantId"] != tc.wantMerchant || result["stage"] != "booking" || present != tc.wantZero || (present && amount != float64(0)) {
 					t.Fatalf("unexpected booking JSON: %v", result)
+				}
+				if tc.name == "mock checkout metadata" {
+					if result["product"] != "hotel_room" || result["sdkStatus"] != "unavailable" {
+						t.Fatalf("checkout metadata did not round-trip: %v", result)
+					}
+				} else if result["product"] != nil || result["sdkStatus"] != nil {
+					t.Fatalf("legacy booking unexpectedly contains checkout metadata: %v", result)
 				}
 			}
 		})
