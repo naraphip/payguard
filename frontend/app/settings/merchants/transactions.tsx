@@ -7,6 +7,7 @@ import { merchantDemoRequest, merchantJevStatus, merchantOutcomeLabels, merchant
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
 import { PolicyDecisionDetails } from "../../merchant-policy-decision";
 import { MerchantJevEvidence } from "../../merchant-jev-evidence";
+import { BookingComparisonDetails } from "../../merchant-booking-comparison";
 import { RiskScoreDetails, riskScoreLabel } from "../../merchant-risk-score";
 import { managementError } from "./management-access";
 import { merchantDate, merchantDetailsHref } from "./management-contracts";
@@ -214,6 +215,7 @@ function TransactionDetail({ selected, canDecide, saving, updated, onDecide }: {
     </dl>
     {selected.policyDecision && <PolicyDecisionDetails decision={selected.policyDecision} />}
     <RiskScoreDetails score={selected.policyDecision?.riskScore} />
+    {selected.policyDecision?.bookingComparison && <BookingComparisonDetails comparison={selected.policyDecision.bookingComparison} />}
     <p className="text-sm wrap-anywhere">{selected.reason}</p>
     {selected.jevReason && selected.jevReason !== selected.reason && <p className="text-sm wrap-anywhere"><strong>Jev assessment</strong> {selected.jevReason}</p>}
     <p className="text-sm wrap-anywhere"><strong>Rule hits</strong> {selected.ruleHits.length ? selected.ruleHits.join(", ") : "None"}</p>

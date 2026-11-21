@@ -207,8 +207,8 @@ func (h jevAIConfigurationHandler) diagnose(ctx context.Context, config jevAICon
 		return result
 	}
 	provider := merchantJev{key: h.apiKey, client: h.client, endpoint: h.endpoint}.withConfiguration(config)
-	threshold := int64(10000)
-	answer, status, reason := provider.requestDecision(ctx, merchantJevState{AmountMinor: 12000, ReviewThresholdMinor: &threshold, ReviewRuleMatched: true})
+	amount, threshold := int64(12000), int64(10000)
+	answer, status, reason := provider.requestDecision(ctx, merchantJevState{AmountMinor: &amount, ReviewThresholdMinor: &threshold, ReviewRuleMatched: true})
 	result.Status, result.FallbackUsed, result.Message = status, answer.FallbackUsed, reason
 	if status == "LIVE" {
 		result.Model, result.Decision = answer.Model, answer.Answers[merchantJevQuestion].Choice

@@ -69,15 +69,15 @@ func evaluateMerchantPlatformRules(input mockTransactionInput, approved []active
 	return part
 }
 
-func evaluateMerchantRuleDecision(ctx context.Context, input mockTransactionInput, platformRules []activePlatformRule, merchantRules []merchantPolicyRule, evidence merchantPolicyEvidence, rules jevRulesSnapshot, jev merchantJev) mockTransaction {
+func evaluateMerchantRuleDecision(ctx context.Context, input mockTransactionInput, platformRules []activePlatformRule, merchantRules []merchantPolicyRule, evidence merchantPolicyEvidence, rules jevRulesSnapshot, jev merchantJev, comparison *merchantBookingComparison) mockTransaction {
 	platform := evaluateMerchantPlatformRules(input, platformRules)
 	policies := evaluateMerchantPoliciesWithJev(ctx, merchantRules, evidence, jev, input.SimulateTimeout, platform.Action == "BLOCK")
-	return resolveMerchantRuleDecision(ctx, input, platform, platformRulesetVersion(platformRules), policies, rules, jev)
+	return resolveMerchantRuleDecision(ctx, input, platform, platformRulesetVersion(platformRules), policies, rules, jev, comparison)
 }
 
-func resolveMerchantRuleDecision(ctx context.Context, input mockTransactionInput, platform policyDecisionPart, platformVersion string, policies policyDecisionPart, rules jevRulesSnapshot, jev merchantJev) mockTransaction {
+func resolveMerchantRuleDecision(ctx context.Context, input mockTransactionInput, platform policyDecisionPart, platformVersion string, policies policyDecisionPart, rules jevRulesSnapshot, jev merchantJev, comparison *merchantBookingComparison) mockTransaction {
 	baseReview := platform.Action == "REVIEW" || policies.Action == "REVIEW"
-	result := evaluateJevWithoutScenario(ctx, input, rules, baseReview, jev)
+	result := evaluateJevWithoutScenario(ctx, input, rules, baseReview, jev, comparison)
 	result.RuleVersion = platformVersion
 
 	jevDecision := policyDecisionPart{Action: result.Outcome, ReasonCodes: []string{}}
@@ -91,10 +91,19 @@ func resolveMerchantRuleDecision(ctx context.Context, input mockTransactionInput
 	}
 	if input.AmountMinor == nil {
 		jevDecision.MissingSignals = []string{policyAmount}
+		switch {
+		case comparison != nil && (len(rules.Rules) > 0 || slices.Contains(policies.MissingSignals, policyAmount)):
+			jevDecision.Action = "UNRESOLVED"
+			result.Reason = "Manual review is required because an applicable rule needs the transaction amount."
+		case comparison != nil && comparison.Similarity == "INSUFFICIENT" && result.JevAnswer == "LOW_RISK":
+			jevDecision.Action = "UNRESOLVED"
+			result.Reason = "Manual review is required because the amount is missing and the bookings could not be compared."
+		}
 	}
 	policy := resolvePolicyDecision(platform, policies)
 	policy.ScoringProfileVersion = merchantRuleProfileVersion
 	policy.Jev = &jevDecision
+	policy.BookingComparison = comparison
 	if policyActionRank(jevDecision.Action) > policyActionRank(policy.Final.Action) {
 		policy.Final = policyFinal{Action: jevDecision.Action, Source: "JEV"}
 	}

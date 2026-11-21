@@ -73,9 +73,10 @@ func (j merchantJev) withConfiguration(config jevAIConfiguration) merchantJev {
 }
 
 type merchantJevState struct {
-	AmountMinor          int64  `json:"booking_amount_minor"`
-	ReviewThresholdMinor *int64 `json:"review_threshold_minor,omitempty"`
-	ReviewRuleMatched    bool   `json:"configured_review_rule_matched"`
+	AmountMinor          *int64                             `json:"booking_amount_minor"`
+	ReviewThresholdMinor *int64                             `json:"review_threshold_minor,omitempty"`
+	ReviewRuleMatched    bool                               `json:"configured_review_rule_matched"`
+	BookingComparison    *merchantBookingComparisonEvidence `json:"booking_comparison,omitempty"`
 }
 
 type merchantJevChoice struct {
@@ -112,7 +113,7 @@ func evaluateMerchantJev(ctx context.Context, input mockTransactionInput, scenar
 	}
 
 	state := merchantJevState{
-		AmountMinor:          *input.AmountMinor,
+		AmountMinor:          input.AmountMinor,
 		ReviewThresholdMinor: &scenario.ThresholdMinor,
 		ReviewRuleMatched:    result.Outcome == "REVIEW",
 	}
@@ -132,7 +133,7 @@ func evaluateMerchantJev(ctx context.Context, input mockTransactionInput, scenar
 	return result
 }
 
-func evaluateJevWithoutScenario(ctx context.Context, input mockTransactionInput, rules jevRulesSnapshot, baseReview bool, jev merchantJev) mockTransaction {
+func evaluateJevWithoutScenario(ctx context.Context, input mockTransactionInput, rules jevRulesSnapshot, baseReview bool, jev merchantJev, comparison *merchantBookingComparison) mockTransaction {
 	result := mockTransaction{
 		ID: input.ID, Source: input.Source, Product: input.Product, AmountMinor: input.AmountMinor,
 		Outcome: "LOW_RISK", ReviewState: "NONE", RuleHits: []string{},
@@ -143,20 +144,27 @@ func evaluateJevWithoutScenario(ctx context.Context, input mockTransactionInput,
 	switch {
 	case input.SimulateTimeout:
 		result.JevStatus, result.JevReason = "TIMEOUT", "Mock Jev timed out before returning a decision."
-	case input.AmountMinor == nil:
+	case input.AmountMinor == nil && comparison == nil:
 		result.JevStatus, result.JevReason = "NOT_RUN", "Jev requires the transaction amount to assess risk."
 		if jev.live {
 			result.JevVersion = jev.model
 		}
 	case jev.live:
-		assessLiveWithoutScenario(ctx, &result, baseReview || reviewRuleMatched, jev)
+		assessLiveWithoutScenario(ctx, &result, baseReview || reviewRuleMatched, jev, comparison)
 	default:
+		comparisonReview := comparison != nil && comparison.mock()
 		result.JevAnswer = "LOW_RISK"
 		result.JevReason = "Mock Jev found no review signal in the supplied evidence."
 		if baseReview || reviewRuleMatched {
 			result.JevAnswer = "REVIEW"
 			result.JevReason = "Mock Jev received a matching review signal."
+		} else if comparisonReview {
+			result.JevAnswer = "REVIEW"
+			result.JevReason = "Mock Jev found a booking change following a prior manual rejection."
 		}
+	}
+	if comparison != nil {
+		comparison.Status = result.JevStatus
 	}
 	if reviewRuleMatched {
 		return result
@@ -171,16 +179,22 @@ func evaluateJevWithoutScenario(ctx context.Context, input mockTransactionInput,
 	return result
 }
 
-func assessLiveWithoutScenario(ctx context.Context, result *mockTransaction, reviewRuleMatched bool, jev merchantJev) {
+func assessLiveWithoutScenario(ctx context.Context, result *mockTransaction, reviewRuleMatched bool, jev merchantJev, comparison *merchantBookingComparison) {
 	result.JevVersion = jev.model
-	response, resultStatus, reason := jev.requestDecision(ctx, merchantJevState{
-		AmountMinor: *result.AmountMinor, ReviewRuleMatched: reviewRuleMatched,
-	})
+	state := merchantJevState{AmountMinor: result.AmountMinor, ReviewRuleMatched: reviewRuleMatched}
+	if comparison != nil {
+		state.BookingComparison = &comparison.merchantBookingComparisonEvidence
+	}
+	response, resultStatus, reason := jev.requestDecision(ctx, state)
 	result.JevStatus, result.JevReason = resultStatus, reason
 	if resultStatus == "LIVE" {
 		choice := response.Answers[merchantJevQuestion]
 		result.JevVersion, result.JevDecisionID = response.Model, response.ID
 		result.JevAnswer, result.JevConfidence = choice.Choice, choice.Confidence
+		if comparison != nil {
+			answer := response.Answers[merchantBookingSimilarityQuestion]
+			comparison.Similarity, comparison.Confidence = answer.Choice, answer.Confidence
+		}
 		result.JevReason = "Live Jev assessed the transaction as low risk."
 		if choice.Choice == "REVIEW" {
 			result.JevReason = "Live Jev recommended review based on the transaction evidence."
@@ -204,6 +218,23 @@ func (j merchantJev) requestDecision(ctx context.Context, state merchantJevState
 			"REVIEW":   "The supplied evidence shows elevated risk or a configured review rule matched.",
 		}
 	}
+	questions := make(merchantJevQuestions, 2)
+	if state.BookingComparison != nil {
+		riskQuestion.Instructions = "Assess this synthetic transaction using the configured rule result and the supplied prior and current booking evidence. A shared mailbox provides comparison context only. Product, amount, or metadata changes alone can be legitimate. Treat null amounts and unknown comparisons as missing evidence. Never invent a threshold or assume missing amounts are zero."
+		riskQuestion.Criteria = map[string]string{
+			"LOW_RISK": "Available evidence shows no material risk and no configured review rule matched.",
+			"REVIEW":   "A configured review rule matched or the booking comparison supplies corroborated elevated risk, such as a prior manual rejection together with a changed product or amount.",
+		}
+		questions[merchantBookingSimilarityQuestion] = merchantJevQuestionDefinition{
+			Type:         "choice",
+			Instructions: "Compare only known product types, known amounts, and the locally evaluated description and custom-field comparisons in booking_comparison. Treat null amounts and UNKNOWN as missing. Similarity is independent of risk and of the prior manual disposition.",
+			Criteria: map[string]string{
+				"SIMILAR":      "Two or more known fields agree, or meaningful description or registered metadata agrees, without a known difference.",
+				"DIFFERENT":    "At least one comparable product, amount, description, or custom field differs.",
+				"INSUFFICIENT": "There is too little comparable booking evidence to establish similarity or a difference.",
+			},
+		}
+	}
 	if instructions := jevAdvisoryRubrics[j.rubric]; instructions != "" {
 		if state.ReviewThresholdMinor == nil {
 			riskQuestion.Instructions += " " + instructions
@@ -211,7 +242,8 @@ func (j merchantJev) requestDecision(ctx context.Context, state merchantJevState
 			riskQuestion.Instructions = instructions
 		}
 	}
-	return j.requestChoices(ctx, state, merchantJevQuestions{merchantJevQuestion: riskQuestion})
+	questions[merchantJevQuestion] = riskQuestion
+	return j.requestChoices(ctx, state, questions)
 }
 
 func (j merchantJev) requestChoices(ctx context.Context, state any, questions merchantJevQuestions) (merchantJevResponse, string, string) {

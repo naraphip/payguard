@@ -107,7 +107,7 @@ func TestMerchantSemanticPolicyUnknownAndLocalShortCircuit(t *testing.T) {
 			}
 			amount := int64(10)
 			transaction := resolveMerchantRuleDecision(t.Context(), mockTransactionInput{AmountMinor: &amount},
-				policyDecisionPart{Action: "CHALLENGE"}, "platform-v1", decision, jevRulesSnapshot{}, merchantJev{})
+				policyDecisionPart{Action: "CHALLENGE"}, "platform-v1", decision, jevRulesSnapshot{}, merchantJev{}, nil)
 			if transaction.Outcome != "UNRESOLVED" || transaction.ReviewState != "NEEDS_DECISION" {
 				t.Fatalf("unresolved rule fails to require manual review: %+v", transaction)
 			}

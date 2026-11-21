@@ -8,6 +8,7 @@ import {
   getMerchantDemoRole, getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantOutcomeLabels, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken,
 } from "./merchant-demo";
 import { MerchantJevEvidence } from "./merchant-jev-evidence";
+import { BookingComparisonDetails } from "./merchant-booking-comparison";
 import { PolicyDecisionDetails } from "./merchant-policy-decision";
 import { RiskScoreDetails } from "./merchant-risk-score";
 import { merchantDate, merchantDetailsHref } from "./settings/merchants/management-contracts";
@@ -79,10 +80,8 @@ function sourceProducts(source: ScenarioSource, declared: string[]) {
 
 function customFields(context?: DemoScenarioContext, product?: SimulationProduct) {
   if (!context || !product) return [];
-  const usesDescription = context.policies.some(policy => policy.products.includes(product) &&
-    policy.conditions.rules.some(condition => condition.field === "transaction.description"));
   return context.fieldRegistry?.filter(field => field.supportedProductTypes.includes(product) &&
-    (field.fieldName.startsWith("custom_") || (usesDescription && field.fieldName === "transaction.description"))) ?? [];
+    (field.fieldName.startsWith("custom_") || field.fieldName === "transaction.description")) ?? [];
 }
 
 function readAccountAge(input?: string) {
@@ -425,7 +424,7 @@ export function DemoScenarioCustomerIdField({ value, onChange }: { value: string
     <input id={id} className="control mt-1.5" value={value} placeholder="customer-a (optional)"
       autoComplete="off" autoCapitalize="none" spellCheck={false} aria-describedby={`${id}-help`}
       onChange={event => onChange(event.currentTarget.value)} />
-    <p id={`${id}-help`} className="mt-1.5 text-xs text-muted">Use the same customer ID for this merchant on each booking. Full synthetic addresses also detect changes within one domain.</p>
+    <p id={`${id}-help`} className="mt-1.5 text-xs text-muted">Guest bookings can leave this blank. Use the same full synthetic email to compare guest bookings at this merchant.</p>
   </div>;
 }
 
@@ -437,9 +436,9 @@ export function DemoScenarioCustomSignals({ flow, values, onChange }: {
   const fields = customFields(flow.context, flow.product);
   if (!fields.length) return null;
   return <fieldset className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
-    <legend className="mb-1 text-sm font-semibold">Additional rule evidence</legend>
+    <legend className="mb-1 text-sm font-semibold">Additional transaction evidence</legend>
     {fields.some(field => field.fieldName === "transaction.description") && <p className="text-xs text-muted sm:col-span-2">
-      Use non-identifying test details in the transaction description. Jev may use it to assess meaning.
+      Use a synthetic product description. Booking comparisons check whether the descriptions match. Jev may use the text to evaluate semantic rules.
     </p>}
     {fields.map(field => {
       const name = field.fieldName;
@@ -526,6 +525,7 @@ const reviewLabels = { NONE: "No manual review", NEEDS_DECISION: "Needs decision
 
 export function DemoScenarioResult({ transaction, merchantName }: { transaction: DemoTransaction; merchantName: string }) {
   const final = transaction.policyDecision?.finalDecision;
+  const comparison = transaction.policyDecision?.bookingComparison;
   const result = final ? policyActionLabels[final.action] ?? final.action : merchantOutcomeLabels[transaction.outcome];
   const allowed = final ? final.action === "ALLOW" : transaction.outcome === "LOW_RISK";
   const title = final ? "Transaction decision" : "Jev result";
@@ -539,6 +539,7 @@ export function DemoScenarioResult({ transaction, merchantName }: { transaction:
     </div>
     {transaction.policyDecision && <div className="mt-3"><PolicyDecisionDetails decision={transaction.policyDecision} /></div>}
     <div className="mt-3"><RiskScoreDetails score={transaction.policyDecision?.riskScore} /></div>
+    {comparison && <div className="mt-3"><BookingComparisonDetails comparison={comparison} /></div>}
     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
       {final && <div><dt className="text-xs text-muted">Risk result</dt><dd className="font-semibold">{merchantOutcomeLabels[transaction.outcome]}</dd></div>}
       <div className="min-w-0"><dt className="text-xs text-muted">Merchant</dt><dd className="break-words font-semibold">{merchantName}</dd></div>

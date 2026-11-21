@@ -81,6 +81,9 @@ ALTER TABLE merchant_demo_transactions
 CREATE INDEX IF NOT EXISTS merchant_demo_transactions_customer_history_idx
   ON merchant_demo_transactions(merchant_id, customer_id_ref, created_at DESC, id DESC)
   WHERE customer_id_ref <> '';
+CREATE INDEX IF NOT EXISTS merchant_demo_transactions_mailbox_history_idx
+  ON merchant_demo_transactions(merchant_id, customer_mailbox_ref, created_at DESC, id DESC)
+  WHERE customer_mailbox_ref <> '';
 DO $migration$
 BEGIN
   IF NOT EXISTS (
@@ -467,6 +470,7 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 			return err
 		}
 
+		var fields []merchantCapability
 		if input.ScenarioID == "" {
 			profile, _, err := readMerchantPolicyContext(ctx, tx, merchantID)
 			if err != nil {
@@ -475,6 +479,7 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 			if !slices.Contains(profile.Products, input.Product) {
 				return merchantPolicyValidationError{errors.New("Choose a product available for this merchant.")}
 			}
+			fields = profile.FieldRegistry
 		}
 		if err := validateTransactionCustomSignals(ctx, tx, merchantID, input.CustomSignals); err != nil {
 			return err
@@ -513,6 +518,10 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		decisionCtx, cancelDecision := context.WithDeadline(ctx, decisionDeadline)
 		defer cancelDecision()
 		if input.ScenarioID == "" {
+			comparison, err := readMerchantBookingComparison(ctx, tx, merchantID, mailboxRef, input, fields)
+			if err != nil {
+				return err
+			}
 			changedEmail, err := customerChangedDisposableEmail(ctx, tx, merchantID, customerRef, input.CustomerEmailDomain, mailboxRef)
 			if err != nil {
 				return err
@@ -521,7 +530,7 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 			if err != nil {
 				return err
 			}
-			result = evaluateMerchantRuleDecision(decisionCtx, input, platformRules, activePolicies, evidence, jevRules, jev)
+			result = evaluateMerchantRuleDecision(decisionCtx, input, platformRules, activePolicies, evidence, jevRules, jev, comparison)
 			result.PolicyDecision.RiskScore = calculateMerchantRiskScore(input, result, changedEmail)
 		} else {
 			merchant := evaluateMerchantPoliciesWithJev(decisionCtx, activePolicies, evidence, jev, input.SimulateTimeout, false)

@@ -360,12 +360,13 @@ type policyFinal struct {
 }
 
 type transactionPolicyDecision struct {
-	Platform              policyDecisionPart  `json:"platformDecision"`
-	Merchant              policyDecisionPart  `json:"merchantPolicyDecision"`
-	Jev                   *policyDecisionPart `json:"jevDecision,omitempty"`
-	Final                 policyFinal         `json:"finalDecision"`
-	ScoringProfileVersion string              `json:"scoringProfileVersion,omitempty"`
-	RiskScore             *merchantRiskScore  `json:"riskScore,omitempty"`
+	Platform              policyDecisionPart         `json:"platformDecision"`
+	Merchant              policyDecisionPart         `json:"merchantPolicyDecision"`
+	Jev                   *policyDecisionPart        `json:"jevDecision,omitempty"`
+	Final                 policyFinal                `json:"finalDecision"`
+	ScoringProfileVersion string                     `json:"scoringProfileVersion,omitempty"`
+	RiskScore             *merchantRiskScore         `json:"riskScore,omitempty"`
+	BookingComparison     *merchantBookingComparison `json:"bookingComparison,omitempty"`
 }
 
 func policyActionRank(action string) int {

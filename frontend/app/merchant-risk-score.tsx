@@ -45,7 +45,7 @@ export function RiskScoreDetails({ score }: { score?: MerchantRiskScore }) {
     <summary className="cursor-pointer py-3 font-semibold text-ink">
       <span className="ml-1">Risk score</span>
       <span className={`ml-2 tabular-nums ${score.value === null ? "text-amber-900" : "text-accent"}`}>{riskScoreLabel(score)}</span>
-      {score.partial && score.value !== null && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900">Partial evidence</span>}
+      {score.partial && score.value !== null && <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900">Partial evidence</span>}
     </summary>
     <div className="border-t border-line pb-3 pt-2">
       <p className="text-xs text-muted">Use this advisory index alongside the final decision. Points show the effect of available evidence. A matched rule or Jev review adds points only if its minimum exceeds the current score.</p>

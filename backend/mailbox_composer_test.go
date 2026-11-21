@@ -79,12 +79,26 @@ func TestScopedMailboxInterpretationAndTransactionPostgres(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		for _, value := range []string{address, "example.test", digest, peerDigest, firstRef, "mailbox"} {
+		for _, value := range []string{address, "example.test", digest, peerDigest, firstRef, `"mailbox"`} {
 			if value != "" && strings.Contains(string(data), value) {
 				t.Error("Jev received private mailbox evidence.")
 			}
 		}
-		return testJevResponse(http.StatusOK, `{"id":"scoped-mailbox-test","model":"typesafe/jev-1.14","answers":{"booking_risk":{"type":"choice","choice":"LOW_RISK"}}}`), nil
+		var payload struct {
+			Questions merchantJevQuestions `json:"questions"`
+		}
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return nil, err
+		}
+		answers := map[string]merchantJevChoice{merchantJevQuestion: {Type: "choice", Choice: "LOW_RISK"}}
+		if _, requested := payload.Questions[merchantBookingSimilarityQuestion]; requested {
+			answers[merchantBookingSimilarityQuestion] = merchantJevChoice{Type: "choice", Choice: "SIMILAR"}
+		}
+		body, err := json.Marshal(merchantJevResponse{Model: defaultMerchantJevModel, ID: "scoped-mailbox-test", Answers: answers})
+		if err != nil {
+			return nil, err
+		}
+		return testJevResponse(http.StatusOK, string(body)), nil
 	})
 	configuration, err := readJevAIConfiguration(t.Context(), db)
 	if err != nil {

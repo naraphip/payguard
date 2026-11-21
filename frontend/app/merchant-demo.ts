@@ -71,12 +71,25 @@ export type MerchantRiskScore = {
   factors: { code: string; points: number }[];
 };
 
+type ComparedBooking = { product: string; amountMinor: number | null };
+
+export type MerchantBookingComparison = {
+  prior: ComparedBooking & { disposition?: DemoTransaction["disposition"] };
+  current: ComparedBooking;
+  descriptionComparison: "SAME" | "CHANGED" | "UNKNOWN";
+  customFieldComparison?: { same: number; changed: number };
+  similarity?: "SIMILAR" | "DIFFERENT" | "INSUFFICIENT";
+  status: DemoTransaction["jevStatus"];
+  confidence?: number;
+};
+
 export type MerchantPolicyDecision = {
   platformDecision: MerchantPolicyDecisionPart;
   merchantPolicyDecision: MerchantPolicyDecisionPart;
   jevDecision?: MerchantPolicyDecisionPart;
   finalDecision: { action: string; source: string };
   riskScore?: MerchantRiskScore;
+  bookingComparison?: MerchantBookingComparison;
 };
 
 export const merchantPolicyProducts = {
