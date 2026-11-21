@@ -17,14 +17,15 @@ import (
 const merchantDemoPath = "/api/v1/booking/demo/merchants"
 
 var (
+	errMerchantCreateReplay = errors.New("This creation request was already used. Find the existing merchant in the directory. Its credential is shown only once.")
 	errDemoNameInUse        = errors.New("A scenario with this name already exists for this merchant.")
 	errDemoReplayConflict   = errors.New("Transaction ID is already used for a different request.")
 	errDemoDecisionConflict = errors.New("This transaction does not have an open review for that decision.")
 )
 
 type mockMerchantService struct {
-	repo         repository
 	jev          merchantJev
+	repo         repository
 	adminHash    [sha256.Size]byte
 	adminEnabled bool
 }
@@ -35,15 +36,21 @@ type mockMerchantActor struct {
 }
 
 type mockMerchant struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	Setup     *merchantSetup `json:"setup,omitempty"`
-	Scenarios []mockScenario `json:"scenarios"`
+	ID                string                     `json:"id"`
+	Name              string                     `json:"name"`
+	Description       string                     `json:"description,omitempty"`
+	CreatedAt         *time.Time                 `json:"createdAt,omitempty"`
+	Setup             *merchantSetup             `json:"setup,omitempty"`
+	PolicyIntegration *merchantPolicyIntegration `json:"policyIntegration,omitempty"`
+	Scenarios         []mockScenario             `json:"scenarios"`
 }
 
 type mockMerchantInput struct {
-	Name  string         `json:"name"`
-	Setup *merchantSetup `json:"setup"`
+	Name                string                     `json:"name"`
+	Description         *string                    `json:"description,omitempty"`
+	CreationRequestHash []byte                     `json:"-"`
+	Setup               *merchantSetup             `json:"setup"`
+	PolicyIntegration   *merchantPolicyIntegration `json:"policyIntegration,omitempty"`
 }
 
 type mockScenario struct {
@@ -55,46 +62,57 @@ type mockScenario struct {
 }
 
 type mockTransactionInput struct {
-	ID              string `json:"id"`
-	ScenarioID      string `json:"scenarioId"`
-	Source          string `json:"source"`
-	Product         string `json:"product,omitempty"`
-	AmountMinor     *int64 `json:"amountMinor"`
-	SimulateTimeout bool   `json:"simulateTimeout"`
+	ID                  string `json:"id"`
+	ScenarioID          string `json:"scenarioId"`
+	Source              string `json:"source"`
+	Product             string `json:"product,omitempty"`
+	AmountMinor         *int64 `json:"amountMinor"`
+	SimulateTimeout     bool   `json:"simulateTimeout"`
+	CustomerEmailDomain string `json:"customerEmailDomain,omitempty"`
 }
 
 type mockTransaction struct {
-	ID              string     `json:"id"`
-	MerchantID      string     `json:"merchantId"`
-	ScenarioID      string     `json:"scenarioId"`
-	ScenarioName    string     `json:"scenarioName"`
-	ScenarioVersion int        `json:"scenarioVersion"`
-	RuleVersion     string     `json:"ruleVersion"`
-	JevRuleVersion  string     `json:"jevRuleVersion,omitempty"`
-	ThresholdMinor  int64      `json:"thresholdMinor"`
-	Source          string     `json:"source"`
-	Product         string     `json:"product,omitempty"`
-	AmountMinor     *int64     `json:"amountMinor"`
-	Outcome         string     `json:"outcome"`
-	Reason          string     `json:"reason"`
-	RuleHits        []string   `json:"ruleHits"`
-	JevStatus       string     `json:"jevStatus"`
-	JevVersion      string     `json:"jevVersion"`
-	JevAnswer       string     `json:"jevAnswer,omitempty"`
-	JevDecisionID   string     `json:"jevDecisionId,omitempty"`
-	JevConfidence   *float64   `json:"jevConfidence,omitempty"`
-	ReviewState     string     `json:"reviewState"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	Disposition     *string    `json:"disposition,omitempty"`
-	DecidedBy       *string    `json:"decidedBy,omitempty"`
-	DecidedAt       *time.Time `json:"decidedAt,omitempty"`
-	simulateTimeout bool
+	ID                      string     `json:"id"`
+	MerchantID              string     `json:"merchantId"`
+	ScenarioID              string     `json:"scenarioId"`
+	ScenarioName            string     `json:"scenarioName"`
+	ScenarioVersion         int        `json:"scenarioVersion"`
+	RuleVersion             string     `json:"ruleVersion"`
+	JevRuleVersion          string     `json:"jevRuleVersion,omitempty"`
+	ThresholdMinor          int64      `json:"thresholdMinor"`
+	Source                  string     `json:"source"`
+	Product                 string     `json:"product,omitempty"`
+	AmountMinor             *int64     `json:"amountMinor"`
+	Outcome                 string     `json:"outcome"`
+	Reason                  string     `json:"reason"`
+	RuleHits                []string   `json:"ruleHits"`
+	JevStatus               string     `json:"jevStatus"`
+	JevVersion              string     `json:"jevVersion"`
+	ReviewState             string     `json:"reviewState"`
+	CreatedAt               time.Time  `json:"createdAt"`
+	Disposition             *string    `json:"disposition,omitempty"`
+	DecidedBy               *string    `json:"decidedBy,omitempty"`
+	DecidedAt               *time.Time `json:"decidedAt,omitempty"`
+	JevAnswer               string     `json:"jevAnswer,omitempty"`
+	JevDecisionID           string     `json:"jevDecisionId,omitempty"`
+	JevConfidence           *float64   `json:"jevConfidence,omitempty"`
+	JevConfigurationVersion int64      `json:"jevConfigurationVersion,omitempty"`
+	simulateTimeout         bool
+	CustomerEmailDomain     string                     `json:"-"`
+	PolicyDecision          *transactionPolicyDecision `json:"policyDecision,omitempty"`
 }
 
-func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string, jev merchantJev) {
-	service := mockMerchantService{repo: repo, jev: jev, adminHash: sha256.Sum256([]byte(adminToken)), adminEnabled: adminToken != ""}
+func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string, options ...merchantJev) {
+	service := mockMerchantService{repo: repo, adminHash: sha256.Sum256([]byte(adminToken)), adminEnabled: adminToken != ""}
+	if len(options) > 0 {
+		service.jev = options[0]
+	}
 	mux.HandleFunc("GET "+merchantDemoPath, service.listMerchants)
 	mux.HandleFunc("POST "+merchantDemoPath, service.createMerchant)
+	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}", service.managedMerchantDetails)
+	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/policies", service.managedMerchantPolicies)
+	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/policies/{id}", service.managedMerchantPolicyHistory)
+	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/audit", service.managedMerchantAudit)
 	mux.HandleFunc("PUT "+merchantDemoPath+"/{merchantId}", service.updateMerchant)
 	mux.HandleFunc("DELETE "+merchantDemoPath+"/{merchantId}", service.deleteMerchant)
 	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/scenarios", service.saveScenario)
@@ -104,6 +122,7 @@ func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/transactions/{transactionId}", service.getTransaction)
 	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/transactions/{transactionId}/decision", service.decideTransaction)
 	service.registerRules(mux)
+	service.registerMerchantPolicies(mux)
 }
 
 func (s mockMerchantService) authorize(w http.ResponseWriter, r *http.Request, adminOnly bool) (mockMerchantActor, bool) {
@@ -155,7 +174,7 @@ func demoWriteError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		problem(w, http.StatusNotFound, "Merchant, scenario, or transaction not found.")
-	case errors.Is(err, errDemoNameInUse), errors.Is(err, errDemoReplayConflict), errors.Is(err, errDemoDecisionConflict):
+	case errors.Is(err, errMerchantCreateReplay), errors.Is(err, errDemoNameInUse), errors.Is(err, errDemoReplayConflict), errors.Is(err, errDemoDecisionConflict):
 		problem(w, http.StatusConflict, err.Error())
 	default:
 		bookingRiskUnavailable(w, err)
@@ -177,11 +196,28 @@ func readMockMerchantInput(w http.ResponseWriter, r *http.Request) (mockMerchant
 		problem(w, http.StatusUnprocessableEntity, "Enter a name of 1 to 100 characters without control characters.")
 		return mockMerchantInput{}, false
 	}
+	if input.Description != nil {
+		description := strings.TrimSpace(*input.Description)
+		if utf8.RuneCountInString(description) > 500 || strings.IndexFunc(description, func(r rune) bool {
+			return unicode.IsControl(r) && r != '\n' && r != '\t'
+		}) >= 0 {
+			problem(w, http.StatusUnprocessableEntity, "Business description must be at most 500 characters.")
+			return mockMerchantInput{}, false
+		}
+		input.Description = &description
+	}
 	if input.Setup != nil {
 		if err := validateBookingSetup(input.Setup); err != nil {
 			problem(w, http.StatusUnprocessableEntity, err.Error())
 			return mockMerchantInput{}, false
 		}
+	}
+	if input.PolicyIntegration != nil {
+		if !input.PolicyIntegration.valid() {
+			problem(w, http.StatusUnprocessableEntity, "Choose distinct supported catalogue products.")
+			return mockMerchantInput{}, false
+		}
+		input.PolicyIntegration.Products = sortedPolicyValues(input.PolicyIntegration.Products)
 	}
 	return input, true
 }
@@ -203,6 +239,10 @@ func (s mockMerchantService) listMerchants(w http.ResponseWriter, r *http.Reques
 		respond(w, http.StatusOK, map[string]any{"merchants": []mockMerchant{merchant}, "role": "merchant"})
 		return
 	}
+	if len(r.URL.Query()) > 0 {
+		s.managedMerchantList(w, r)
+		return
+	}
 	merchants, err := s.repo.listMockMerchants(r.Context(), "")
 	if err != nil {
 		demoWriteError(w, err)
@@ -218,6 +258,14 @@ func (s mockMerchantService) createMerchant(w http.ResponseWriter, r *http.Reque
 	input, ok := readMockMerchantInput(w, r)
 	if !ok {
 		return
+	}
+	if keys := r.Header.Values("Idempotency-Key"); len(keys) > 0 {
+		if len(keys) != 1 || !bookingKeyPattern.MatchString(keys[0]) {
+			problem(w, http.StatusBadRequest, "Expected one Idempotency-Key of 1 to 128 printable ASCII characters without spaces.")
+			return
+		}
+		hash := sha256.Sum256([]byte(keys[0]))
+		input.CreationRequestHash = hash[:]
 	}
 	merchant, token, err := s.repo.createMockMerchant(r.Context(), input)
 	if err != nil {
@@ -319,6 +367,10 @@ func (s mockMerchantService) listTransactions(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	if len(r.URL.Query()) > 0 {
+		s.managedTransactionPage(w, r, id)
+		return
+	}
 	transactions, err := s.repo.listMockTransactions(r.Context(), id)
 	if err != nil {
 		demoWriteError(w, err)
@@ -343,8 +395,15 @@ func (s mockMerchantService) createTransaction(w http.ResponseWriter, r *http.Re
 		problem(w, http.StatusUnprocessableEntity, "Enter valid transaction and scenario IDs, source, product, and optional amount in minor units.")
 		return
 	}
-	// Finish a validated assessment if the caller disconnects during the provider
-	// call, so the caller can recover the saved decision with its transaction ID.
+	if input.CustomerEmailDomain != "" {
+		var err error
+		input.CustomerEmailDomain, err = normalizePolicyDomain(input.CustomerEmailDomain)
+		if err != nil {
+			problem(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+	}
+	// Preserve an idempotently recoverable result even when the UI disconnects.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 12*time.Second)
 	defer cancel()
 	transaction, created, err := s.repo.saveMockTransaction(ctx, id, input, s.jev)

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { merchantDemoRequest } from "../../merchant-demo";
 import { examplePrompts, parseProposal, type Proposal } from "./proposal";
@@ -111,8 +112,11 @@ export function JevRulesPanel({ merchant }: {
   return (
     <Container className={merchant ? "min-w-0 space-y-6" : "mx-auto min-w-0 max-w-5xl space-y-6 p-4 md:p-8"}>
       <header>
-        <Heading className={merchant ? "text-lg font-semibold" : "text-3xl font-bold text-slate-900"}>Jev Rules</Heading>
-        <p className="mt-2 text-slate-600">{merchant ? `Review amount-based rules for ${merchant.name}.` : "Author, preview, and publish merchant review rules for the local booking evaluator."}</p>
+        {!merchant && <Link href="/settings/merchant-rules" className="mb-2 inline-block text-sm font-semibold text-accent hover:underline">← Merchant AI Rules</Link>}
+        <Heading className={merchant ? "text-lg font-semibold" : "text-3xl font-bold text-slate-900"}>{merchant ? "Booking review rules (Jev)" : "Legacy booking review rules"}</Heading>
+        <p className="mt-2 text-slate-600">{merchant
+          ? `Review amount-based Jev conditions for ${merchant.name}.`
+          : "Author, preview, and publish review rules using the legacy booking credential."}</p>
       </header>
 
       <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">

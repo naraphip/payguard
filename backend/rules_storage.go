@@ -51,12 +51,46 @@ func (r repository) draftRules(ctx context.Context, tenant string) ([]systemRule
 }
 
 func (r repository) createDraft(ctx context.Context, tenant string, input ruleInput) (systemRule, error) {
+	return insertSystemDraft(ctx, r.db, tenant, input)
+}
+
+type systemDraftWriter interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func insertSystemDraft(ctx context.Context, query systemDraftWriter, tenant string, input ruleInput) (systemRule, error) {
 	id, err := attemptID()
 	if err != nil {
 		return systemRule{}, err
 	}
-	return readDraft(r.db.QueryRow(ctx, `INSERT INTO system_rule_drafts (tenant_id, rule_id, input)
+	return readDraft(query.QueryRow(ctx, `INSERT INTO system_rule_drafts (tenant_id, rule_id, input)
 		VALUES ($1,$2,$3) RETURNING rule_id, input, version, updated_at`, tenant, id, input))
+}
+
+func (r repository) savePlatformComposerDraft(ctx context.Context, input ruleInput) (systemRule, bool, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return systemRule{}, false, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Serialize simultaneous retries for the shared platform draft catalogue.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(95144520)`); err != nil {
+		return systemRule{}, false, err
+	}
+	rule, err := readDraft(tx.QueryRow(ctx, `SELECT rule_id, input, version, updated_at FROM system_rule_drafts
+		WHERE tenant_id=$1 AND input=$2::jsonb ORDER BY updated_at DESC, rule_id DESC LIMIT 1 FOR SHARE`, merchantID, input))
+	created := errors.Is(err, pgx.ErrNoRows)
+	if created {
+		rule, err = insertSystemDraft(ctx, tx, merchantID, input)
+	}
+	if err != nil {
+		return systemRule{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return systemRule{}, false, err
+	}
+	return rule, created, nil
 }
 
 func (r repository) updateDraft(ctx context.Context, tenant, id string, version int64, input ruleInput) (systemRule, error) {

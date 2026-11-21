@@ -7,4 +7,4 @@ Add a note for each feature or screen with its status, user flow, interaction st
 - [Merchant setup](merchant-setup.md)
 - [Booking assessment](booking-assessment.md)
 - [Mock checkout](mock-checkout.md)
-- [Jev Rules](jev-rules.md)
+- [Booking review rules](jev-rules.md)
