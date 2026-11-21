@@ -7,6 +7,28 @@ Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4
 - Independent fixture and workflow YAML checks passed. A live local sync changed 18 activity records in Notion. The GitHub Actions repository secret and variable are configured.
 - The [manual GitHub Actions run](https://github.com/pwatakul/payguard/actions/runs/44868685163) succeeded. The Notion health row showed Last Success at 11:59 Bangkok time on 21 November 2026. Verification of two scheduled runs is ongoing.
 
+## Merchant transaction Risk Score and email changes
+
+Merchant-selected Mock Checkout, Simulation Lab, and **Transactions** show the saved advisory score and its contributing factors. The initial scoring commit `56ee4e5` adds `merchant-risk-v1`. `merchant-risk-v2` adds an optional merchant-scoped Customer ID and 15 points for a confirmed address change after the previous disposable-email booking for that customer. The recorded rule and Jev actions drive the final decision. [Score formula and API contract](requirements/decision-engine.md#merchant-transaction-risk-score) · [Three-transaction walkthrough](simulation-runbook.md#test-the-risk-score-and-email-changes)
+
+- Independent HTTP checks against isolated Go, PostgreSQL, and Redis verified tool parity, account-age and disposable-domain points, incomplete Jev evidence, score persistence on replay and manual disposition, an exact email block with an 85-point score, and tenant isolation. The full initial Go suite, frontend TypeScript check, and four existing Node tests passed.
+- Independent v2 verification passed all 331 Go tests and subtests in both standard and race runs on disposable PostgreSQL. Go vet, frontend production build, TypeScript, and four Node tests passed. Chrome at desktop and 390 px widths verified the score and same-customer email-change flow. Live Jev returned **Low risk** and added 0 points to a disposable-email booking whose saved score was 45.
+
+## Guest booking comparison with Jev
+
+Merchant-selected Mock Checkout and Simulation Lab compare a repeat full email to the latest booking at the same merchant. The saved comparison shows whether Jev considers the bookings similar and whether it recommends review. [Comparison contract](requirements/decision-engine.md#guest-booking-comparison) · [Guest walkthrough](simulation-runbook.md#compare-guest-bookings-with-jev)
+
+- The full Go suite passed 340 tests and subtests. Go vet passed. A live test with `typesafe/jev-1.14-20261014` compared two physical goods guest bookings with amounts of 7,900 and 8,100 minor units and changed descriptions. Jev returned **Different** with 96% similarity confidence and **Low risk**. Exact replay preserved the comparison. Chrome confirmed the comparison at desktop and 390 px widths.
+
+## Transaction status and merchant rule navigation
+
+Merchant-selected transaction results, the ledger, and dashboard show **Approved**, **Rejected**, or **Review**. The ledger has one **Status** filter. Platform Admin can **Approve** or **Reject** any **Review**, including Challenge. The detail shows the saved manual decision with the actor and time. Administrators reach shop policies through **Merchants → selected shop → AI Rule**. Merchants retain their scoped **Merchant AI Rules** entry. Legacy links still open the rules flow. [Status contract](requirements/decision-engine.md#transaction-status-and-manual-review) · [Review walkthrough](simulation-runbook.md#merchant-management)
+
+- The combined Go suite passed all 340 tests and subtests in both standard and race runs, with zero failures or skips. Go vet, frontend production build, TypeScript, and four Node tests passed.
+- Chrome at desktop and 390 px widths verified the **Approved**, **Rejected**, and **Review** states, immediate changes after manual decisions, and the saved manual decision, actor, and time after reload. The original score and assessment evidence remained exact. The scoped Merchant view could read the decisions, and review actions required Platform Admin. Dashboard counts matched the selected merchant's four ledger rows, with two Approved, one Rejected, and one Review.
+- Chrome verified that Platform Admin could create a scoped two-minute rule through **Merchants → selected shop → AI Rule**, and that the Merchant workspace retained its scoped **Merchant AI Rules** entry.
+- The local backend reported healthy on `1f85cd5`. The three status filters through the port 3001 preview returned two Approved, zero Rejected, and zero Review for the existing Test 001 ledger. Transaction `50b5cbb5-83d4-42b1-9dce-ea02cd740f2d` retained its manual approval and original Jev timeout evidence.
+
 ## Unified merchant AI Rule
 
 Platform Admin and Merchant now share **AI Rule** for merchant rule authoring and the saved list. Existing amount-based booking review rules stay editable in that list. Merchant access stays scoped to its own rules and read-only ledger. The local proxy distinguishes missing API routes, connection failures, timeouts and unreadable replies. Rule field loading provides a retry action. [Rule contract](requirements/ai-rule-management.md) · [Runbook](simulation-runbook.md#ai-rule-composer)

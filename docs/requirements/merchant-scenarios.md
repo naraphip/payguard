@@ -6,31 +6,31 @@ Platform Admin sets up a merchant and its evidence in **Merchants**, configures 
 
 | Area | Behavior |
 | --- | --- |
-| Local administrator | The opt-in loopback preview uses a server-side demo administrator credential for merchant management, scoped policies, Jev review rules, Platform drafts and AI Configuration. Platform Admin can view transactions across merchants and resolve pending cases. Independent checker approval still governs publishing global Platform drafts. |
+| Local administrator | The opt-in loopback preview uses a server-side demo administrator credential for merchant management, scoped policies, Jev review rules, Platform drafts and AI Configuration. Platform Admin can view transactions across merchants and use **Approve** or **Reject** on any **Review** transaction. Independent checker approval still governs publishing global Platform drafts. |
 | Merchant | The issued tenant credential grants access to the merchant's own read-only ledger, versioned Merchant Policies, and editing or removal of its existing booking review rules. Platform-wide routes require Platform Admin. |
 | Configuration | Declare products and signals on the merchant record. The shared typed field catalogue supplies conditions in the rule editor and evidence inputs in both test tools. Product determines the booking or checkout stage. |
 | Decision | The tools evaluate built-in and approved Platform Rules, active Merchant Policies including semantic conditions, published amount-based booking review rules, and the configured Jev advisory. Unsupported or omitted signals appear as unavailable for applicable rules. |
-| Evidence | A saved assessment records the independent rule decisions, final action and its source, applicable rule and Jev configuration versions, and the selected merchant and product. A downstream disposition has its own actor and time. |
+| Evidence | A saved assessment records the independent rule decisions, final action and its source, applicable rule and Jev configuration versions, and the selected merchant and product. Current assessments also record the Risk Score and any booking comparison. The manual decision shows its actor and time. |
 | Compatibility | The test tools submit through the existing tenant transaction endpoint without `scenarioId`. Historical API callers may submit it explicitly for the legacy scenario path. The same transaction ID and input replay the saved result. A changed input under the same ID returns a conflict. |
 
 ## Current risk results
 
-| Risk and final action | Queue behavior |
+| Status | Underlying assessment and actions |
 | --- | --- |
-| Low risk and Allow | Appears in the ledger with its assessment. |
-| High risk and Block | Appears with the matching platform or merchant policy evidence. |
-| Review and Challenge | Shows the challenge action. |
-| Review and Review | Appears under **Needs decision** for manual review. |
-| Review (unresolved) and Unresolved | Appears under **Needs decision** when the final decision cannot be resolved. Saved API outcome is `UNRESOLVED`. |
+| **Approved** | Automated Allow or Low risk, or a saved manual approval. |
+| **Rejected** | Automated Block or High risk, or a saved manual rejection. |
+| **Review** | Automated Review, Unresolved, or Challenge awaiting **Approve** or **Reject** by Platform Admin. |
 
-Final actions normally rank Block, Review, Challenge, Unresolved, and Allow in descending order. An applicable semantic condition that remains unresolved sends the transaction to **Review (unresolved)** unless another rule conclusively blocks it. A Platform decision wins a tie with Merchant Policy. A local decision wins a tie with the Jev advisory. The original Jev answers, served model, provider ID, and failure status are available whenever returned. Mock is the deployment default. Live Jev uses bounded booking evidence for the advisory and bounded text for needed semantic checks. [Jev configuration](decision-engine.md#jev-configuration)
+The ledger and dashboard share these three statuses. The transaction detail preserves the automated action, risk result, and assessment evidence after a manual decision changes the visible status. An unresolved assessment can still have a saved API outcome of `UNRESOLVED`. [Status contract](decision-engine.md#transaction-status-and-manual-review)
+
+Final actions normally rank Block, Review, Challenge, Unresolved, and Allow in descending order. An applicable unresolved semantic condition sends the transaction to **Review** with **Unresolved** in its decision evidence unless another rule conclusively blocks it. A Platform decision wins a tie with Merchant Policy. A local decision wins a tie with the Jev advisory. The original Jev answers, served model, provider ID, and failure status are available whenever returned. Mock is the deployment default. Live Jev uses bounded booking evidence for the advisory and bounded text for needed semantic checks. [Jev configuration](decision-engine.md#jev-configuration)
 
 ## Acceptance checks
 
 1. Create two merchants and register different products or fields. Use the Platform Admin preview to create, read, update and delete a merchant policy. Edit and remove an existing amount-based booking review rule under Saved rules. Verify that a merchant credential can use only its own ledger and policy editor, and that changes to one merchant leave the other merchant's config intact.
 2. Submit equivalent product and evidence in both test tools for a merchant with zero scenarios. Compare final action, merchant and product, matching rule versions, missing signals and Jev outcome. Select a different merchant while a test is in flight and check each saved record in its own ledger.
 3. Use a compound custom policy with a literal text comparison and a country code. Test both inputs present, a nonmatching value, an omitted signal, and an invalid type. Verify that the omitted input is recorded as unavailable and an invalid value is rejected. Test explicit zero and false separately when registered.
-4. Exercise an amount-based review, a temporary exact-email block and a simulated Jev timeout. Verify the ledger outcome, evidence and review state. Record a disposition on a pending case as Platform Admin and replay the initial submission.
+4. Exercise an amount-based review, a temporary exact-email block, a simulated Jev timeout, and a Challenge. Compare the visible status and original automated evidence in the dashboard and ledger. Filter the ledger by **Review**, then use **Approve** or **Reject** as Platform Admin. Reopen the record to confirm its status, actor and time, and replay the initial submission to compare the stored assessment.
 5. Open a stored scenario result from before the change and check that its threshold, rules, outcome, and Jev evidence still match. Change a current rule, then compare exact replays of both historical and current records.
 
 <details>
