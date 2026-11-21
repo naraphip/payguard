@@ -35,7 +35,13 @@ type mockMerchantActor struct {
 type mockMerchant struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
+	Setup     *merchantSetup `json:"setup,omitempty"`
 	Scenarios []mockScenario `json:"scenarios"`
+}
+
+type mockMerchantInput struct {
+	Name  string         `json:"name"`
+	Setup *merchantSetup `json:"setup"`
 }
 
 type mockScenario struct {
@@ -152,19 +158,23 @@ func validDemoName(name string) bool {
 		strings.IndexFunc(name, unicode.IsControl) == -1
 }
 
-func readDemoName(w http.ResponseWriter, r *http.Request) (string, bool) {
-	var input struct {
-		Name string `json:"name"`
-	}
+func readMockMerchantInput(w http.ResponseWriter, r *http.Request) (mockMerchantInput, bool) {
+	var input mockMerchantInput
 	if !decodeBookingRiskJSON(w, r, &input) {
-		return "", false
+		return mockMerchantInput{}, false
 	}
-	name := strings.TrimSpace(input.Name)
-	if !validDemoName(name) {
+	input.Name = strings.TrimSpace(input.Name)
+	if !validDemoName(input.Name) {
 		problem(w, http.StatusUnprocessableEntity, "Enter a name of 1 to 100 characters without control characters.")
-		return "", false
+		return mockMerchantInput{}, false
 	}
-	return name, true
+	if input.Setup != nil {
+		if err := validateBookingSetup(input.Setup); err != nil {
+			problem(w, http.StatusUnprocessableEntity, err.Error())
+			return mockMerchantInput{}, false
+		}
+	}
+	return input, true
 }
 
 func (s mockMerchantService) listMerchants(w http.ResponseWriter, r *http.Request) {
@@ -188,11 +198,11 @@ func (s mockMerchantService) createMerchant(w http.ResponseWriter, r *http.Reque
 	if _, ok := s.authorize(w, r, true); !ok {
 		return
 	}
-	name, ok := readDemoName(w, r)
+	input, ok := readMockMerchantInput(w, r)
 	if !ok {
 		return
 	}
-	merchant, token, err := s.repo.createMockMerchant(r.Context(), name)
+	merchant, token, err := s.repo.createMockMerchant(r.Context(), input)
 	if err != nil {
 		demoWriteError(w, err)
 		return
@@ -208,11 +218,11 @@ func (s mockMerchantService) updateMerchant(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	name, ok := readDemoName(w, r)
+	input, ok := readMockMerchantInput(w, r)
 	if !ok {
 		return
 	}
-	merchant, err := s.repo.renameMockMerchant(r.Context(), id, name)
+	merchant, err := s.repo.updateMockMerchant(r.Context(), id, input)
 	if err != nil {
 		demoWriteError(w, err)
 		return

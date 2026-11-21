@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS merchant_demo_merchants (
   name text NOT NULL,
   token_hash bytea NOT NULL UNIQUE CHECK (octet_length(token_hash) = 32)
 );
+ALTER TABLE merchant_demo_merchants ADD COLUMN IF NOT EXISTS setup jsonb;
 CREATE TABLE IF NOT EXISTS merchant_demo_scenarios (
   merchant_id uuid NOT NULL REFERENCES merchant_demo_merchants(id),
   id uuid NOT NULL,
@@ -59,7 +60,7 @@ type mockMerchantQueryer interface {
 }
 
 const mockMerchantListQuery = `
-SELECT m.id::text, m.name, s.id::text, s.name, s.threshold_minor, s.revision
+SELECT m.id::text, m.name, m.setup, s.id::text, s.name, s.threshold_minor, s.revision
 FROM merchant_demo_merchants m
 LEFT JOIN LATERAL (
 	SELECT DISTINCT ON (id) id, name, threshold_minor, revision
@@ -80,14 +81,15 @@ func scanMockMerchants(ctx context.Context, db mockMerchantQueryer, merchantID s
 	merchants := []mockMerchant{}
 	for rows.Next() {
 		var id, name string
+		var setup *merchantSetup
 		var scenarioID, scenarioName *string
 		var threshold *int64
 		var revision *int
-		if err := rows.Scan(&id, &name, &scenarioID, &scenarioName, &threshold, &revision); err != nil {
+		if err := rows.Scan(&id, &name, &setup, &scenarioID, &scenarioName, &threshold, &revision); err != nil {
 			return nil, err
 		}
 		if len(merchants) == 0 || merchants[len(merchants)-1].ID != id {
-			merchants = append(merchants, mockMerchant{ID: id, Name: name, Scenarios: []mockScenario{}})
+			merchants = append(merchants, mockMerchant{ID: id, Name: name, Setup: setup, Scenarios: []mockScenario{}})
 		}
 		if scenarioID != nil {
 			m := &merchants[len(merchants)-1]
@@ -104,27 +106,30 @@ func (r repository) listMockMerchants(ctx context.Context, merchantID string) ([
 	return scanMockMerchants(ctx, r.db, merchantID)
 }
 
-func (r repository) createMockMerchant(ctx context.Context, name string) (mockMerchant, string, error) {
+func (r repository) createMockMerchant(ctx context.Context, input mockMerchantInput) (mockMerchant, string, error) {
 	var secret [32]byte
 	if _, err := rand.Read(secret[:]); err != nil {
 		return mockMerchant{}, "", err
 	}
 	token := "merchant-demo-" + hex.EncodeToString(secret[:])
 	hash := sha256.Sum256([]byte(token))
-	merchant := mockMerchant{Name: name, Scenarios: []mockScenario{}}
+	merchant := mockMerchant{Name: input.Name, Setup: input.Setup, Scenarios: []mockScenario{}}
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO merchant_demo_merchants(name, token_hash)
-		VALUES ($1, $2) RETURNING id::text`, name, hash[:]).Scan(&merchant.ID)
+		INSERT INTO merchant_demo_merchants(name, token_hash, setup)
+		VALUES ($1, $2, NULLIF($3::jsonb, 'null'::jsonb))
+		RETURNING id::text`, input.Name, hash[:], input.Setup).Scan(&merchant.ID)
 	if err != nil {
 		return mockMerchant{}, "", err
 	}
 	return merchant, token, nil
 }
 
-func (r repository) renameMockMerchant(ctx context.Context, merchantID, name string) (mockMerchant, error) {
+func (r repository) updateMockMerchant(ctx context.Context, merchantID string, input mockMerchantInput) (mockMerchant, error) {
 	var merchant mockMerchant
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
-		result, err := tx.Exec(ctx, `UPDATE merchant_demo_merchants SET name=$2 WHERE id=$1::text::uuid`, merchantID, name)
+		result, err := tx.Exec(ctx, `
+			UPDATE merchant_demo_merchants SET name=$2, setup=COALESCE(NULLIF($3::jsonb, 'null'::jsonb), setup)
+			WHERE id=$1::text::uuid`, merchantID, input.Name, input.Setup)
 		if err != nil {
 			return err
 		}
