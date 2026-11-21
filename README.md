@@ -4,6 +4,8 @@ A local sandbox for synthetic OTA bookings and e-commerce checkout risk. It runs
 
 ## Run locally
 
+The repository-root [`.env.example`](.env.example) lists the demo merchant and optional provider variables. For authenticated API requests or external enrichment, follow the [local keys setup](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
+
 Requires Docker with Docker Compose. From the repository root, build and start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis:
 
 ```sh

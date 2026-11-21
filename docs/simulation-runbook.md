@@ -2,6 +2,33 @@
 
 Follow the [local startup steps](../README.md). PostgreSQL initializes its demo tables and QA schema when Go starts.
 
+## Local keys and Omise sandbox preparation
+
+Docker Compose reads the repository-root `.env`. Create it from the [example template](../.env.example) if it does not already exist.
+
+```sh
+test -e .env || (umask 077; cp .env.example .env)
+```
+
+Run `openssl rand -hex 32` separately for each demo merchant you want to enable, then assign each generated value to its matching `PAYGUARD_DEMO_MERCHANT_A_TOKEN` or `PAYGUARD_DEMO_MERCHANT_B_TOKEN` in `.env`. The template also has optional `PAYGUARD_IPAPI_IS_KEY` and `PAYGUARD_PROXYCHECK_KEY` fields. Set `PAYGUARD_ENRICHMENT_ENABLED=true` to enable outbound provider lookups. Local masters work with the default setting.
+
+After changing the keys for a running Compose stack, apply the new environment with `docker compose up -d --wait backend` from the repository root.
+
+Go reads exported variables when running directly on the host. From the repository root, source your trusted shell-compatible `.env` if you use one. You can keep using an existing trusted `backend/.env` as your source.
+
+```sh
+(
+  set -a
+  . ./.env || exit
+  set +a
+  cd backend && go run .
+)
+```
+
+The commented Omise variables are proposed for the next sandbox integration and the current application does not read them. Get the test public and secret keys from **Omise Dashboard → Test mode → Keys**. The future host frontend would read `NEXT_PUBLIC_OMISE_TEST_PUBLIC_KEY` from `frontend/.env.local`. Keep `PAYGUARD_OMISE_TEST_SECRET_KEY` in the backend's private environment. [Finding Omise API keys](https://docs.omise.co/how-to-access-omise-api-keys)
+
+The planned sandbox flow uses Omise.js in the browser to tokenize an official test card. Go receives the token and uses the test secret key to create a sandbox charge. [Omise authentication](https://docs.omise.co/api-authentication), [Omise testing](https://docs.omise.co/api-testing)
+
 ## Booking event intake
 
 PG-01 adds `POST /api/v1/booking/events` on the Go API at `http://127.0.0.1:8081`. Set distinct local tokens in `PAYGUARD_DEMO_MERCHANT_A_TOKEN` and `PAYGUARD_DEMO_MERCHANT_B_TOKEN` before starting Compose. An unset token disables access for its demo merchant. Send the token as `Authorization: Bearer <token>` and supply one `Idempotency-Key` header with 1–128 printable ASCII characters and no spaces.
