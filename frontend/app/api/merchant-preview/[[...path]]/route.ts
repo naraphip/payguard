@@ -4,28 +4,25 @@ type RouteContext = { params: Promise<{ path?: string[] }> };
 
 const loopback = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
-const draftID = /^[a-f0-9]{32}$/;
 const noStore = { "Cache-Control": "no-store" };
 
 function allowed(method: string, path: string[]) {
   const [merchant, collection, record, action] = path;
   if (path.length === 0) return method === "GET" || method === "POST";
   if (!uuid.test(merchant)) return false;
-  if (path.length === 1) return method === "PUT" || method === "DELETE";
+  if (path.length === 1) return method === "GET" || method === "PUT" || method === "DELETE";
   if (path.length === 2) {
     return (method === "POST" && collection === "scenarios")
+      || (method === "GET" && (collection === "policies" || collection === "audit"))
       || (collection === "transactions" && (method === "GET" || method === "POST"));
   }
   if ((collection === "jev" || collection === "platform") && record === "rules") {
-    if (path.length === 3) return method === "GET" || method === "POST";
-    if (path.length !== 4) return false;
-    if (action === "preview") return method === "POST";
-    return collection === "platform" && method === "PUT" && draftID.test(action);
+    return path.length === 3 && method === "GET";
   }
   if (!uuid.test(record)) return false;
   if (path.length === 3) {
     return (method === "PUT" && collection === "scenarios")
-      || (method === "GET" && collection === "transactions");
+      || (method === "GET" && (collection === "transactions" || collection === "policies"));
   }
   return path.length === 4 && method === "POST" && collection === "transactions" && action === "decision";
 }
@@ -38,6 +35,9 @@ async function proxy(request: NextRequest, { params }: RouteContext) {
   }
 
   const path = (await params).path ?? [];
+  if (request.method !== "GET" && uuid.test(path[0]) && (path[1] === "jev" || path[1] === "platform") && path[2] === "rules") {
+    return Response.json({ error: "Connect with a platform administrator token to write or preview rules." }, { status: 403, headers: noStore });
+  }
   if (!allowed(request.method, path)) {
     return Response.json({ error: "Merchant preview route not found." }, { status: 404, headers: noStore });
   }
@@ -48,11 +48,14 @@ async function proxy(request: NextRequest, { params }: RouteContext) {
   }
 
   const backend = process.env.PAYGUARD_BOOKING_API_URL ?? process.env.PAYGUARD_API_URL ?? "http://127.0.0.1:8081";
-  const endpoint = `${backend.replace(/\/$/, "")}/api/v1/booking/demo/merchants${path.length ? `/${path.join("/")}` : ""}`;
+  const endpoint = `${backend.replace(/\/$/, "")}/api/v1/booking/demo/merchants${path.length ? `/${path.join("/")}` : ""}${write ? "" : request.nextUrl.search}`;
   try {
+    const headers = new Headers({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
+    const creationKey = path.length === 0 && request.method === "POST" ? request.headers.get("Idempotency-Key") : null;
+    if (creationKey) headers.set("Idempotency-Key", creationKey);
     const response = await fetch(endpoint, {
       method: request.method,
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers,
       body: write ? await request.text() : undefined,
       cache: "no-store",
       redirect: "error",

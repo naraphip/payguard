@@ -21,7 +21,7 @@ Sources include the [PayGuard requirements folder](https://drive.google.com/driv
 | PG-13 | PHASE 1 / P0 | — | Frontend | Transactions queue/detail + essential dashboard KPIs | 10–12 | Latency and freshness measured, filters use real data | To do |
 | PG-14 | PHASE 2 / P1 | — | Backend/QA | Replay/shadow with temporal holdout + baseline versions | 10, 08 | No production action from shadow; FPR and Recall computed | To do |
 | PG-15 | PHASE 2 / P1 | — | Risk/Security | Maker-checker for profile/rule/rubric/list changes | 14 | Different approver, expiry and audit; rollback new version | To do |
-| PG-16 | PHASE 2 / P1 | — | Backend | Typed product modules + separate merchant policy resolver | 01, 11 | OTA/e-commerce/gateway, exact domain matching and action_source | To do |
+| PG-16 | PHASE 2 / P1 | — | Backend | Typed product modules + separate merchant policy resolver | 01, 11 | OTA/e-commerce/gateway, exact domain matching and action_source | Done |
 | PG-17 | PHASE 2 / P1 | — | AI/Security | Evidence-backed narrative dossier, injection tests | 10, 12 | Post-decision only, citations validated and masked export | To do |
 | PG-18 | PHASE 3 / P2 | — | Frontend/Backend | Fraud Simulation Lab graph / linked entity network | 05, 10, 16 | Graph evidence and no false-positive IP-only block | To do |
 | PG-19 | PHASE 3 / P2 | — | Frontend | Advanced visual rule builder and personalized dashboards | 14–16 | No premature visual work before replay and approvals | Deferred |
@@ -70,6 +70,7 @@ Mark a task complete only when its acceptance checks pass. Update the local stat
 
 | Task ID | Verification evidence | Sheet sync |
 | --- | --- | --- |
+| PG-16 | Typed OTA, e-commerce, and gateway modules, independent merchant policy outputs, exact-domain and precedence checks, and pinned replay passed in the local suites. [Policy verification](current-work.md#ai-rule-management) · [Product module verification](current-work.md#pg-11-through-pg-19-local-evaluation) | 21 November 2026. Set `01 ACTION PLAN LATEST!H18` to `Done` and verified by readback. |
 
 This log records team Action Plan completions and Sheet sync. See the [verified implementation progress](#verified-implementation-progress) for local verification evidence.
 

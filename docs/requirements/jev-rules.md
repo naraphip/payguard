@@ -4,6 +4,8 @@ Status **Local demo implemented and verified**. A merchant can use the demo to t
 
 The evaluator uses the evidence and lineage from the existing mock Jev booking flow. Score adjustments, payment actions, production Jev and AI provider connections, and the maker-checker policy in PG-15 and DEC-07 are outside the demo scope. [Booking assessment](booking-assessment.md) · [PayGuard task list](../payguard-tasks.md) · [Jev Rules UI](../ui/jev-rules.md)
 
+The administrator manages a selected merchant's demo booking review rules under **Merchant Details → Merchant Rules**. The legacy Booking API review rules continue to use the demo booking credential. Test Jev provider settings separately in [AI Configuration](decision-engine.md#jev-configuration).
+
 ## Rule contract
 
 A custom rule has a name of 1–80 characters without control characters, the `REVIEW` action, and one to five conditions joined by AND. Each condition compares one observed booking signal with a nonnegative JavaScript-safe integer, up to 9,007,199,254,740,991. The operators are `gte`, `gt`, `lte`, `lt`, and `eq`.

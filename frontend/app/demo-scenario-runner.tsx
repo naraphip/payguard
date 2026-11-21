@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantJevStatus,
-  merchantOutcomeLabels, setMerchantDemoToken,
+  getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantOutcomeLabels, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken,
 } from "./merchant-demo";
+import { MerchantJevEvidence } from "./merchant-jev-evidence";
+import { PolicyDecisionDetails } from "./merchant-policy-decision";
+import { merchantDetailsHref } from "./settings/merchants/management-contracts";
 import type { DemoDirectory, DemoTransaction } from "./merchant-demo";
 import type { SimulationProduct } from "./types";
 
@@ -14,6 +16,7 @@ type ScenarioInputs = {
   source: "checkout" | "simulation";
   product?: SimulationProduct;
   amountMinor?: number;
+  customerEmailDomain?: string;
   simulateTimeout: boolean;
 };
 
@@ -30,6 +33,16 @@ export function readDemoAmount(value: string) {
 }
 
 export const invalidDemoAmount = "Enter a whole number from 0 to 9,007,199,254,740,991 or leave it empty.";
+
+function syntheticEmailDomain(value?: string) {
+  const entered = value?.trim();
+  if (!entered) return undefined;
+  const parts = entered.split("@");
+  if (parts.length > 2 || !parts[0] || /\s/u.test(entered)) return null;
+  const domain = parts[parts.length - 1].toLowerCase();
+  if (!domain.includes(".") || domain.length > 254 || /[:/\\?#%]/u.test(domain)) return null;
+  return domain;
+}
 
 export function useDemoScenario() {
   const [credential, setCredential] = useState("");
@@ -150,7 +163,14 @@ export function useDemoScenario() {
 
   async function submit(inputs: ScenarioInputs) {
     if (!directory || !merchant || !scenario || submittingRef.current) return;
-    const attempt = pending ?? { ...inputs, id: crypto.randomUUID(), scenarioId: scenario.id };
+    const domain = syntheticEmailDomain(inputs.customerEmailDomain);
+    if (domain === null) {
+      setSubmissionError("Enter a synthetic email or its domain, such as buyer@example.test.");
+      return;
+    }
+    const attempt = pending ?? {
+      ...inputs, customerEmailDomain: domain, id: crypto.randomUUID(), scenarioId: scenario.id,
+    };
     const request = ++requestGeneration.current;
     submittingRef.current = true;
     setPending(attempt);
@@ -251,33 +271,37 @@ export function DemoScenarioPicker({ flow, allowLegacy = false }: { flow: DemoSc
 const reviewLabels = { NONE: "No manual review", NEEDS_DECISION: "Needs decision", RESOLVED: "Resolved" } as const;
 
 export function DemoScenarioResult({ transaction, merchantName }: { transaction: DemoTransaction; merchantName: string }) {
-  const query = new URLSearchParams({ merchant: transaction.merchantId, transaction: transaction.id, view: "transactions" });
-  return <section className="rounded-xl border border-line bg-white p-4 sm:p-5" aria-label="Jev result">
+  const final = transaction.policyDecision?.finalDecision;
+  const result = final ? policyActionLabels[final.action] ?? final.action : merchantOutcomeLabels[transaction.outcome];
+  const allowed = final ? final.action === "ALLOW" : transaction.outcome === "LOW_RISK";
+  const title = final ? "Transaction decision" : "Jev result";
+  return <section className="rounded-xl border border-line bg-white p-4 sm:p-5" aria-label={title}>
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <h3 className="font-semibold">Jev result</h3>
-      <p role="status" className={`rounded-full px-3 py-1 text-xs font-semibold ${transaction.outcome === "LOW_RISK"
-        ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{merchantOutcomeLabels[transaction.outcome]}</p>
+      <h3 className="font-semibold">{title}</h3>
+      <p role="status" className={`rounded-full px-3 py-1 text-xs font-semibold ${allowed
+        ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{result}</p>
     </div>
     <p className="mt-2 text-sm text-muted">{transaction.reason}</p>
+    {transaction.policyDecision && <div className="mt-3"><PolicyDecisionDetails decision={transaction.policyDecision} /></div>}
     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
       <div className="min-w-0"><dt className="text-xs text-muted">Merchant</dt><dd className="break-words font-semibold">{merchantName}</dd></div>
       <div className="min-w-0"><dt className="text-xs text-muted">Scenario</dt><dd className="break-words font-semibold">{transaction.scenarioName} · v{transaction.scenarioVersion}</dd></div>
       <div><dt className="text-xs text-muted">Rule set</dt><dd className="font-semibold">{transaction.ruleVersion}</dd></div>
       {transaction.jevRuleVersion && <div><dt className="text-xs text-muted">Merchant Jev rules</dt><dd className="font-semibold">{transaction.jevRuleVersion}</dd></div>}
-      <div className="min-w-0"><dt className="text-xs text-muted">Jev status</dt><dd className="break-words font-semibold">{merchantJevStatus(transaction)}</dd></div>
-      <div className="min-w-0"><dt className="text-xs text-muted">Jev model</dt><dd className="break-words font-semibold">{transaction.jevVersion}</dd></div>
-      {transaction.jevAnswer && <div><dt className="text-xs text-muted">Jev answer</dt><dd className="font-semibold">{merchantOutcomeLabels[transaction.jevAnswer]}</dd></div>}
+      <MerchantJevEvidence transaction={transaction} />
       <div><dt className="text-xs text-muted">Booking amount</dt><dd className="font-semibold">{transaction.amountMinor === null ? "Unavailable" : `${transaction.amountMinor.toLocaleString()} minor units`}</dd></div>
       <div className="min-w-0"><dt className="text-xs text-muted">Rule hits</dt><dd className="break-words font-semibold">{transaction.ruleHits.join(", ") || "None"}</dd></div>
       <div><dt className="text-xs text-muted">Transaction state</dt><dd className="font-semibold">{reviewLabels[transaction.reviewState]}</dd></div>
     </dl>
-    <Link href={`/settings/merchants?${query}`} className="mt-4 inline-block text-sm font-semibold text-accent underline underline-offset-2">View merchant transaction</Link>
+    <Link href={merchantDetailsHref(transaction.merchantId, "transactions", transaction.id)} className="mt-4 inline-block text-sm font-semibold text-accent underline underline-offset-2">View merchant transaction</Link>
   </section>;
 }
 
 export function DemoScenarioSimulation() {
   const flow = useDemoScenario();
   const [amount, setAmount] = useState("50000");
+  const [product, setProduct] = useState<SimulationProduct>("flight_ticket");
+  const [domain, setDomain] = useState("");
   const [simulateTimeout, setSimulateTimeout] = useState(false);
   const [amountError, setAmountError] = useState("");
   const amountId = useId();
@@ -289,7 +313,7 @@ export function DemoScenarioSimulation() {
       setAmountError(invalidDemoAmount);
       return;
     }
-    void flow.submit({ source: "simulation", amountMinor, simulateTimeout });
+    void flow.submit({ source: "simulation", product, amountMinor, customerEmailDomain: domain, simulateTimeout });
   }
 
   return <section className="space-y-4 rounded-xl border border-line bg-white p-4 sm:p-5" aria-labelledby="scenario-simulation">
@@ -300,6 +324,15 @@ export function DemoScenarioSimulation() {
     <DemoScenarioPicker flow={flow} />
     {flow.directory && <form onSubmit={submit} noValidate className="space-y-3">
       <fieldset className="grid gap-3 sm:grid-cols-2" disabled={flow.pending !== null || !flow.scenario}>
+        <label className="text-sm font-semibold">Product
+          <select className="control mt-1.5" value={product} onChange={event => setProduct(event.currentTarget.value as SimulationProduct)}>
+            {Object.entries(merchantPolicyProducts).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
+        </label>
+        <label className="text-sm font-semibold">Synthetic email or domain
+          <input className="control mt-1.5" value={domain} maxLength={320} placeholder="example.test (optional)"
+            autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={event => setDomain(event.currentTarget.value)} />
+        </label>
         <label htmlFor={amountId} className="text-sm font-semibold">Booking amount in minor units
           <input id={amountId} className="control mt-1.5" inputMode="numeric" value={amount} placeholder="Optional"
             aria-invalid={!!amountError} aria-describedby={amountError ? `${amountId}-error` : undefined} onChange={event => {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -79,7 +80,7 @@ type mockMerchantQueryer interface {
 }
 
 const mockMerchantListQuery = `
-SELECT m.id::text, m.name, m.setup, s.id::text, s.name, s.threshold_minor, s.revision
+SELECT m.id::text, m.name, m.description, m.created_at, m.setup, m.policy_integration, s.id::text, s.name, s.threshold_minor, s.revision
 FROM merchant_demo_merchants m
 LEFT JOIN LATERAL (
 	SELECT DISTINCT ON (id) id, name, threshold_minor, revision
@@ -99,16 +100,18 @@ func scanMockMerchants(ctx context.Context, db mockMerchantQueryer, merchantID s
 
 	merchants := []mockMerchant{}
 	for rows.Next() {
-		var id, name string
+		var id, name, description string
+		var createdAt *time.Time
 		var setup *merchantSetup
+		var integration *merchantPolicyIntegration
 		var scenarioID, scenarioName *string
 		var threshold *int64
 		var revision *int
-		if err := rows.Scan(&id, &name, &setup, &scenarioID, &scenarioName, &threshold, &revision); err != nil {
+		if err := rows.Scan(&id, &name, &description, &createdAt, &setup, &integration, &scenarioID, &scenarioName, &threshold, &revision); err != nil {
 			return nil, err
 		}
 		if len(merchants) == 0 || merchants[len(merchants)-1].ID != id {
-			merchants = append(merchants, mockMerchant{ID: id, Name: name, Setup: setup, Scenarios: []mockScenario{}})
+			merchants = append(merchants, mockMerchant{ID: id, Name: name, Description: description, CreatedAt: createdAt, Setup: setup, PolicyIntegration: integration, Scenarios: []mockScenario{}})
 		}
 		if scenarioID != nil {
 			m := &merchants[len(merchants)-1]
@@ -132,11 +135,24 @@ func (r repository) createMockMerchant(ctx context.Context, input mockMerchantIn
 	}
 	token := "merchant-demo-" + hex.EncodeToString(secret[:])
 	hash := sha256.Sum256([]byte(token))
-	merchant := mockMerchant{Name: input.Name, Setup: input.Setup, Scenarios: []mockScenario{}}
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO merchant_demo_merchants(name, token_hash, setup)
-		VALUES ($1, $2, NULLIF($3::jsonb, 'null'::jsonb))
-		RETURNING id::text`, input.Name, hash[:], input.Setup).Scan(&merchant.ID)
+	merchant := mockMerchant{Name: input.Name, Setup: input.Setup, PolicyIntegration: input.PolicyIntegration, Scenarios: []mockScenario{}}
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO merchant_demo_merchants(name, token_hash, setup, policy_integration, description, creation_request_hash)
+			VALUES ($1, $2, NULLIF($3::jsonb, 'null'::jsonb), NULLIF($4::jsonb, 'null'::jsonb), COALESCE($5, ''), $6)
+ ON CONFLICT (creation_request_hash) WHERE creation_request_hash IS NOT NULL DO NOTHING
+			RETURNING id::text, description, created_at`, input.Name, hash[:], input.Setup, input.PolicyIntegration, input.Description, input.CreationRequestHash).
+			Scan(&merchant.ID, &merchant.Description, &merchant.CreatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errMerchantCreateReplay
+			}
+			return err
+		}
+		if err := auditMerchant(ctx, tx, merchant.ID, "MERCHANT_CREATED"); err != nil {
+			return err
+		}
+		return auditMerchant(ctx, tx, merchant.ID, "MERCHANT_CREDENTIAL_ISSUED")
+	})
 	if err != nil {
 		return mockMerchant{}, "", err
 	}
@@ -147,8 +163,10 @@ func (r repository) updateMockMerchant(ctx context.Context, merchantID string, i
 	var merchant mockMerchant
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		result, err := tx.Exec(ctx, `
-			UPDATE merchant_demo_merchants SET name=$2, setup=COALESCE(NULLIF($3::jsonb, 'null'::jsonb), setup)
-			WHERE id=$1::text::uuid AND deleted_at IS NULL`, merchantID, input.Name, input.Setup)
+			UPDATE merchant_demo_merchants SET name=$2, setup=COALESCE(NULLIF($3::jsonb, 'null'::jsonb), setup),
+ policy_integration=COALESCE(NULLIF($4::jsonb, 'null'::jsonb), policy_integration),
+ description=COALESCE($5,description)
+			WHERE id=$1::text::uuid AND deleted_at IS NULL`, merchantID, input.Name, input.Setup, input.PolicyIntegration, input.Description)
 		if err != nil {
 			return err
 		}
@@ -160,22 +178,29 @@ func (r repository) updateMockMerchant(ctx context.Context, merchantID string, i
 			return err
 		}
 		merchant = rows[0]
-		return nil
+		return auditMerchant(ctx, tx, merchantID, "MERCHANT_UPDATED")
 	})
 	return merchant, err
 }
 
 func (r repository) deleteMockMerchant(ctx context.Context, merchantID string) error {
-	result, err := r.db.Exec(ctx, `
-		UPDATE merchant_demo_merchants SET deleted_at=COALESCE(deleted_at, clock_timestamp())
-		WHERE id=$1::text::uuid`, merchantID)
-	if err != nil {
-		return err
-	}
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
-	}
-	return nil
+	return pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		var deletedAt *time.Time
+		if err := tx.QueryRow(ctx, `SELECT deleted_at FROM merchant_demo_merchants WHERE id=$1::text::uuid FOR UPDATE`,
+			merchantID).Scan(&deletedAt); err != nil {
+			return err
+		}
+		if deletedAt != nil {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE merchant_demo_merchants SET deleted_at=clock_timestamp() WHERE id=$1::text::uuid`, merchantID); err != nil {
+			return err
+		}
+		if err := auditMerchant(ctx, tx, merchantID, "MERCHANT_DEACTIVATED"); err != nil {
+			return err
+		}
+		return auditMerchant(ctx, tx, merchantID, "MERCHANT_CREDENTIAL_REVOKED")
+	})
 }
 
 func lockMockMerchant(ctx context.Context, tx pgx.Tx, merchantID string) error {
@@ -246,9 +271,8 @@ func (r repository) saveMockScenario(ctx context.Context, merchantID, scenarioID
 
 const mockTransactionReadQuery = `
 SELECT t.id::text, t.merchant_id::text, t.scenario_id::text, s.name, t.scenario_revision,
-	s.threshold_minor, t.source, t.product, t.amount_minor, t.simulate_timeout, t.outcome, t.reason, t.rule_hits,
-	t.jev_status, t.jev_version, t.jev_rule_version, t.jev_answer, t.jev_decision_id, t.jev_confidence,
-	t.created_at, t.disposition, t.decided_by, t.decided_at
+	s.threshold_minor, t.source, t.product, t.amount_minor, t.simulate_timeout, t.outcome, t.reason, t.rule_hits, t.jev_status,
+	t.jev_version, t.jev_rule_version, t.jev_answer, t.jev_decision_id, t.jev_confidence, t.jev_configuration_version, t.created_at, t.disposition, t.decided_by, t.decided_at, t.customer_email_domain, t.policy_decision
 FROM merchant_demo_transactions t
 JOIN merchant_demo_merchants m ON m.id=t.merchant_id AND m.deleted_at IS NULL
 JOIN merchant_demo_scenarios s ON s.merchant_id=t.merchant_id AND s.id=t.scenario_id AND s.revision=t.scenario_revision
@@ -257,10 +281,9 @@ WHERE t.merchant_id=$1::text::uuid`
 func scanMockTransaction(row pgx.Row) (mockTransaction, error) {
 	var result mockTransaction
 	err := row.Scan(&result.ID, &result.MerchantID, &result.ScenarioID, &result.ScenarioName, &result.ScenarioVersion,
-		&result.ThresholdMinor, &result.Source, &result.Product, &result.AmountMinor, &result.simulateTimeout,
-		&result.Outcome, &result.Reason, &result.RuleHits, &result.JevStatus, &result.JevVersion, &result.JevRuleVersion,
-		&result.JevAnswer, &result.JevDecisionID, &result.JevConfidence, &result.CreatedAt, &result.Disposition,
-		&result.DecidedBy, &result.DecidedAt)
+		&result.ThresholdMinor, &result.Source, &result.Product, &result.AmountMinor, &result.simulateTimeout, &result.Outcome,
+		&result.Reason, &result.RuleHits, &result.JevStatus, &result.JevVersion, &result.JevRuleVersion, &result.JevAnswer, &result.JevDecisionID, &result.JevConfidence, &result.JevConfigurationVersion, &result.CreatedAt,
+		&result.Disposition, &result.DecidedBy, &result.DecidedAt, &result.CustomerEmailDomain, &result.PolicyDecision)
 	if err != nil {
 		return result, err
 	}
@@ -312,8 +335,7 @@ func evaluateMockJev(input mockTransactionInput, scenario mockScenario) mockTran
 		ID: input.ID, ScenarioID: scenario.ID, ScenarioName: scenario.Name,
 		ScenarioVersion: scenario.ScenarioVersion, RuleVersion: scenario.RuleVersion,
 		ThresholdMinor: scenario.ThresholdMinor, Source: input.Source, Product: input.Product,
-		AmountMinor: input.AmountMinor, RuleHits: []string{}, JevStatus: "MOCKED", JevVersion: "mock-jev-v1",
-		simulateTimeout: input.SimulateTimeout,
+		AmountMinor: input.AmountMinor, RuleHits: []string{}, JevStatus: "MOCKED", JevVersion: "mock-jev-v1", simulateTimeout: input.SimulateTimeout,
 	}
 	switch {
 	case input.SimulateTimeout:
@@ -335,10 +357,14 @@ func evaluateMockJev(input mockTransactionInput, scenario mockScenario) mockTran
 
 func (result mockTransaction) matchesRequest(input mockTransactionInput) bool {
 	return result.ScenarioID == input.ScenarioID && result.Source == input.Source && result.Product == input.Product &&
-		sameBookingAmount(result.AmountMinor, input.AmountMinor) && result.simulateTimeout == input.SimulateTimeout
+		result.CustomerEmailDomain == input.CustomerEmailDomain && sameBookingAmount(result.AmountMinor, input.AmountMinor) &&
+		result.simulateTimeout == input.SimulateTimeout
 }
-
-func (r repository) saveMockTransaction(ctx context.Context, merchantID string, input mockTransactionInput, jev merchantJev) (mockTransaction, bool, error) {
+func (r repository) saveMockTransaction(ctx context.Context, merchantID string, input mockTransactionInput, options ...merchantJev) (mockTransaction, bool, error) {
+	var jev merchantJev
+	if len(options) > 0 {
+		jev = options[0]
+	}
 	var result mockTransaction
 	var created bool
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
@@ -367,17 +393,44 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		if err != nil {
 			return err
 		}
+		savedConfig, err := readJevAIConfiguration(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if savedConfig.Version > 0 {
+			jev = jev.withConfiguration(savedConfig.Config)
+		}
 		result = evaluateMerchantJev(ctx, input, scenario, jevRules, jev)
+		result.JevConfigurationVersion = savedConfig.Version
+		activePolicies, err := readMerchantPolicies(ctx, tx, merchantID, true)
+		if err != nil {
+			return err
+		}
 		result.MerchantID = merchantID
+		result.CustomerEmailDomain = input.CustomerEmailDomain
+		platform := policyDecisionPart{Action: result.Outcome, ReasonCodes: result.RuleHits}
+		if platform.Action == "LOW_RISK" {
+			platform.Action = "ALLOW"
+		}
+		merchant := evaluateMerchantPolicies(activePolicies, merchantPolicyEvidence{
+			product: input.Product, stage: merchantPolicyStage(input.Product), domain: input.CustomerEmailDomain, amount: input.AmountMinor,
+		})
+		policyDecision := resolvePolicyDecision(platform, merchant)
+		policyDecision.ScoringProfileVersion = merchantScenarioProfileVersion
+		result.PolicyDecision = &policyDecision
+		if policyDecision.Final.Action == "REVIEW" && result.Outcome == "LOW_RISK" {
+			result.Outcome, result.ReviewState = "REVIEW", "NEEDS_DECISION"
+			result.Reason = "A merchant business policy requires manual review."
+		}
 		err = tx.QueryRow(ctx, `
 			INSERT INTO merchant_demo_transactions
 				(merchant_id, id, scenario_id, scenario_revision, source, product, amount_minor, simulate_timeout,
-				 outcome, reason, rule_hits, jev_status, jev_version, jev_rule_version, jev_answer, jev_decision_id, jev_confidence)
-			VALUES ($1::text::uuid, $2::text::uuid, $3::text::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+				 outcome, reason, rule_hits, jev_status, jev_version, jev_rule_version, customer_email_domain, policy_decision, jev_answer, jev_decision_id, jev_confidence, jev_configuration_version)
+			VALUES ($1::text::uuid, $2::text::uuid, $3::text::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 			RETURNING created_at`,
 			merchantID, input.ID, input.ScenarioID, result.ScenarioVersion, input.Source, input.Product, input.AmountMinor,
 			input.SimulateTimeout, result.Outcome, result.Reason, result.RuleHits, result.JevStatus, result.JevVersion,
-			result.JevRuleVersion, result.JevAnswer, result.JevDecisionID, result.JevConfidence).Scan(&result.CreatedAt)
+			result.JevRuleVersion, result.CustomerEmailDomain, result.PolicyDecision, result.JevAnswer, result.JevDecisionID, result.JevConfidence, result.JevConfigurationVersion).Scan(&result.CreatedAt)
 		created = err == nil
 		return err
 	})
