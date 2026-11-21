@@ -230,27 +230,18 @@ func assess(e event, features []feature, policy, timeout bool) decision {
 		Event: e, Action: "ALLOW", Source: "PLATFORM", Platform: "ALLOW", Merchant: "NOT_APPLICABLE",
 		JevStatus: "MOCK", JevAnswer: "LOW", RuleHits: []string{}, Missing: []string{}, Features: features,
 	}
-	var device, token int64
-	for _, f := range features {
-		switch f.Kind {
-		case "device":
-			device = f.Orders
-		case "token":
-			token = f.Orders
-		}
-	}
-	if paymentStage(e.Stage) && token == 0 {
+	if paymentTokenMissing(e, features) {
 		d.Missing = append(d.Missing, "payment_token")
 	}
-	if token >= 2 && device >= 2 {
-		d.RuleHits = append(d.RuleHits, "SHARED_DEVICE_AND_TOKEN")
-		d.Platform, d.JevAnswer = "REVIEW", "HIGH"
-	} else if (token >= 2 || device >= 2) && e.AgeDays <= 7 {
-		d.RuleHits = append(d.RuleHits, "NEW_ACCOUNT_SHARED_INSTRUMENT_OR_DEVICE")
-		d.Platform, d.JevAnswer = "CHALLENGE", "MEDIUM"
-	} else if len(d.Missing) > 0 {
-		d.RuleHits = append(d.RuleHits, "PAYMENT_TOKEN_MISSING")
-		d.Platform, d.JevAnswer = "REVIEW", "INSUFFICIENT_EVIDENCE"
+	for _, rule := range builtinRules {
+		if !rule.includesStage(e.Stage) {
+			continue
+		}
+		if matched, _ := rule.matchSignals(e, features); matched {
+			d.RuleHits = append(d.RuleHits, rule.Code)
+			d.Platform, d.JevAnswer = rule.Action, rule.jevAnswer
+			break
+		}
 	}
 	d.Action = d.Platform
 	if timeout {

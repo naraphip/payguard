@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Activity, ArrowRight, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, TabletSmartphone } from "lucide-react";
+import { Activity, ArrowRight, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, SlidersHorizontal, TabletSmartphone } from "lucide-react";
 import { Network } from "./network";
 import type { Config, Decision, Product, Report, Run, Scenario } from "./types";
 
@@ -195,7 +196,12 @@ export default function Home() {
             <span className="font-semibold tracking-tight">PayGuard</span>
             <span className="hidden border-l border-line pl-3 text-sm text-muted sm:inline">Simulation Lab</span>
           </div>
-          <span className="flex items-center gap-2 rounded-full border border-line bg-paper px-3 py-1 text-xs font-semibold text-muted"><span className="size-2 rounded-full bg-teal-600" /> Sandbox</span>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <Link href="/settings/system-rules" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
+              <SlidersHorizontal size={14} aria-hidden /><span>Platform Rules</span>
+            </Link>
+            <span className="hidden items-center gap-2 rounded-full border border-line bg-paper px-3 py-1 text-xs font-semibold text-muted min-[400px]:flex"><span className="size-2 rounded-full bg-teal-600" /> Sandbox</span>
+          </div>
         </div>
       </header>
 
