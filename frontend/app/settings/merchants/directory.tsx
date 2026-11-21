@@ -43,6 +43,7 @@ export function MerchantDirectory() {
   const [createMode, setCreateMode] = useState(false);
   const [issuedToken, setIssuedToken] = useState("");
   const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState("");
   const [requiresToken, setRequiresToken] = useState(false);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [error, setError] = useState("");
@@ -117,6 +118,7 @@ export function MerchantDirectory() {
       ...current, merchants: current.merchants.filter(merchant => merchant.id !== merchantId),
     }));
     selectMerchant(current => current === merchantId ? "" : current);
+    setNotice("Merchant removed from the directory.");
   }
 
   const selected = directory?.merchants.find(({ id }) => id === selectedId) ?? directory?.merchants[0];
@@ -180,7 +182,8 @@ export function MerchantDirectory() {
           ))}
           {!directory.merchants.length && <p className="text-sm text-slate-600">No merchants yet.</p>}
         </div>
-        {admin && <button className={action} onClick={() => { setCreateMode(true); setIssuedToken(""); }}>Create merchant</button>}
+        {notice && <p role="status" className="text-sm text-slate-600">{notice}</p>}
+        {admin && <button className={action} onClick={() => { setCreateMode(true); setIssuedToken(""); setNotice(""); }}>Create merchant</button>}
       </aside>
       <div className="min-w-0 space-y-5">
         {admin && (createMode || !selected) ? (
