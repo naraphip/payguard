@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -76,7 +75,6 @@ type bookingShadowLineage struct {
 	ListVersion     string  `json:"listVersion,omitempty"`
 	ProfileVersion  string  `json:"profileVersion"`
 	RuleVersion     string  `json:"ruleVersion"`
-	JevRuleVersion  string  `json:"jevRuleVersion,omitempty"`
 	BaselineVersion *string `json:"baselineVersion"`
 	ModelVersion    string  `json:"modelVersion"`
 	RubricVersion   string  `json:"rubricVersion"`
@@ -140,20 +138,16 @@ func (r *bookingShadowReport) include(sample bookingShadowSample) error {
 
 	fraud := sample.label == "fraud"
 	r.Stored.observe(fraud, assessment.Outcome == "REVIEW")
-	otherReviewRuleMatched := slices.ContainsFunc(assessment.RuleHits, func(hit string) bool {
-		return hit == bookingProductListRuleCode || strings.HasPrefix(hit, jevRuleIDPrefix)
-	})
+	otherReviewRuleMatched := slices.Contains(assessment.RuleHits, bookingProductListRuleCode)
 	r.Shadow.observe(fraud, velocity >= r.Window.ReviewThreshold || otherReviewRuleMatched)
 
 	lineage := bookingShadowLineage{
 		ProfileVersion: assessment.ProfileVersion, RuleVersion: assessment.RuleVersion,
-		JevRuleVersion: assessment.JevRuleVersion,
-		ModelVersion:   assessment.Jev.ModelVersion, RubricVersion: assessment.Jev.RubricVersion,
+		ModelVersion: assessment.Jev.ModelVersion, RubricVersion: assessment.Jev.RubricVersion,
 		BaselineVersion: assessment.Baseline.Version, ListVersion: assessment.ListVersion,
 	}
 	for _, existing := range r.Lineage {
 		if existing.ProfileVersion == lineage.ProfileVersion && existing.RuleVersion == lineage.RuleVersion &&
-			existing.JevRuleVersion == lineage.JevRuleVersion &&
 			existing.ModelVersion == lineage.ModelVersion && existing.RubricVersion == lineage.RubricVersion && existing.ListVersion == lineage.ListVersion &&
 			sameShadowBaselineVersion(existing.BaselineVersion, lineage.BaselineVersion) {
 			return nil
