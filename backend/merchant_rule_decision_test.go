@@ -162,6 +162,10 @@ func TestMerchantRuleDecisionPostgres(t *testing.T) {
 			bytes.Contains(first, []byte(`"scenarioId"`)) || !strings.Contains(result.RuleVersion, "+governed-") {
 			t.Fatalf("unexpected threshold or venue for merchant-only %s result: %s", source, first)
 		}
+		score := result.PolicyDecision.RiskScore
+		if score == nil || score.Value == nil || *score.Value != 20 || !score.Partial {
+			t.Fatalf("missing or unexpected score for %s: %s", source, first)
+		}
 		replayed := call(http.MethodPost, path, admin, input, http.StatusOK)
 		if !bytes.Equal(first, replayed) || !bytes.Equal(first, call(http.MethodGet, path+"/"+input.ID, token, nil, http.StatusOK)) {
 			t.Fatalf("saved %s result or replay did not round-trip", source)
@@ -183,6 +187,15 @@ func TestMerchantRuleDecisionPostgres(t *testing.T) {
 	if read := decode(call(http.MethodGet, path+"/"+input.ID, token, nil, http.StatusOK)); read.ReviewState != challenged.ReviewState {
 		t.Fatalf("persisted challenge changed review state: %+v", read)
 	}
+	input = makeInput("simulation")
+	input.SimulateTimeout = true
+	input.CustomerEmailDomain = "mailinator.com"
+	timeout := decode(call(http.MethodPost, path, admin, input, http.StatusCreated))
+	resolved := decode(call(http.MethodPost, path+"/"+input.ID+"/decision", admin, map[string]any{"decision": "cleared"}, http.StatusOK))
+	if timeout.Outcome != "UNRESOLVED" || resolved.ReviewState != "RESOLVED" ||
+		!reflect.DeepEqual(timeout.PolicyDecision.RiskScore, resolved.PolicyDecision.RiskScore) {
+		t.Fatalf("manual resolution changed the recorded score: before=%+v after=%+v", timeout, resolved)
+	}
 	legacyScenario, err := repo.saveMockScenario(ctx, merchant.ID, "", "Legacy threshold", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +205,8 @@ func TestMerchantRuleDecisionPostgres(t *testing.T) {
 	input.Product = "digital"
 	legacy := call(http.MethodPost, path, admin, input, http.StatusCreated)
 	if result := decode(legacy); result.ScenarioID != legacyScenario.ID || result.ThresholdMinor == nil || *result.ThresholdMinor != 0 ||
-		result.Outcome != "REVIEW" || result.PolicyDecision.Jev != nil || result.PolicyDecision.ScoringProfileVersion != merchantScenarioProfileVersion {
+		result.Outcome != "REVIEW" || result.PolicyDecision.Jev != nil || result.PolicyDecision.ScoringProfileVersion != merchantScenarioProfileVersion ||
+		result.PolicyDecision.RiskScore != nil {
 		t.Fatalf("legacy zero threshold or review lineage changed: %s", legacy)
 	}
 	if !bytes.Equal(legacy, call(http.MethodPost, path, admin, input, http.StatusOK)) {

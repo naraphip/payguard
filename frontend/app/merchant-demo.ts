@@ -64,11 +64,19 @@ type MerchantPolicyDecisionPart = {
   }[];
 };
 
+export type MerchantRiskScore = {
+  version: string;
+  value: number | null;
+  partial: boolean;
+  factors: { code: string; points: number }[];
+};
+
 export type MerchantPolicyDecision = {
   platformDecision: MerchantPolicyDecisionPart;
   merchantPolicyDecision: MerchantPolicyDecisionPart;
   jevDecision?: MerchantPolicyDecisionPart;
   finalDecision: { action: string; source: string };
+  riskScore?: MerchantRiskScore;
 };
 
 export const merchantPolicyProducts = {

@@ -9,6 +9,7 @@ import {
 } from "./merchant-demo";
 import { MerchantJevEvidence } from "./merchant-jev-evidence";
 import { PolicyDecisionDetails } from "./merchant-policy-decision";
+import { RiskScoreDetails } from "./merchant-risk-score";
 import { merchantDate, merchantDetailsHref } from "./settings/merchants/management-contracts";
 import { merchantFieldLabels, merchantOperatorLabels, policyFieldLabel } from "./settings/structured-rule-builder";
 import { useWorkspaceView } from "./workspace-view";
@@ -515,6 +516,7 @@ export function DemoScenarioResult({ transaction, merchantName }: { transaction:
         ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{result}</p>
     </div>
     {transaction.policyDecision && <div className="mt-3"><PolicyDecisionDetails decision={transaction.policyDecision} /></div>}
+    <div className="mt-3"><RiskScoreDetails score={transaction.policyDecision?.riskScore} /></div>
     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
       {final && <div><dt className="text-xs text-muted">Risk result</dt><dd className="font-semibold">{merchantOutcomeLabels[transaction.outcome]}</dd></div>}
       <div className="min-w-0"><dt className="text-xs text-muted">Merchant</dt><dd className="break-words font-semibold">{merchantName}</dd></div>

@@ -365,6 +365,7 @@ type transactionPolicyDecision struct {
 	Jev                   *policyDecisionPart `json:"jevDecision,omitempty"`
 	Final                 policyFinal         `json:"finalDecision"`
 	ScoringProfileVersion string              `json:"scoringProfileVersion,omitempty"`
+	RiskScore             *merchantRiskScore  `json:"riskScore,omitempty"`
 }
 
 func policyActionRank(action string) int {

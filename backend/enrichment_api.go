@@ -24,32 +24,32 @@ type enrichmentHandler struct {
 	auth    bookingAuth
 	service enrichment.Service
 	db      *pgxpool.Pool
-	domains func() *masterdata.Domains
 	cache   *redis.Client
 }
 
+var disposableEmailDomains = sync.OnceValue(func() *masterdata.Domains {
+	domains, err := masterdata.LoadDomains()
+	if err != nil {
+		log.Printf("Disposable email master could not be loaded: %v", err)
+		return nil
+	}
+	local := os.Getenv("PAYGUARD_EMAIL_MASTER_LOCAL")
+	if local == "" {
+		const defaultLocal = "masterdata/local/domains.txt.gz"
+		if _, err := os.Stat(defaultLocal); err == nil {
+			local = defaultLocal
+		}
+	}
+	if local != "" {
+		if err := domains.AddLocal(local); err != nil {
+			log.Printf("Local disposable email master could not be loaded: %v", err)
+		}
+	}
+	return domains
+})
+
 func newEnrichmentHandler(auth bookingAuth, db *pgxpool.Pool, redisOptions *redis.Options) (enrichmentHandler, error) {
-	handler := enrichmentHandler{auth: auth, db: db, domains: sync.OnceValue(func() *masterdata.Domains {
-		domains, err := masterdata.LoadDomains()
-		if err != nil {
-			log.Printf("Disposable email master could not be loaded: %v", err)
-			return nil
-		}
-		local := os.Getenv("PAYGUARD_EMAIL_MASTER_LOCAL")
-		if local != "" {
-			if err := domains.AddLocal(local); err != nil {
-				log.Printf("Local disposable email master could not be loaded: %v", err)
-			}
-		} else {
-			const defaultLocal = "masterdata/local/domains.txt.gz"
-			if _, err := os.Stat(defaultLocal); err == nil {
-				if err := domains.AddLocal(defaultLocal); err != nil {
-					log.Printf("Local disposable email master could not be loaded: %v", err)
-				}
-			}
-		}
-		return domains
-	})}
+	handler := enrichmentHandler{auth: auth, db: db}
 
 	enabled, err := strconv.ParseBool(env("PAYGUARD_ENRICHMENT_ENABLED", "false"))
 	if err != nil {
@@ -181,7 +181,7 @@ func (h enrichmentHandler) lookup(w http.ResponseWriter, r *http.Request) {
 		output.Email = &enrichment.Result[emailMasterData]{
 			Status: "UNKNOWN", Reason: "UNAVAILABLE", Provider: "email-master", LookedUpAt: time.Now().UTC(),
 		}
-		if domains := h.domains(); domains != nil {
+		if domains := disposableEmailDomains(); domains != nil {
 			matched, sources := domains.Lookup(domain)
 			output.Email.Status, output.Email.Reason = "OK", ""
 			output.Email.Data = &emailMasterData{Domain: domain, Listed: matched != "", MatchedDomain: matched, Sources: sources}

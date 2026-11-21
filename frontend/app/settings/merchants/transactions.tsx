@@ -7,6 +7,7 @@ import { merchantDemoRequest, merchantJevStatus, merchantOutcomeLabels, merchant
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
 import { PolicyDecisionDetails } from "../../merchant-policy-decision";
 import { MerchantJevEvidence } from "../../merchant-jev-evidence";
+import { RiskScoreDetails, riskScoreLabel } from "../../merchant-risk-score";
 import { managementError } from "./management-access";
 import { merchantDate, merchantDetailsHref } from "./management-contracts";
 import type { MerchantLedgerPage } from "./management-contracts";
@@ -162,7 +163,10 @@ export function MerchantTransactions({ token, merchant, canDecide, initialTransa
             <span className="block font-mono text-[11px] text-muted wrap-anywhere">{item.id}</span>
             <span className="block text-xs text-muted">{item.source === "checkout" ? "Mock Checkout" : "Simulation Lab"} · {merchantJevStatus(item)} · {merchantDate(item.createdAt)}</span>
           </span>
-          <span className="text-sm font-medium">{decisionLabel(item)}</span>
+          <span>
+            <span className="block text-sm font-medium">{decisionLabel(item)}</span>
+            <span className="block text-xs text-muted tabular-nums">Risk score · {riskScoreLabel(item.policyDecision?.riskScore)}</span>
+          </span>
           <span className="text-xs text-muted">{reviewStates[item.reviewState]}</span>
         </Link>
       </li>)}
@@ -209,6 +213,7 @@ function TransactionDetail({ selected, canDecide, saving, updated, onDecide }: {
       {selected.thresholdMinor != null && <div><dt className="font-medium">Saved review threshold</dt><dd className="text-muted">{count.format(selected.thresholdMinor)} minor units</dd></div>}
     </dl>
     {selected.policyDecision && <PolicyDecisionDetails decision={selected.policyDecision} />}
+    <RiskScoreDetails score={selected.policyDecision?.riskScore} />
     <p className="text-sm wrap-anywhere">{selected.reason}</p>
     {selected.jevReason && selected.jevReason !== selected.reason && <p className="text-sm wrap-anywhere"><strong>Jev assessment</strong> {selected.jevReason}</p>}
     <p className="text-sm wrap-anywhere"><strong>Rule hits</strong> {selected.ruleHits.length ? selected.ruleHits.join(", ") : "None"}</p>

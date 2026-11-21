@@ -509,6 +509,7 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 				return err
 			}
 			result = evaluateMerchantRuleDecision(decisionCtx, input, platformRules, activePolicies, evidence, jevRules, jev)
+			result.PolicyDecision.RiskScore = calculateMerchantRiskScore(input, result)
 		} else {
 			merchant := evaluateMerchantPoliciesWithJev(decisionCtx, activePolicies, evidence, jev, input.SimulateTimeout, false)
 			result = evaluateMerchantJev(decisionCtx, input, scenario, jevRules, jev)
