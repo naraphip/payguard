@@ -74,8 +74,9 @@ export function merchantDetailsHref(merchant: string, tab: MerchantTab = "overvi
 }
 
 const dateTime = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
-export function merchantDate(value?: string) {
+const dateTimeWithSeconds = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "medium" });
+export function merchantDate(value?: string, withSeconds = false) {
   if (!value) return "Unavailable";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Unavailable" : dateTime.format(date);
+  return Number.isNaN(date.getTime()) ? "Unavailable" : (withSeconds ? dateTimeWithSeconds : dateTime).format(date);
 }

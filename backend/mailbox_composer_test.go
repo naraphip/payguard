@@ -10,8 +10,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMailboxBlockCannotBeInterpretedByProvider(t *testing.T) {
@@ -27,6 +29,7 @@ func TestMailboxBlockCannotBeInterpretedByProvider(t *testing.T) {
 	}
 	for _, providerResponse := range []string{
 		strings.Replace(validThaiComposition, `"action":"BLOCK"`, `"action":"BLOCK","durationHours":12`, 1),
+		strings.Replace(validThaiComposition, `"action":"BLOCK"`, `"action":"BLOCK","durationMinutes":2`, 1),
 		strings.Replace(validThaiComposition, policyDomain, policyMailbox, 1),
 	} {
 		if _, err := parseComposerInterpretation([]byte(providerResponse), composerMerchant, profile); !errors.Is(err, errComposerOutput) {
@@ -110,18 +113,18 @@ func TestScopedMailboxInterpretationAndTransactionPostgres(t *testing.T) {
 		}),
 	}
 	mux.HandleFunc("POST "+composerPath+"/interpret", composer.interpret)
-	call := func(path, token string, input any, status int, output any) {
+	request := func(method, path, token string, input any, status int, output any) {
 		t.Helper()
 		body, err := json.Marshal(input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req := httptest.NewRequest(method, path, bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+token)
 		res := httptest.NewRecorder()
 		mux.ServeHTTP(res, req)
 		if res.Code != status {
-			t.Fatalf("POST %s returned %d, expected %d: %s", path, res.Code, status, res.Body.String())
+			t.Fatalf("%s %s returned %d, expected %d: %s", method, path, res.Code, status, res.Body.String())
 		}
 		if strings.Contains(res.Body.String(), digest) || strings.Contains(res.Body.String(), address) ||
 			strings.Contains(path, "/transactions") && firstRef != "" && strings.Contains(res.Body.String(), firstRef) {
@@ -132,6 +135,10 @@ func TestScopedMailboxInterpretationAndTransactionPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+	call := func(path, token string, input any, status int, output any) {
+		t.Helper()
+		request(http.MethodPost, path, token, input, status, output)
 	}
 	createMerchant := func(name string) (mockMerchant, mockScenario, string) {
 		t.Helper()
@@ -157,10 +164,13 @@ func TestScopedMailboxInterpretationAndTransactionPostgres(t *testing.T) {
 		{MailboxDigest: "bad digest", DurationHours: 12},
 		{MailboxDigest: digest, DurationHours: 0},
 		{MailboxDigest: digest, DurationHours: maximumMailboxBlockHours + 1},
+		{MailboxDigest: digest, DurationMinutes: -1},
+		{MailboxDigest: digest, DurationMinutes: maximumMailboxBlockMinutes + 1},
+		{MailboxDigest: digest, DurationHours: 1, DurationMinutes: 2},
 	} {
 		call(interpretPath, firstToken, map[string]any{"scope": composerMerchant, "mailboxBlock": invalid}, http.StatusUnprocessableEntity, nil)
 	}
-	interpret := func(token string) (merchantPolicyProposal, string) {
+	interpret := func(token string, block mailboxBlockInstruction) (merchantPolicyProposal, string) {
 		t.Helper()
 		var output struct {
 			Status     string
@@ -170,8 +180,8 @@ func TestScopedMailboxInterpretationAndTransactionPostgres(t *testing.T) {
 		call(interpretPath, token, map[string]any{"scope": composerMerchant, "mailboxBlock": block}, http.StatusOK, &output)
 		proposal := output.Proposal
 		if output.Status != "READY" || !output.Validation.Valid || proposal.Action != "BLOCK" ||
-			proposal.DurationHours != 12 || len(proposal.Conditions.Rules) != 1 || proposal.Conditions.Rules[0].Field != policyMailbox {
-			t.Fatal("Expected a ready, exact 12-hour block.")
+			len(proposal.Conditions.Rules) != 1 || proposal.Conditions.Rules[0].Field != policyMailbox {
+			t.Fatal("Expected a ready, exact email block.")
 		}
 		var ref string
 		if err := json.Unmarshal(proposal.Conditions.Rules[0].Value, &ref); err != nil || !validMailboxDigest(ref) || ref == digest {
@@ -179,12 +189,20 @@ func TestScopedMailboxInterpretationAndTransactionPostgres(t *testing.T) {
 		}
 		return proposal, ref
 	}
-	proposal, ref := interpret(firstToken)
+	proposal, ref := interpret(firstToken, block)
 	firstRef = ref
-	if _, otherRef := interpret(secondToken); firstRef == otherRef {
+	if proposal.DurationHours != 12 || proposal.DurationMinutes != 0 || !strings.HasSuffix(proposal.Name, "(12 h)") {
+		t.Fatal("Expected the legacy 12-hour block representation.")
+	}
+	equivalent, _ := interpret(firstToken, mailboxBlockInstruction{MailboxDigest: digest, DurationMinutes: 720})
+	if !reflect.DeepEqual(proposal, equivalent) {
+		t.Fatal("An equivalent minute instruction must preserve the rule identity.")
+	}
+	if _, otherRef := interpret(secondToken, block); firstRef == otherRef {
 		t.Fatal("Same mailbox reference was used for different merchants.")
 	}
-	call(merchantPolicyPath+"/rules", firstToken, map[string]any{"proposal": proposal}, http.StatusCreated, nil)
+	var legacy struct{ Rule merchantPolicyRule }
+	call(merchantPolicyPath+"/rules", firstToken, map[string]any{"proposal": proposal}, http.StatusCreated, &legacy)
 	amount := int64(50)
 	const sharedID = "8de823e4-9254-4d5a-b1c7-2db0ed189480"
 	transaction := func(merchant mockMerchant, scenario mockScenario, id, source, digest string, wantStatus int, wantAction string) {
@@ -219,4 +237,47 @@ func TestScopedMailboxInterpretationAndTransactionPostgres(t *testing.T) {
 		WHERE merchant_id=$1::text::uuid AND id=$2::text::uuid`, first.ID, sharedID).Scan(&storedRef); err != nil || storedRef != firstRef {
 		t.Fatal("Transaction did not store the merchant-scoped mailbox reference.")
 	}
+
+	twoMinutes := mailboxBlockInstruction{MailboxDigest: digest, DurationMinutes: 2}
+	minuteProposal, _ := interpret(firstToken, twoMinutes)
+	if minuteProposal.DurationMinutes != 2 || minuteProposal.DurationHours != 0 || !strings.HasSuffix(minuteProposal.Name, "(2 min)") {
+		t.Fatal("The preview did not retain the two-minute duration.")
+	}
+	assertTwoMinuteWindow := func(rule merchantPolicyRule, version int) {
+		t.Helper()
+		if rule.Status != "ACTIVE" || rule.Version != version || rule.ExpiresAt == nil || rule.ExpiresAt.Sub(rule.CreatedAt) != 2*time.Minute {
+			t.Fatalf("Expected version %d to activate for two minutes, got %+v.", version, rule)
+		}
+	}
+	var edited struct{ Rule merchantPolicyRule }
+	request(http.MethodPut, merchantPolicyPath+"/rules/"+legacy.Rule.ID, firstToken,
+		map[string]any{"proposal": minuteProposal, "expectedVersion": legacy.Rule.Version}, http.StatusOK, &edited)
+	assertTwoMinuteWindow(edited.Rule, 2)
+	const minuteCheckoutID = "8de823e4-9254-4d5a-b1c7-2db0ed189485"
+	transaction(first, mockScenario{}, minuteCheckoutID, "checkout", digest, http.StatusCreated, "BLOCK")
+	transaction(first, mockScenario{}, "8de823e4-9254-4d5a-b1c7-2db0ed189486", "simulation", digest, http.StatusCreated, "BLOCK")
+
+	freshMinuteProposal, _ := interpret(secondToken, twoMinutes)
+	saveRequest := map[string]any{"proposal": freshMinuteProposal}
+	var created, retried struct{ Rule merchantPolicyRule }
+	call(merchantPolicyPath+"/rules", secondToken, saveRequest, http.StatusCreated, &created)
+	assertTwoMinuteWindow(created.Rule, 1)
+	call(merchantPolicyPath+"/rules", secondToken, saveRequest, http.StatusCreated, &retried)
+	if retried.Rule.ID != created.Rule.ID || retried.Rule.Version != created.Rule.Version ||
+		retried.Rule.ExpiresAt == nil || !retried.Rule.ExpiresAt.Equal(*created.Rule.ExpiresAt) {
+		t.Fatal("Retrying the same new minute rule extended its block or created another version.")
+	}
+
+	// Place the revision at its cutoff without making the integration test sleep.
+	if _, err := db.Exec(t.Context(), `UPDATE merchant_policy_rule_versions
+		SET created_at=clock_timestamp()-interval '2 minutes'
+		WHERE merchant_id=$1::uuid AND rule_id=$2::uuid AND version=$3`, first.ID, edited.Rule.ID, edited.Rule.Version); err != nil {
+		t.Fatal(err)
+	}
+	request(http.MethodGet, merchantPolicyPath+"/rules/"+legacy.Rule.ID, firstToken, nil, http.StatusOK, &edited)
+	if edited.Rule.Status != "EXPIRED" {
+		t.Fatalf("Expected the minute rule to expire at the cutoff, got %s.", edited.Rule.Status)
+	}
+	transaction(first, mockScenario{}, "8de823e4-9254-4d5a-b1c7-2db0ed189487", "checkout", digest, http.StatusCreated, "ALLOW")
+	transaction(first, mockScenario{}, minuteCheckoutID, "checkout", digest, http.StatusOK, "BLOCK")
 }

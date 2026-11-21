@@ -318,12 +318,12 @@ When the editor shows an error while loading rule fields, use **Retry loading ru
 ### Temporary exact-email block
 
 1. Open **Merchant AI Rules** with the merchant's credential or open the merchant's **AI Rule** tab as Platform Admin. The merchant needs at least one supported product in its profile.
-2. Enter `Block email buyer@example.test 12 h.` or `บล็อกอีเมล buyer@example.test เป็นเวลา 12 ชั่วโมง`, then select **Generate preview**. Use one synthetic address and a duration from 1 to 8,760 whole hours.
-3. Verify the address, duration, and products in the preview, then select **Save Rule**. The rule covers all supported products shown in the preview. After activation, **Saved rules** shows when the block expires.
+2. Enter `block buyer@example.test 2min` or `บล็อกอีเมล buyer@example.test 2 นาที`, then select **Generate preview**. The form also accepts hour-based commands such as `Block email buyer@example.test for 12 hours`. Use one synthetic address and a duration from 1 minute to 365 days, in whole minutes or hours.
+3. Verify the address, duration, and products in the preview, then select **Save Rule**. The rule covers all supported products shown in the preview. The timer starts when the rule becomes active, and **Saved rules** shows the expiry. From **Edit**, saving creates a new version of that rule.
 4. Run a merchant-selected test in **Mock Checkout** and **Simulation Lab** with `buyer@example.test`. Check that the final decision is **Block** and the merchant policy is the source. Run again with `other@example.test` to confirm this rule only matches the first mailbox.
 5. Once the rule expires, submit a new transaction with `buyer@example.test` and verify the expired rule does not match. Replaying the original transaction with its original ID and input returns its saved decision.
 
-The full address stays in the browser. PayGuard receives a digest, derives a reference with the merchant's key, and uses that reference for matching inside PayGuard. The command does not require an OpenAI key.
+The full address stays in the browser. PayGuard receives a digest, derives a reference with the merchant's key, and checks the reference and expiry locally.
 
 ### Composer and policy APIs
 

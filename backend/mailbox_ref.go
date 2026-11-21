@@ -8,7 +8,16 @@ import (
 	"strings"
 )
 
-const maximumMailboxBlockHours = 365 * 24
+const (
+	maximumMailboxBlockHours    = 365 * 24
+	maximumMailboxBlockMinutes  = maximumMailboxBlockHours * 60
+	mailboxBlockDurationMessage = "Use one duration from 1 minute to 365 days, in whole minutes or hours."
+)
+
+func validMailboxBlockDuration(hours, minutes int) bool {
+	return (hours == 0 && minutes >= 1 && minutes <= maximumMailboxBlockMinutes) ||
+		(minutes == 0 && hours >= 1 && hours <= maximumMailboxBlockHours)
+}
 
 func validMailboxDigest(value string) bool {
 	return len(value) == sha256.Size*2 && strings.IndexFunc(value, func(r rune) bool {

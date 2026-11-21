@@ -66,8 +66,9 @@ type composerSemanticDraft struct {
 }
 
 type mailboxBlockInstruction struct {
-	MailboxDigest string `json:"mailboxDigest"`
-	DurationHours int    `json:"durationHours"`
+	MailboxDigest   string `json:"mailboxDigest"`
+	DurationHours   int    `json:"durationHours,omitempty"`
+	DurationMinutes int    `json:"durationMinutes,omitempty"`
 }
 
 func composerAuthorization(repo repository, adminToken string) mockMerchantService {
@@ -309,9 +310,9 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s ruleComposer) interpretMailboxBlock(w http.ResponseWriter, r *http.Request, actor mockMerchantActor, block mailboxBlockInstruction, started time.Time) {
-	if !validMailboxDigest(block.MailboxDigest) || block.DurationHours < 1 || block.DurationHours > maximumMailboxBlockHours {
+	if !validMailboxDigest(block.MailboxDigest) || !validMailboxBlockDuration(block.DurationHours, block.DurationMinutes) {
 		s.audit("mailbox_interpret", composerMerchant, actor, "INVALID_INSTRUCTION", "", started)
-		problem(w, http.StatusUnprocessableEntity, fmt.Sprintf("Provide an exact email address and a whole duration from 1 to %d hours.", maximumMailboxBlockHours))
+		problem(w, http.StatusUnprocessableEntity, "Provide an exact email address. "+mailboxBlockDurationMessage)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -336,9 +337,19 @@ func (s ruleComposer) interpretMailboxBlock(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	value, _ := json.Marshal(mailboxRef)
+	// Equivalent minute and hour commands keep the existing rule name and save identity.
+	if block.DurationMinutes > 0 && block.DurationMinutes%60 == 0 {
+		block.DurationHours = block.DurationMinutes / 60
+		block.DurationMinutes = 0
+	}
+	durationLabel := fmt.Sprintf("%d h", block.DurationHours)
+	if block.DurationMinutes > 0 {
+		durationLabel = fmt.Sprintf("%d min", block.DurationMinutes)
+	}
 	proposal := merchantPolicyProposal{
-		Scope: composerMerchant, Name: fmt.Sprintf("Email block %s.%s (%d h)", mailboxRef[:6], mailboxRef[6:12], block.DurationHours),
-		ProductTypes: profile.Products, Stages: profile.Stages, Action: "BLOCK", DurationHours: block.DurationHours,
+		Scope: composerMerchant, Name: fmt.Sprintf("Email block %s.%s (%s)", mailboxRef[:6], mailboxRef[6:12], durationLabel),
+		ProductTypes: profile.Products, Stages: profile.Stages, Action: "BLOCK",
+		DurationHours: block.DurationHours, DurationMinutes: block.DurationMinutes,
 		Conditions: merchantPolicyConditions{Logic: "AND", Rules: []merchantPolicyCondition{{
 			Field: policyMailbox, Operator: "eq", Value: value,
 		}}},
@@ -401,7 +412,7 @@ func parseComposerInterpretation(data []byte, scope string, profile merchantPoli
 		if !validComposerJSON(body.Proposal, &merchant) || merchant.Scope != composerMerchant {
 			return composerInterpretation{}, errComposerOutput
 		}
-		if merchant.DurationHours != 0 || slices.ContainsFunc(merchant.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+		if merchant.DurationHours != 0 || merchant.DurationMinutes != 0 || slices.ContainsFunc(merchant.Conditions.Rules, func(condition merchantPolicyCondition) bool {
 			return condition.Field == policyMailbox
 		}) {
 			return composerInterpretation{}, errComposerOutput

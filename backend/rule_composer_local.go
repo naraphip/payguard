@@ -56,7 +56,7 @@ func interpretLocalMerchantRule(instruction string, profile merchantPolicyProfil
 				Status: "CLARIFICATION", Message: "Paste one complete AI Rule JSON object or use the rule fields.",
 			}, true
 		}
-		if proposal.DurationHours != 0 || slices.ContainsFunc(proposal.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+		if proposal.DurationHours != 0 || proposal.DurationMinutes != 0 || slices.ContainsFunc(proposal.Conditions.Rules, func(condition merchantPolicyCondition) bool {
 			return condition.Field == policyMailbox
 		}) {
 			return composerInterpretation{

@@ -6,6 +6,7 @@ import type { FormEvent } from "react";
 import { getMerchantDemoRole, getMerchantDemoToken, merchantDemoRequest, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken, subscribeMerchantDemoSession } from "../merchant-demo";
 import type { DemoDirectory } from "../merchant-demo";
 import { containsMailbox, merchantMailboxDigest, parseMailboxBlock } from "../merchant-mailbox";
+import type { MailboxBlockDuration } from "../merchant-mailbox";
 import { adminRulePath, useLocalAdminPreview } from "../local-admin-preview";
 import { useWorkspaceView } from "../workspace-view";
 import type { ReactNode } from "react";
@@ -31,6 +32,7 @@ export type MerchantProposal = {
   conditions: { logic: "AND" | "OR"; rules: PolicyCondition[] };
   action: PolicyAction;
   durationHours?: number;
+  durationMinutes?: number;
 };
 type PlatformProposal = { scope: "PLATFORM"; rule: RuleInput };
 type Proposal = MerchantProposal | PlatformProposal;
@@ -75,7 +77,7 @@ export type BusinessProfile = {
 const scopeLabels = { MERCHANT: "Merchant AI Rule", PLATFORM: "Platform fraud rule" };
 const products: Record<string, string> = merchantPolicyProducts;
 const mailboxField = "customer.mailbox_ref";
-const mailboxExample = "Block email buyer@example.test for 12 hours";
+const mailboxExample = "Block email buyer@example.test for 2 minutes";
 const fields: Record<string, string> = {
   ...merchantFieldLabels,
   account_age_days: "Account age in days",
@@ -197,7 +199,8 @@ export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal
   const conditions = merchant ? proposal.conditions.rules : proposal.rule.conditions.map(({ signal, operator, value }) => ({ field: signal, operator, value }));
   const logic = merchant && proposal.conditions.logic === "OR" ? "Any condition" : "All conditions";
   const hasMailbox = conditions.some(condition => condition.field === mailboxField);
-  const duration = merchant ? proposal.durationHours : undefined;
+  const duration = merchant ? proposal.durationMinutes ?? proposal.durationHours : undefined;
+  const durationUnit = merchant && proposal.durationMinutes !== undefined ? "minute" : "hour";
   return <div className="space-y-4 rounded-lg border border-line bg-paper p-4">
     <dl className="grid gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
       <div><dt className="text-muted">Rule name</dt><dd className="font-semibold wrap-anywhere">{name}</dd></div>
@@ -205,7 +208,7 @@ export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal
       {merchant && <div><dt className="text-muted">Products</dt><dd>{proposal.product_types.map(product => products[product] ?? product).join(", ")}</dd></div>}
       <div><dt className="text-muted">When</dt><dd>{ruleStages.map(stage => stages[stage as keyof typeof stages] ?? stage).join(", ")}</dd></div>
       <div><dt className="text-muted">Action</dt><dd className="font-semibold">{policyActionLabels[action] ?? action}</dd></div>
-      {duration && <div><dt className="text-muted">Duration</dt><dd>{duration} {duration === 1 ? "hour" : "hours"} from activation</dd></div>}
+      {duration && <div><dt className="text-muted">Duration</dt><dd>{duration} {durationUnit}{duration === 1 ? "" : "s"} from activation</dd></div>}
     </dl>
     <div>
       <p className="text-sm font-semibold">{logic}</p>
@@ -236,7 +239,7 @@ export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal
 export function PolicyExpiry({ expiresAt, status }: Pick<PolicyRule, "expiresAt" | "status">) {
   if (!expiresAt) return null;
   return <p className="mt-1 text-xs text-muted">
-    {status === "EXPIRED" ? "Expired" : "Expires"} <time dateTime={expiresAt}>{merchantDate(expiresAt)}</time>
+    {status === "EXPIRED" ? "Expired" : "Expires"} <time dateTime={expiresAt}>{merchantDate(expiresAt, true)}</time>
   </p>;
 }
 
@@ -314,14 +317,15 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
     setSaved(null);
     setError("");
     try {
-      let payload: { scope: Scope; instruction: string } | { scope: Scope; mailboxBlock: { mailboxDigest: string; durationHours: number } };
+      let payload: { scope: Scope; instruction: string } | { scope: Scope; mailboxBlock: { mailboxDigest: string } & MailboxBlockDuration };
       if (mailboxBlock) {
         if (!profile?.merchantId) throw new Error("The merchant profile is unavailable. Reconnect and try again.");
-        const mailboxDigest = await merchantMailboxDigest(profile.merchantId, mailboxBlock.mailbox);
-        payload = { scope, mailboxBlock: { mailboxDigest, durationHours: mailboxBlock.durationHours } };
+        const { mailbox, ...duration } = mailboxBlock;
+        const mailboxDigest = await merchantMailboxDigest(profile.merchantId, mailbox);
+        payload = { scope, mailboxBlock: { mailboxDigest, ...duration } };
       } else {
         if (scope === "MERCHANT" && containsMailbox(instruction)) {
-          throw new Error(`To block one email address temporarily, enter a duration from 1 to 8,760 whole hours. For example, ${mailboxExample}.`);
+          throw new Error(`To block one email address, enter a duration in whole minutes or hours, up to 365 days. For example, ${mailboxExample}.`);
         }
         payload = { scope, instruction: instruction.trim() };
       }

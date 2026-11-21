@@ -236,7 +236,10 @@ func previewSemanticGroup(group merchantPolicyConditions, item merchantPolicyEvi
 	return false, missing, deferred
 }
 
-const merchantPolicyExpiry = `(CASE WHEN status='ACTIVE' THEN created_at+((proposal->>'durationHours')::integer * interval '1 hour') END)`
+const merchantPolicyExpiry = `(CASE WHEN status='ACTIVE' THEN created_at+COALESCE(
+	(proposal->>'durationMinutes')::integer * interval '1 minute',
+	(proposal->>'durationHours')::integer * interval '1 hour'
+) END)`
 
 const merchantPolicyColumns = `rule_id::text, version, status, proposal, preview, created_at, created_by, change_reason, rollback_version, ` + merchantPolicyExpiry + `, statement_timestamp()`
 

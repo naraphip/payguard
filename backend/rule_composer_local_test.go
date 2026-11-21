@@ -101,6 +101,7 @@ func TestComposerMerchantSchemaRoutesSupportedFieldTypes(t *testing.T) {
 		strings.Replace(mixedMerchantComposition, "custom_ticket_title", "custom_undeclared", 1),
 		strings.Replace(mixedMerchantComposition, "custom_ticket_title", "custom_refundable", 1),
 		strings.Replace(mixedMerchantComposition, `"Hong Kong Disneyland admission ticket"`, `"raw 198.51.100.7"`, 1),
+		strings.Replace(mixedMerchantComposition, `"action":"BLOCK"`, `"action":"BLOCK","durationMinutes":2`, 1),
 		mixedMerchantComposition + "{}",
 	} {
 		result, handled := interpretLocalMerchantRule(invalid, profile)

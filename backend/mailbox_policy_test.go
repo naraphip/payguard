@@ -33,10 +33,17 @@ func TestTemporaryMailboxProposalValidationAndMatch(t *testing.T) {
 		{"disjunction", func(p *merchantPolicyProposal) { p.Conditions.Logic = "OR" }},
 		{"zero hours", func(p *merchantPolicyProposal) { p.DurationHours = 0 }},
 		{"excessive hours", func(p *merchantPolicyProposal) { p.DurationHours = maximumMailboxBlockHours + 1 }},
+		{"two units", func(p *merchantPolicyProposal) { p.DurationMinutes = 2 }},
+		{"negative minutes", func(p *merchantPolicyProposal) { p.DurationHours, p.DurationMinutes = 0, -2 }},
+		{"excessive minutes", func(p *merchantPolicyProposal) { p.DurationHours, p.DurationMinutes = 0, maximumMailboxBlockMinutes+1 }},
 		{"invalid operator", func(p *merchantPolicyProposal) { p.Conditions.Rules[0].Operator = "ne" }},
 		{"email in title", func(p *merchantPolicyProposal) { p.Name = "Block buyer@example.test" }},
 		{"email as value", func(p *merchantPolicyProposal) { p.Conditions.Rules[0].Value = json.RawMessage(`"buyer@example.test"`) }},
 		{"duration on domain rule", func(p *merchantPolicyProposal) {
+			p.Conditions.Rules[0] = merchantPolicyCondition{Field: policyDomain, Operator: "eq", Value: json.RawMessage(`"example.test"`)}
+		}},
+		{"minute duration on domain rule", func(p *merchantPolicyProposal) {
+			p.DurationHours, p.DurationMinutes = 0, 2
 			p.Conditions.Rules[0] = merchantPolicyCondition{Field: policyDomain, Operator: "eq", Value: json.RawMessage(`"example.test"`)}
 		}},
 	} {
@@ -47,6 +54,11 @@ func TestTemporaryMailboxProposalValidationAndMatch(t *testing.T) {
 				t.Fatal("Invalid temporary block accepted.")
 			}
 		})
+	}
+	minute := temporaryMailboxProposal()
+	minute.DurationHours, minute.DurationMinutes = 0, 2
+	if err := minute.validate(profile); err != nil {
+		t.Fatal(err)
 	}
 	proposal := temporaryMailboxProposal()
 	if err := proposal.validate(profile); err != nil {

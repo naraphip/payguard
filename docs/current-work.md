@@ -15,6 +15,12 @@ Platform Admin and Merchant now share **AI Rule** for merchant rule authoring an
 - Focused backend unit and PostgreSQL integration tests passed for scoped authoring, local short-circuiting, approved outbound evidence, provider failure, tool parity and replay after disabling a rule. Run `go test -count=1 -run 'TestMerchantSemantic|TestManagedAuthoringWithoutComposerPostgres' ./...` from `backend` with a disposable `PAYGUARD_POLICY_TEST_DATABASE_URL`. The full Go test suite and race suite passed against disposable PostgreSQL, and Go vet passed. The frontend typecheck and isolated production build passed. The browser showed the semantic preview under the unified rule editor.
 - The local assessment backend was healthy on port 8082. The page's profile, saved policies, existing booking review rules, and test context reads returned HTTP 200 through the Next.js proxy on port 3001.
 
+## Exact-email blocks in minutes
+
+The Merchant AI Rule editor accepts `block buyer@example.test 2min` and `บล็อกอีเมล buyer@example.test 2 นาที` for new rules or edits. PayGuard checks the merchant-scoped mailbox reference and expires the rule from activation. The API also accepts hour-based commands. [Test steps](simulation-runbook.md#temporary-exact-email-block)
+
+- Focused Go and disposable PostgreSQL tests verified a 120-second expiry, block decisions from Mock Checkout and Simulation Lab while active, a fresh Allow result after expiry with no other restrictive rule, and preservation of the original Block on replay. Repeating the create request preserved the expiry. The frontend mailbox tests, TypeScript check, and isolated production build passed.
+
 ## Merchant rule testing and local Platform Admin
 
 Mock Checkout and Simulation Lab run the selected merchant's Platform Rules, Merchant Policies, published Jev review rules and configured Jev advisory. Choose a merchant and a product to run a test. Open its **Transactions** to compare each decision and saved version. Previous scenario transactions retain their original results and can still replay through the API. [Requirements](requirements/merchant-scenarios.md) · [Local evaluation](simulation-runbook.md#merchant-scenarios-and-jev)

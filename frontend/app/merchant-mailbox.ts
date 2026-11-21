@@ -1,9 +1,14 @@
 const mailboxLocalPart = /^[\p{L}\p{M}\p{N}.!#$%&'*+/=?^_`{|}~-]+$/u;
 const mailboxInInstruction = /([\p{L}\p{M}\p{N}.!#$%&'*+/=?^_`{|}~-]+)@[\p{L}\p{M}\p{N}-]+(?:\.[\p{L}\p{M}\p{N}-]+)+/gu;
-const englishBlock = /^block[ \t]+(?:email(?:[ \t]+address)?[ \t]+)?(\S+)[ \t]+(?:for[ \t]+)?([1-9]\d{0,3})[ \t]*h(?:rs?|ours?)?\.?$/iu;
-const thaiBlock = /^บล็อก[ \t]*(?:อีเมล[ \t]+)?(\S+)[ \t]+(?:เป็นเวลา[ \t]*)?([1-9]\d{0,3})[ \t]*(?:ชั่วโมง|ชม)\.?$/u;
+const englishBlock = /^block[ \t]+(?:email(?:[ \t]+address)?[ \t]+)?(\S+)[ \t]+(?:for[ \t]+)?([1-9]\d{0,5})[ \t]*(h(?:rs?|ours?)?|m(?:ins?|inutes?)?)\.?$/iu;
+const thaiBlock = /^บล็อก[ \t]*(?:อีเมล[ \t]+)?(\S+)[ \t]+(?:เป็นเวลา[ \t]*)?([1-9]\d{0,5})[ \t]*(ชั่วโมง|ชม|นาที)\.?$/u;
+const maxBlockHours = 365 * 24;
+const maxBlockMinutes = maxBlockHours * 60;
 
 type ScenarioEmail = { domain?: string; mailbox?: string };
+export type MailboxBlockDuration =
+  | { durationMinutes: number; durationHours?: never }
+  | { durationHours: number; durationMinutes?: never };
 
 export function parseScenarioEmail(value?: string): ScenarioEmail | null {
   const entered = value?.trim();
@@ -30,7 +35,7 @@ export function containsMailbox(instruction: string): boolean {
   return Array.from(instruction.matchAll(mailboxInInstruction)).some(([, local]) => local !== "*");
 }
 
-export function parseMailboxBlock(instruction: string) {
+export function parseMailboxBlock(instruction: string): ({ mailbox: string } & MailboxBlockDuration) | null {
   let command = instruction.trim();
   if ((command.startsWith('"') && command.endsWith('"')) || (command.startsWith("“") && command.endsWith("”"))) {
     command = command.slice(1, -1).trim();
@@ -38,8 +43,13 @@ export function parseMailboxBlock(instruction: string) {
   const match = englishBlock.exec(command) ?? thaiBlock.exec(command);
   if (!match) return null;
   const mailbox = parseScenarioEmail(match[1])?.mailbox;
-  const durationHours = Number(match[2]);
-  return mailbox && durationHours <= 8760 ? { mailbox, durationHours } : null;
+  if (!mailbox) return null;
+  const duration = Number(match[2]);
+  const unit = match[3].toLowerCase();
+  if (unit.startsWith("m") || unit === "นาที") {
+    return duration <= maxBlockMinutes ? { mailbox, durationMinutes: duration } : null;
+  }
+  return duration <= maxBlockHours ? { mailbox, durationHours: duration } : null;
 }
 
 export async function merchantMailboxDigest(merchantId: string, mailbox: string) {

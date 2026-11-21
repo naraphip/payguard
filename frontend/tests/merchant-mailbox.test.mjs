@@ -14,12 +14,31 @@ test("interprets a standalone exact block in English or Thai", () => {
   }
 });
 
+test("interprets minute-based blocks and keeps the original hour contract", () => {
+  for (const [command, duration] of [
+    ["block buyer@example.test 2min", { durationMinutes: 2 }],
+    ['"BLOCK Email Address buyer@EXAMPLE.TEST for 2 MIN."', { durationMinutes: 2 }],
+    ["บล็อกอีเมล buyer@example.test เป็นเวลา 2 นาที", { durationMinutes: 2 }],
+    ["Block buyer@example.test for 1 minute", { durationMinutes: 1 }],
+    ["Block buyer@example.test for 525600 minutes", { durationMinutes: 525600 }],
+    ["Block buyer@example.test for 8760 hours", { durationHours: 8760 }],
+  ]) {
+    assert.deepEqual(parseMailboxBlock(command), { mailbox: "buyer@example.test", ...duration });
+  }
+});
+
 test("leaves compound, mismatched and invalid commands out of exact blocking", () => {
   for (const command of [
     '"Block email buyer@example.test for 12 hours" for hotels only',
     "“Block email buyer@example.test for 12 hours and review other bookings”",
     "“Block email buyer@example.test for 12 hours\"",
     "Block email buyer@example.test for 8761 hours",
+    "Block buyer@example.test for 525601 minutes",
+    "Block buyer@example.test for 0 minutes",
+    "Block buyer@example.test for 2.5min",
+    "Block buyer@example.test for 1h 2min",
+    "Block buyer@example.test for 120 seconds",
+    "Block buyer@example.test for 2min and review other bookings",
     "Block email *@example.test for 12 hours",
   ]) {
     assert.equal(parseMailboxBlock(command), null);

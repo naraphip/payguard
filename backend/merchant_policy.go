@@ -48,13 +48,14 @@ type merchantPolicyConditions struct {
 }
 
 type merchantPolicyProposal struct {
-	Scope         string                   `json:"scope"`
-	Name          string                   `json:"name"`
-	ProductTypes  []string                 `json:"product_types"`
-	Stages        []string                 `json:"stages"`
-	Conditions    merchantPolicyConditions `json:"conditions"`
-	Action        string                   `json:"action"`
-	DurationHours int                      `json:"durationHours,omitempty"`
+	Scope           string                   `json:"scope"`
+	Name            string                   `json:"name"`
+	ProductTypes    []string                 `json:"product_types"`
+	Stages          []string                 `json:"stages"`
+	Conditions      merchantPolicyConditions `json:"conditions"`
+	Action          string                   `json:"action"`
+	DurationHours   int                      `json:"durationHours,omitempty"`
+	DurationMinutes int                      `json:"durationMinutes,omitempty"`
 }
 
 type policyField struct {
@@ -164,10 +165,10 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 		if p.Action != "BLOCK" || p.Conditions.Logic != "AND" || len(p.Conditions.Rules) != 1 {
 			return errors.New("A temporary email block requires one exact mailbox condition.")
 		}
-		if p.DurationHours < 1 || p.DurationHours > maximumMailboxBlockHours {
-			return fmt.Errorf("Enter a temporary email block duration from 1 to %d hours.", maximumMailboxBlockHours)
+		if !validMailboxBlockDuration(p.DurationHours, p.DurationMinutes) {
+			return errors.New(mailboxBlockDurationMessage)
 		}
-	} else if p.DurationHours != 0 {
+	} else if p.DurationHours != 0 || p.DurationMinutes != 0 {
 		return errors.New("A duration is supported for temporary email blocks.")
 	}
 	for i := range p.Conditions.Rules {
