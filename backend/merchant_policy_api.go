@@ -3,7 +3,10 @@ package main
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -158,6 +161,7 @@ func (s mockMerchantService) policyMutate(w http.ResponseWriter, r *http.Request
 		Proposal        merchantPolicyProposal `json:"proposal"`
 		Version         int                    `json:"version"`
 		ExpectedVersion int                    `json:"expectedVersion"`
+		Instruction     string                 `json:"instruction"`
 	}{}
 	operation := "save"
 	id := r.PathValue("id")
@@ -191,6 +195,26 @@ func (s mockMerchantService) policyMutate(w http.ResponseWriter, r *http.Request
 	if !decodeBookingRiskJSON(w, r, &input) {
 		return
 	}
+	instruction := strings.TrimSpace(input.Instruction)
+	if instruction != "" {
+		if operation != "save" && operation != "edit" {
+			problem(w, http.StatusUnprocessableEntity, "Supply a rule instruction when saving or editing a rule.")
+			return
+		}
+		if utf8.RuneCountInString(instruction) > 2000 || sensitiveComposerText(instruction) ||
+			strings.IndexFunc(instruction, func(r rune) bool {
+				return unicode.IsControl(r) && r != '\t' && r != '\n' && r != '\r'
+			}) != -1 || slices.ContainsFunc(input.Proposal.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+			return condition.Field == policyMailbox
+		}) {
+			problem(w, http.StatusUnprocessableEntity, "Save a rule description of up to 2,000 characters without personal data or credentials.")
+			return
+		}
+		if emailRiskMention.MatchString(instruction) && !emailRiskProposalHasSignal(input.Proposal) {
+			problem(w, http.StatusUnprocessableEntity, "Add the email condition from your instruction before saving.")
+			return
+		}
+	}
 	if id != "" && input.ExpectedVersion <= 0 {
 		problem(w, http.StatusUnprocessableEntity, "The latest expectedVersion is required.")
 		return
@@ -204,7 +228,8 @@ func (s mockMerchantService) policyMutate(w http.ResponseWriter, r *http.Request
 		actor = platformMaker
 	}
 	rule, err := s.repo.mutateMerchantPolicy(r.Context(), merchant, merchantPolicyMutation{
-		Actor: actor, Kind: operation, ID: id, ExpectedVersion: input.ExpectedVersion, RollbackVersion: input.Version, Proposal: input.Proposal,
+		Actor: actor, Kind: operation, ID: id, ExpectedVersion: input.ExpectedVersion, RollbackVersion: input.Version,
+		Proposal: input.Proposal, Instruction: instruction,
 	})
 	if err != nil {
 		merchantPolicyError(w, err)

@@ -72,6 +72,7 @@ ALTER TABLE merchant_demo_transactions
   ADD COLUMN IF NOT EXISTS account_age_days bigint CHECK (account_age_days BETWEEN 0 AND 36500),
   ADD COLUMN IF NOT EXISTS jev_reason text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS customer_mailbox_ref text NOT NULL DEFAULT '',
+	ADD COLUMN IF NOT EXISTS customer_email_random boolean,
   ADD COLUMN IF NOT EXISTS customer_id_ref text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS jev_rule_version text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS jev_answer text NOT NULL DEFAULT '' CHECK (jev_answer IN ('', 'LOW_RISK', 'REVIEW')),
@@ -358,7 +359,7 @@ SELECT t.id::text, t.merchant_id::text, COALESCE(t.scenario_id::text, ''), COALE
 	s.threshold_minor, t.source, t.product, t.amount_minor, t.simulate_timeout, t.outcome, t.reason, t.rule_hits, t.jev_status,
 	t.jev_version, t.jev_rule_version, t.jev_answer, t.jev_decision_id, t.jev_confidence, t.jev_configuration_version,
 	t.created_at, t.disposition, t.decided_by, t.decided_at, t.customer_email_domain, t.customer_mailbox_ref, t.customer_id_ref, t.policy_decision,
-	t.platform_rule_version, t.jev_reason, t.account_age_days, t.custom_signals, ` + merchantTransactionStatus + `, ` + merchantTransactionReview + `
+	t.platform_rule_version, t.jev_reason, t.account_age_days, t.custom_signals, t.customer_email_random, ` + merchantTransactionStatus + `, ` + merchantTransactionReview + `
 FROM merchant_demo_transactions t
 JOIN merchant_demo_merchants m ON m.id=t.merchant_id AND m.deleted_at IS NULL
 LEFT JOIN merchant_demo_scenarios s ON s.merchant_id=t.merchant_id AND s.id=t.scenario_id AND s.revision=t.scenario_revision
@@ -370,7 +371,7 @@ func scanMockTransaction(row pgx.Row) (mockTransaction, error) {
 		&result.ThresholdMinor, &result.Source, &result.Product, &result.AmountMinor, &result.simulateTimeout, &result.Outcome,
 		&result.Reason, &result.RuleHits, &result.JevStatus, &result.JevVersion, &result.JevRuleVersion, &result.JevAnswer, &result.JevDecisionID, &result.JevConfidence, &result.JevConfigurationVersion, &result.CreatedAt,
 		&result.Disposition, &result.DecidedBy, &result.DecidedAt, &result.CustomerEmailDomain, &result.customerMailboxRef, &result.customerIDRef, &result.PolicyDecision,
-		&result.RuleVersion, &result.JevReason, &result.AccountAgeDays, &result.CustomSignals, &result.Status, &result.ReviewState)
+		&result.RuleVersion, &result.JevReason, &result.AccountAgeDays, &result.CustomSignals, &result.customerEmailRandom, &result.Status, &result.ReviewState)
 	if err != nil {
 		return result, err
 	}
@@ -440,10 +441,13 @@ func evaluateMockJev(input mockTransactionInput, scenario mockScenario) mockTran
 }
 
 func (result mockTransaction) matchesRequest(input mockTransactionInput) bool {
+	random := input.CustomerEmailShape.randomLocalPart()
+	sameEmailObservation := result.customerEmailRandom == random ||
+		result.customerEmailRandom != nil && random != nil && *result.customerEmailRandom == *random
 	return result.ScenarioID == input.ScenarioID && result.Source == input.Source && result.Product == input.Product &&
 		result.CustomerEmailDomain == input.CustomerEmailDomain && sameBookingAmount(result.AmountMinor, input.AmountMinor) &&
 		result.simulateTimeout == input.SimulateTimeout && sameBookingAmount(result.AccountAgeDays, input.AccountAgeDays) &&
-		equalCustomSignals(result.CustomSignals, input.CustomSignals)
+		sameEmailObservation && equalCustomSignals(result.CustomSignals, input.CustomSignals)
 }
 func (r repository) saveMockTransaction(ctx context.Context, merchantID string, input mockTransactionInput, options ...merchantJev) (mockTransaction, bool, error) {
 	var jev merchantJev
@@ -519,6 +523,7 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		evidence := merchantPolicyEvidence{
 			product: input.Product, stage: merchantPolicyStage(input.Product), domain: input.CustomerEmailDomain,
 			mailboxRef: mailboxRef, amount: input.AmountMinor, custom: input.CustomSignals,
+			randomLocalPart: input.CustomerEmailShape.randomLocalPart(),
 		}
 		// Reserve time for writing the decision after Jev, including after waiting for the merchant lock.
 		decisionDeadline := time.Now().Add(10 * time.Second)
@@ -558,6 +563,7 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		result.MerchantID = merchantID
 		result.CustomerEmailDomain = input.CustomerEmailDomain
 		result.customerMailboxRef = mailboxRef
+		result.customerEmailRandom = evidence.randomLocalPart
 		result.customerIDRef = customerRef
 		result.AccountAgeDays = input.AccountAgeDays
 		if len(input.CustomSignals) > 0 {
@@ -569,15 +575,15 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 				(merchant_id, id, scenario_id, scenario_revision, source, product, amount_minor, simulate_timeout,
 				 outcome, reason, rule_hits, jev_status, jev_version, jev_rule_version, customer_email_domain, customer_mailbox_ref,
 				 policy_decision, jev_answer, jev_decision_id, jev_confidence, jev_configuration_version,
-			 platform_rule_version, jev_reason, account_age_days, custom_signals, customer_id_ref)
+				 platform_rule_version, jev_reason, account_age_days, custom_signals, customer_id_ref, customer_email_random)
 			VALUES ($1::text::uuid, $2::text::uuid, NULLIF($3::text,'')::uuid, NULLIF($4::int,0), $5, $6, $7, $8, $9, $10, $11, $12, $13,
-			 $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+			 $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 			RETURNING created_at, `+merchantTransactionStatus+`, `+merchantTransactionReview,
 			merchantID, input.ID, input.ScenarioID, result.ScenarioVersion, input.Source, input.Product, input.AmountMinor,
 			input.SimulateTimeout, result.Outcome, result.Reason, result.RuleHits, result.JevStatus, result.JevVersion,
 			result.JevRuleVersion, result.CustomerEmailDomain, result.customerMailboxRef, result.PolicyDecision,
 			result.JevAnswer, result.JevDecisionID, result.JevConfidence, result.JevConfigurationVersion,
-			result.RuleVersion, result.JevReason, result.AccountAgeDays, result.CustomSignals, result.customerIDRef).Scan(&result.CreatedAt, &result.Status, &result.ReviewState)
+			result.RuleVersion, result.JevReason, result.AccountAgeDays, result.CustomSignals, result.customerIDRef, result.customerEmailRandom).Scan(&result.CreatedAt, &result.Status, &result.ReviewState)
 		created = err == nil
 		return err
 	})

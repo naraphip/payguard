@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS merchant_policy_rule_versions (
 	PRIMARY KEY (merchant_id, rule_id, version),
 	FOREIGN KEY (merchant_id, rule_id, rollback_version) REFERENCES merchant_policy_rule_versions(merchant_id, rule_id, version)
 );
+ALTER TABLE merchant_policy_rule_versions ADD COLUMN IF NOT EXISTS instruction text NOT NULL DEFAULT '';
 `
 
 var (
@@ -72,6 +73,7 @@ type merchantPolicyRule struct {
 	ActiveVersion   int                    `json:"activeVersion,omitempty"`
 	Status          string                 `json:"status"`
 	Proposal        merchantPolicyProposal `json:"proposal"`
+	Instruction     string                 `json:"instruction,omitempty"`
 	Preview         merchantPolicyPreview  `json:"preview"`
 	CreatedAt       time.Time              `json:"createdAt"`
 	ExpiresAt       *time.Time             `json:"expiresAt,omitempty"`
@@ -108,7 +110,7 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	}
 	declaredAmount, declaredDomain := hasAmount, hasDomain
 	observedAmount, observedDomain := map[string]bool{}, map[string]bool{}
-	rows, err := db.Query(ctx, `SELECT product, amount_minor, customer_email_domain, customer_mailbox_ref, custom_signals FROM merchant_demo_transactions
+	rows, err := db.Query(ctx, `SELECT product, amount_minor, customer_email_domain, customer_mailbox_ref, customer_email_random, custom_signals FROM merchant_demo_transactions
 		WHERE merchant_id=$1::text::uuid ORDER BY created_at DESC,id DESC LIMIT 200`, merchant)
 	if err != nil {
 		return profile, nil, err
@@ -117,7 +119,7 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	var evidence []merchantPolicyEvidence
 	for rows.Next() {
 		var item merchantPolicyEvidence
-		if err := rows.Scan(&item.product, &item.amount, &item.domain, &item.mailboxRef, &item.custom); err != nil {
+		if err := rows.Scan(&item.product, &item.amount, &item.domain, &item.mailboxRef, &item.randomLocalPart, &item.custom); err != nil {
 			return profile, nil, err
 		}
 		item.stage = merchantPolicyStage(item.product)
@@ -148,19 +150,24 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 		profile.Signals = append(profile.Signals, policyAmount)
 	}
 	if hasDomain {
-		profile.Signals = append(profile.Signals, policyDomain)
+		profile.Signals = append(profile.Signals, policyDomain, policyDisposableEmail)
 	}
 	if len(profile.Products) > 0 {
-		profile.Signals = append(profile.Signals, policyMailbox, policyDescription)
+		profile.Signals = append(profile.Signals, policyMailbox, policyRandomEmail, policyDescription)
 	}
 	for _, signal := range profile.Signals {
 		entry := merchantCapability{Name: signal, policyField: merchantPolicyFields[signal], Products: []string{}, Stages: []string{}}
-		if signal == policyDescription {
+		switch signal {
+		case policyDescription:
 			entry.Label = "Transaction description"
+		case policyDisposableEmail:
+			entry.Label = "Disposable email domain"
+		case policyRandomEmail:
+			entry.Label = "Random-looking email username"
 		}
 		for _, product := range profile.Products {
 			if (signal == policyAmount && !declaredAmount && !observedAmount[product]) ||
-				(signal == policyDomain && !declaredDomain && !observedDomain[product]) {
+				((signal == policyDomain || signal == policyDisposableEmail) && !declaredDomain && !observedDomain[product]) {
 				continue
 			}
 			entry.Products = append(entry.Products, product)
@@ -241,13 +248,13 @@ const merchantPolicyExpiry = `(CASE WHEN status='ACTIVE' THEN created_at+COALESC
 	(proposal->>'durationHours')::integer * interval '1 hour'
 ) END)`
 
-const merchantPolicyColumns = `rule_id::text, version, status, proposal, preview, created_at, created_by, change_reason, rollback_version, ` + merchantPolicyExpiry + `, statement_timestamp()`
+const merchantPolicyColumns = `rule_id::text, version, status, proposal, preview, created_at, created_by, change_reason, rollback_version, instruction, ` + merchantPolicyExpiry + `, statement_timestamp()`
 
 func scanMerchantPolicy(row pgx.Row) (merchantPolicyRule, error) {
 	var rule merchantPolicyRule
 	var asOf time.Time
 	err := row.Scan(&rule.ID, &rule.Version, &rule.Status, &rule.Proposal, &rule.Preview,
-		&rule.CreatedAt, &rule.CreatedBy, &rule.ChangeReason, &rule.RollbackVersion, &rule.ExpiresAt, &asOf)
+		&rule.CreatedAt, &rule.CreatedBy, &rule.ChangeReason, &rule.RollbackVersion, &rule.Instruction, &rule.ExpiresAt, &asOf)
 	if rule.ExpiresAt != nil && !asOf.Before(*rule.ExpiresAt) {
 		rule.Status = "EXPIRED"
 	}
@@ -315,6 +322,7 @@ type merchantPolicyMutation struct {
 	ExpectedVersion int
 	RollbackVersion int
 	Proposal        merchantPolicyProposal
+	Instruction     string
 }
 
 func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, request merchantPolicyMutation) (merchantPolicyRule, error) {
@@ -340,6 +348,7 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 			}
 		}
 		proposal := request.Proposal
+		instruction := request.Instruction
 		var rollback *int
 		switch request.Kind {
 		case "activate", "disable", "delete":
@@ -351,6 +360,7 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 				return nil
 			}
 			proposal = current.Proposal
+			instruction = current.Instruction
 		case "rollback":
 			previous, err := scanMerchantPolicy(tx.QueryRow(ctx, `SELECT `+merchantPolicyColumns+`
 				FROM merchant_policy_rule_versions WHERE merchant_id=$1::text::uuid AND rule_id=$2::text::uuid AND version=$3`,
@@ -359,6 +369,7 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 				return err
 			}
 			proposal, rollback = previous.Proposal, &request.RollbackVersion
+			instruction = previous.Instruction
 		}
 		status := "ACTIVE"
 		var preview merchantPolicyPreview
@@ -423,9 +434,9 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 			actor = merchant
 		}
 		result, err = scanMerchantPolicy(tx.QueryRow(ctx, `
-			INSERT INTO merchant_policy_rule_versions(merchant_id,rule_id,version,status,proposal,preview,created_by,change_reason,rollback_version)
-			VALUES($1::text::uuid, COALESCE(NULLIF($2,'')::uuid,gen_random_uuid()),$3,$4,$5,$6,$9,$7,$8)
-			RETURNING `+merchantPolicyColumns, merchant, request.ID, current.Version+1, status, proposal, preview, request.Kind, rollback, actor))
+			INSERT INTO merchant_policy_rule_versions(merchant_id,rule_id,version,status,proposal,preview,created_by,change_reason,rollback_version,instruction)
+			VALUES($1::text::uuid, COALESCE(NULLIF($2,'')::uuid,gen_random_uuid()),$3,$4,$5,$6,$9,$7,$8,$10)
+			RETURNING `+merchantPolicyColumns, merchant, request.ID, current.Version+1, status, proposal, preview, request.Kind, rollback, actor, instruction))
 		if status == "ACTIVE" {
 			result.ActiveVersion = result.Version
 		}

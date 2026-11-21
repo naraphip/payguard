@@ -274,6 +274,11 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 			respond(w, http.StatusOK, output)
 			return
 		}
+		if output, handled := interpretEmailRiskRule(instruction, profile); handled {
+			s.audit("interpret_local", input.Scope, actor, output.Status, "", started)
+			respond(w, http.StatusOK, output)
+			return
+		}
 		sentence := strings.TrimSpace(strings.TrimSuffix(unquoteRuleText(instruction), "."))
 		if hasCustomRuleLifetime(sentence) {
 			s.audit("interpret_local", input.Scope, actor, "UNSUPPORTED_DURATION", "", started)

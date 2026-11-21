@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { merchantMailboxDigest, parseScenarioEmail } from "./merchant-mailbox";
+import { merchantEmailShape, merchantMailboxDigest, parseScenarioEmail } from "./merchant-mailbox";
+import type { MerchantEmailShape } from "./merchant-mailbox";
 import {
   getMerchantDemoRole, getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken,
 } from "./merchant-demo";
@@ -64,6 +65,7 @@ type ScenarioAttempt = Omit<ScenarioInputs, "customerEmail" | "accountAgeDays" |
   id: string;
   customerEmailDomain?: string;
   customerMailboxDigest?: string;
+  customerEmailShape?: MerchantEmailShape;
   accountAgeDays?: number;
   customSignals?: Record<string, string | number | boolean>;
 };
@@ -318,6 +320,7 @@ export function useDemoScenario(source: ScenarioSource) {
         accountAgeDays: readAccountAge(accountAgeDays),
         customSignals: readCustomSignals(context, product, customSignals),
         customerMailboxDigest: email.mailbox ? await merchantMailboxDigest(merchant.id, email.mailbox) : undefined,
+        customerEmailShape: email.mailbox ? merchantEmailShape(email.mailbox) : undefined,
       };
       if (requestGeneration.current !== request) return;
       setPending(attempt);
@@ -406,7 +409,7 @@ export function DemoScenarioEmailField({ value, onChange }: { value: string; onC
     <input className="control mt-1.5" value={value} maxLength={320} placeholder="buyer@example.test (optional)"
       autoComplete="off" autoCapitalize="none" spellCheck={false} aria-describedby={helpId}
       onChange={event => onChange(event.currentTarget.value)} />
-    <span id={helpId} className="mt-1.5 block text-xs font-normal text-muted">Enter the full synthetic address to test an exact-email block. A bare domain only supplies domain evidence.</span>
+    <span id={helpId} className="mt-1.5 block text-xs font-normal text-muted">Enter a full synthetic address to test the exact address or its username pattern. A bare domain supplies domain evidence, including the disposable-domain check.</span>
   </label>;
 }
 

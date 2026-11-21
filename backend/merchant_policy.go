@@ -76,11 +76,13 @@ type merchantCapability struct {
 }
 
 var merchantPolicyFields = map[string]policyField{
-	policyDescription: {"text", customSignalOperators("text"), "transaction description supplied by the merchant", "non-identifying metadata", "no_match"},
-	policyDomain:      {"string", []string{"eq"}, "merchant transaction email domain", "normalized-domain", "no_match"},
-	policyMailbox:     {"string", []string{"eq"}, "merchant transaction mailbox reference", "merchant-scoped-reference", "no_match"},
-	policyAmount:      {"number", []string{"eq", "ne", "gt", "gte", "lt", "lte"}, "merchant transaction amount", "transaction-amount", "no_match"},
-	policyProduct:     {"enum", []string{"eq"}, "merchant transaction product", "catalog-metadata", "no_match"},
+	policyDescription:     {"text", customSignalOperators("text"), "transaction description supplied by the merchant", "non-identifying metadata", "no_match"},
+	policyDomain:          {"string", []string{"eq"}, "merchant transaction email domain", "normalized-domain", "no_match"},
+	policyDisposableEmail: {"boolean", []string{"eq", "ne"}, "disposable domain list matched against the merchant transaction email domain", "derived-email-signal", "no_match"},
+	policyRandomEmail:     {"boolean", []string{"eq", "ne"}, "PayGuard random-looking local-part check from mailbox shape counts", "derived-email-signal", "no_match"},
+	policyMailbox:         {"string", []string{"eq"}, "merchant transaction mailbox reference", "merchant-scoped-reference", "no_match"},
+	policyAmount:          {"number", []string{"eq", "ne", "gt", "gte", "lt", "lte"}, "merchant transaction amount", "transaction-amount", "no_match"},
+	policyProduct:         {"enum", []string{"eq"}, "merchant transaction product", "catalog-metadata", "no_match"},
 }
 
 // Only stages that the merchant transaction intake actually evaluates belong here.
@@ -139,6 +141,9 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 	}
 	if !slices.Contains([]string{"BLOCK", "REVIEW", "CHALLENGE"}, p.Action) {
 		return errors.New("Merchant Policy actions are BLOCK, REVIEW, and CHALLENGE.")
+	}
+	if emailRiskMention.MatchString(p.Name) && !emailRiskProposalHasSignal(*p) {
+		return errors.New("Add the email condition named in this rule before saving.")
 	}
 	if err := policyList(p.ProductTypes, profile.Products, "product"); err != nil {
 		return err
@@ -213,6 +218,10 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 			continue
 		}
 		switch field.DataType {
+		case "boolean":
+			if !validCustomValue(field.DataType, condition.Value) {
+				return fmt.Errorf("Enter true or false for %s.", condition.Field)
+			}
 		case "number":
 			amount, err := strconv.ParseInt(strings.TrimSpace(string(condition.Value)), 10, 64)
 			if err != nil || !validDemoAmount(&amount) {
@@ -264,12 +273,13 @@ func sortedPolicyValues(values []string) []string {
 }
 
 type merchantPolicyEvidence struct {
-	product    string
-	stage      string
-	domain     string
-	mailboxRef string
-	amount     *int64
-	custom     map[string]json.RawMessage
+	product         string
+	stage           string
+	domain          string
+	mailboxRef      string
+	randomLocalPart *bool
+	amount          *int64
+	custom          map[string]json.RawMessage
 }
 
 func (p merchantPolicyProposal) evaluate(evidence merchantPolicyEvidence) (matched, missing bool) {
@@ -298,6 +308,20 @@ func (condition merchantPolicyCondition) evaluate(evidence merchantPolicyEvidenc
 		return evaluateCustomCondition(condition, evidence.custom)
 	}
 	switch condition.Field {
+	case policyDisposableEmail, policyRandomEmail:
+		actual := evidence.randomLocalPart
+		if condition.Field == policyDisposableEmail {
+			actual = disposableEmailEvidence(evidence.domain)
+		}
+		if actual == nil {
+			return false, true
+		}
+		var expected *bool
+		if json.Unmarshal(condition.Value, &expected) != nil || expected == nil {
+			return false, false
+		}
+		return (condition.Operator == "eq" && *actual == *expected) ||
+			(condition.Operator == "ne" && *actual != *expected), false
 	case policyProduct, policyDomain, policyMailbox:
 		var actual string
 		switch condition.Field {

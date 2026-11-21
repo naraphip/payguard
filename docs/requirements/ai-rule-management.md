@@ -20,6 +20,8 @@ The profile reads the existing merchant record, its saved setup, optional `polic
 | --- | --- | --- |
 | `product.type` | Enum, `eq` | `flight_ticket` and `hotel_room` use `BOOKING`. `physical` and `digital` use `CHECKOUT`. `payment_gateway` uses `CHECKOUT` in the merchant panel in Simulation Lab. The proposal includes the corresponding products and stages. |
 | `customer.email_domain` | String, `eq` | Uses the normalized bare domain. IDNA normalization and case folding preserve exact equality. A subdomain, suffix lookalike, or absent domain fails the comparison. |
+| `customer.email_disposable` | Boolean, `eq`, `ne` | Checks the normalized domain against the disposable email domain list. An absent domain or unavailable list leaves the signal missing. A supplied domain absent from the list produces `false`. |
+| `customer.email_local_part_random` | Boolean, `eq`, `ne` | Checks the shape of the part before `@`. A bare domain, a legacy transaction without the shape result, or an input whose shape cannot be calculated leaves this signal missing. |
 | `customer.mailbox_ref` | String, `eq` | Uses a server-derived reference scoped to the merchant. A different mailbox on the same domain or absent mailbox evidence fails the comparison. |
 | `order.amount_minor` | Nonnegative integer, `eq`, `ne`, `gt`, `gte`, `lt`, `lte` | Uses minor units. A missing amount fails the comparison. An observed zero is a valid amount. |
 | `transaction.description` | Text, `eq`, `contains`, `semantic_match` | Optional description of the item or service. Submit it as a `customSignals` entry with this key. |
@@ -50,6 +52,31 @@ A temporary exact-email rule uses `BLOCK`, one `customer.mailbox_ref` equality c
 ```
 
 Platform proposals use the existing stage-specific System Rules signal catalogue. Numeric fields support `eq`, `ne`, `gt`, `gte`, `lt`, and `lte`. The `payment_token_missing` boolean supports `eq` and `ne`. Platform drafts use `REVIEW` or `CHALLENGE` and join one to five conditions with AND. Get the current fields and their stages from `GET /api/v1/system/rules`. [Existing System Rules contract](system-rules.md)
+
+## Disposable email domains and random-looking email usernames
+
+In **Describe your rule**, enter `Block flight tickets and hotel rooms when the email is disposable or the local part looks randomly generated`. The preview should include both products at `BOOKING` and a group with two native email conditions. An incomplete email-risk instruction prompts for clarification. A proposal named for disposable or random-looking email must include an email-risk condition before it can be saved.
+
+```json
+{
+  "scope": "MERCHANT",
+  "name": "Block by email risk",
+  "product_types": ["flight_ticket", "hotel_room"],
+  "stages": ["BOOKING"],
+  "conditions": {
+    "logic": "OR",
+    "rules": [
+      {"field": "customer.email_disposable", "operator": "eq", "value": true},
+      {"field": "customer.email_local_part_random", "operator": "eq", "value": true}
+    ]
+  },
+  "action": "BLOCK"
+}
+```
+
+Either true condition triggers the block. The local-part check matches an ASCII alphanumeric username with at least 12 characters, including at least four letters, four digits, and four transitions between adjacent letters and digits. These checks describe observed email characteristics. A match records a merchant policy decision.
+
+Mock Checkout and the merchant panel in Simulation Lab calculate `customerEmailShape` in the browser for an eligible full address. The request sends four counts for length, letters, digits, and transitions along with the normalized domain and mailbox digest. Go validates the counts and stores the nullable Boolean classification with the transaction. The browser retains the full address. Both email conditions are evaluated locally, and their evidence stays within PayGuard.
 
 ## Conditions checked by Jev
 
@@ -92,6 +119,8 @@ A Merchant Policy save or edit validates the tenant's current capabilities, runs
 
 The API checks the bearer credential before interpreting, reading or mutating tenant rules. The general-purpose composer rejects detected email addresses, IP addresses, card numbers, and credentials in its free-text instruction. Use bare email domains or synthetic signal descriptions for this mode. OpenAI receives the instruction and the permitted field catalogue for the scope. The temporary exact-email command runs locally. The browser keeps the full address and sends a digest for rule authoring and merchant transaction submission. The Go API derives a reference from that digest and a merchant-specific key for storage and exact comparison. This evidence stays within PayGuard. Backend composition logs record operation, scope, actor, outcome, timing, and provider or draft metadata. `OPENAI_API_KEY` stays in the backend environment.
 
+A revision saved from a natural-language preview records the safe source instruction. **Edit** fills **Describe your rule** with that instruction. For an older or structured rule, the editor generates a description of the saved conditions and identifies it as a summary. To edit a temporary exact-address rule, enter the address and duration again. The address is excluded from the revision's source instruction.
+
 Platform change revisions append the approved rule input, shared run preview, reason, actor, time, and source revision. The administrator submits the current draft version and the independent checker approves the pending revision. The checker can restore an earlier active revision or disable the rule by appending another version. New Simulation Lab runs pin the effective platform ruleset and matching rule revisions. Previously saved runs and replays retain their original result.
 
 Go evaluates native policy conditions locally and calls the configured Jev provider only for semantic comparisons that still need a result. The Merchant Policy evaluator applies to the merchant-selected path in Mock Checkout and Simulation Lab. Approved Platform revisions apply to new generated Simulation Lab runs and to merchant-selected tests when the stage and signals are available. General booking assessments and live payment authorization have their existing evaluation paths. Automatic scoring-profile discovery and promotion across all booking flows and production role governance are separate work.
@@ -100,6 +129,7 @@ Go evaluates native policy conditions locally and calls the configured Jev provi
 
 - Compose a supported English or Thai policy and a meaning-based instruction that cannot map to the merchant catalogue. Review both proposals and confirm their scopes before saving. Check that the custom preview preserves every clause, identifies the evidence Jev will receive, and works with the general-purpose composer disabled. Check that incomplete or malformed proposals require correction before saving.
 - Verify exact normalized domain matching and missing amount handling. Check that a rule written by one merchant has no effect on the other merchant or on stored transaction snapshots.
+- In both merchant test tools, exercise the combined Flight and Hotel email block with a disposable domain, a random-looking username on a regular domain, an ordinary username, and missing email evidence. Check that either positive signal blocks and that a product-only proposal named for random email is rejected. Reload a rule written from a safe instruction, an older structured rule, and an exact-address rule and check their respective **Edit** experiences.
 - Preview and save a 12-hour exact-email block. In both merchant test tools, check the target mailbox, another mailbox on the same domain, and the bare domain. Verify the block is limited to the selected merchant, expires 12 hours after activation, and preserves earlier decision snapshots on replay.
 - Verify `MATCH`, `NO_MATCH`, and unresolved results in the merchant's ledger from both tools. Test local short-circuiting, missing evidence, provider timeout, and exact replay after a rule version changes.
 - Verify the recorded Platform, Merchant Policy, Jev and final outputs, a conflict held for review, version history, disable, and rollback. Check that a Merchant Policy rejection leaves confirmed fraud evidence untouched.

@@ -43,6 +43,7 @@ type Interpretation = {
   validation: { valid: boolean; errors?: string[]; warnings?: string[] };
   semanticDraft?: { field: string };
 };
+type DraftPreview = Interpretation & { sourceInstruction?: string };
 
 type PolicyPreview = { evaluated: number; matched: number; missing: number; requiresJev?: number; conflictRuleIds?: string[]; approvalReason?: string };
 type PolicyRule = {
@@ -51,6 +52,7 @@ type PolicyRule = {
   activeVersion?: number;
   status: "ACTIVE" | "PENDING_APPROVAL" | "DISABLED" | "EXPIRED";
   proposal: MerchantProposal;
+  instruction?: string;
   preview: PolicyPreview;
   expiresAt?: string;
 };
@@ -107,6 +109,29 @@ export function useRuleCredential(scope: Scope) {
 
 function errorText(cause: unknown) {
   return cause instanceof Error ? cause.message : "The rule service is unavailable. Try again.";
+}
+
+function conditionLabel(field: string, profile?: BusinessProfile | null) {
+  const capability = profile?.fieldRegistry?.find(entry => entry.fieldName === field);
+  return capability ? policyFieldLabel(capability) : fields[field] ?? field;
+}
+
+function conditionDisplayValue({ field, value }: PolicyCondition) {
+  if (field === "product.type") return products[String(value)] ?? String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+function describeSavedPolicy(proposal: MerchantProposal, profile?: BusinessProfile | null) {
+  const stagesText = proposal.stages.map(stage => stages[stage as keyof typeof stages] ?? stage).join(", ");
+  const productText = proposal.product_types.map(product => products[product] ?? product).join(", ");
+  const matchText = proposal.conditions.logic === "OR" ? "At least one condition must match." : "All conditions must match.";
+  const conditions = proposal.conditions.rules.map(condition => {
+    const value = conditionDisplayValue(condition);
+    const display = value.length > 240 ? value.slice(0, 239) + "…" : value;
+    return `- ${conditionLabel(condition.field, profile)} ${merchantOperatorLabels[condition.operator] ?? condition.operator} ${display}`;
+  });
+  return [`${policyActionLabels[proposal.action]} ${productText} at ${stagesText}.`, matchText, ...conditions].join("\n");
 }
 
 function ProfileDetails({ profile }: { profile: BusinessProfile }) {
@@ -214,10 +239,10 @@ export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal
     <div>
       <p className="text-sm font-semibold">{logic}</p>
       <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
-        {conditions.map(({ field, operator, value }, index) => {
-          const capability = profile?.fieldRegistry?.find(entry => entry.fieldName === field);
-          const label = capability ? policyFieldLabel(capability) : fields[field] ?? field;
-          const display = field === mailboxField ? mailbox ?? "the specified address" : field === "product.type" ? products[String(value)] ?? value : String(value);
+        {conditions.map((condition, index) => {
+          const { field, operator } = condition;
+          const label = conditionLabel(field, profile);
+          const display = field === mailboxField ? mailbox ?? "the specified address" : conditionDisplayValue(condition);
           return <li key={index} className="wrap-anywhere">
             {label} {merchantOperatorLabels[operator] ?? operator} {display}
             {merchant && <span className="ml-2 rounded-md bg-white px-1.5 py-0.5 text-xs font-medium text-muted">
@@ -275,8 +300,16 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
 }) {
   const exactEmailEdit = edit?.proposal.conditions.rules.some(condition => condition.field === mailboxField);
   const canUseBuilder = scope === "MERCHANT" && !exactEmailEdit;
-  const [instruction, setInstruction] = useState("");
-  const [draft, setDraft] = useState<Interpretation | null>(null);
+  const { profile, profileError, retryProfile } = merchantProfile ?? {};
+  const [editText] = useState(() => {
+    if (!edit || exactEmailEdit) return { text: "", reconstructed: false };
+    if (edit.instruction && !containsMailbox(edit.instruction)) {
+      return { text: edit.instruction, reconstructed: false };
+    }
+    return { text: describeSavedPolicy(edit.proposal, profile), reconstructed: true };
+  });
+  const [instruction, setInstruction] = useState(editText.text);
+  const [draft, setDraft] = useState<DraftPreview | null>(null);
   const [pending, setPending] = useState<"interpret" | "save" | null>(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<PolicySave | PlatformSave | null>(null);
@@ -287,10 +320,11 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
   const [builderProposal, setBuilderProposal] = useState<MerchantProposal | undefined>(edit?.proposal);
   const [builderRevision, setBuilderRevision] = useState(0);
   const [semanticField, setSemanticField] = useState<string>();
-  const { profile, profileError, retryProfile } = merchantProfile ?? {};
   const request = useRef<AbortController>(null);
+  const editVersion = useRef(edit?.version);
   const id = useId();
   const mailboxBlock = scope === "MERCHANT" ? parseMailboxBlock(instruction) : null;
+  const unchangedSummary = editText.reconstructed && instruction.trim() === editText.text;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -310,7 +344,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
 
   async function interpret(event: FormEvent) {
     event.preventDefault();
-    if (request.current || !instruction.trim() || (scope === "MERCHANT" && !profile)) return;
+    if (request.current || !instruction.trim() || unchangedSummary || (scope === "MERCHANT" && !profile)) return;
     const controller = new AbortController();
     request.current = controller;
     setPending("interpret");
@@ -337,7 +371,10 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
         : await authenticatedRequest<Interpretation>(adminRulePath(`${composer}/interpret`, localAdmin, token), token, init);
       if (controller.signal.aborted) return;
       if (result.proposal && result.proposal.scope !== scope) throw new Error("The proposal belongs to another rule system.");
-      setDraft(result);
+      const sourceInstruction = result.proposal?.scope === "MERCHANT" && !mailboxBlock &&
+        !result.proposal.conditions.rules.some(condition => condition.field === mailboxField)
+        ? instruction.trim() : undefined;
+      setDraft({ ...result, sourceInstruction });
       if (result.proposal?.scope === "MERCHANT" && !result.proposal.conditions.rules.some(condition => condition.field === mailboxField)) {
         setBuilderProposal(result.proposal);
         setBuilderRevision(value => value + 1);
@@ -362,13 +399,17 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
     setPending("save");
     setError("");
     try {
-      const payload = edit ? { proposal, expectedVersion: edit.version }
-        : proposal.scope === "PLATFORM" && runId ? { proposal, runId } : { proposal };
+      const payload = proposal.scope === "MERCHANT" ? {
+        proposal,
+        expectedVersion: editVersion.current,
+        instruction: draft.sourceInstruction,
+      } : { proposal, runId: runId || undefined };
       const init = { method: edit ? "PUT" : "POST", body: JSON.stringify(payload), signal: controller.signal };
       const result = proposal.scope === "MERCHANT"
         ? await merchantPolicyRequest<PolicySave>(`rules${edit ? `/${encodeURIComponent(edit.id)}` : ""}`, token, init, adminMerchantId)
         : await authenticatedRequest<PlatformSave>(adminRulePath(`${composer}/platform/save`, localAdmin, token), token, init);
       if (controller.signal.aborted) return;
+      if (edit && "version" in result.rule) editVersion.current = result.rule.version;
       setSaved(result);
       onSaved?.();
     } catch (cause) {
@@ -422,17 +463,19 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
     <form className="space-y-2.5" onSubmit={interpret}>
       <label htmlFor={`${id}-instruction`} className="block text-sm font-semibold">Describe your rule</label>
       <textarea id={`${id}-instruction`} rows={3} maxLength={2000} className="control min-h-24 resize-y"
-        aria-describedby={`${id}-instruction-help`} placeholder={prompts[scope]} value={instruction} disabled={pending !== null} onChange={event => {
+        aria-describedby={`${id}-instruction-help`} placeholder={exactEmailEdit ? mailboxExample : prompts[scope]} value={instruction} disabled={pending !== null} onChange={event => {
           setInstruction(event.currentTarget.value);
           resetDraft();
         }} />
       <p id={`${id}-instruction-help`} className="text-xs text-muted">
+        {editText.reconstructed && <span className="mb-1 block">This text describes the saved conditions. Change it to generate a preview, or use Rule fields to edit the conditions directly.</span>}
+        {exactEmailEdit && <span className="mb-1 block">Re-enter the email address and duration to generate a new version.</span>}
         {scope === "MERCHANT" ? <>For a temporary exact-address block, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out IP addresses, card details, and credentials.
           <span className="mt-1 block">For a custom Jev condition, check the transaction field and meaning in the preview before saving.</span></>
           : "Use policy conditions and domains. Leave out customer identities and card details."}
       </p>
       <button type="submit" className={ready ? outlineButton : primaryButton}
-        disabled={!instruction.trim() || pending !== null || (scope === "MERCHANT" && !profile)}>
+        disabled={!instruction.trim() || unchangedSummary || pending !== null || (scope === "MERCHANT" && !profile)}>
         {pending === "interpret" ? "Generating preview…" : "Generate preview"}
       </button>
     </form>

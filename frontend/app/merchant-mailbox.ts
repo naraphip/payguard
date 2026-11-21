@@ -6,6 +6,7 @@ const maxBlockHours = 365 * 24;
 const maxBlockMinutes = maxBlockHours * 60;
 
 type ScenarioEmail = { domain?: string; mailbox?: string };
+export type MerchantEmailShape = { length: number; letters: number; digits: number; transitions: number };
 export type MailboxBlockDuration =
   | { durationMinutes: number; durationHours?: never }
   | { durationHours: number; durationMinutes?: never };
@@ -29,6 +30,25 @@ export function parseScenarioEmail(value?: string): ScenarioEmail | null {
   const local = parts[0];
   if (local.length > 64 || local === "*" || /^\.|\.\.|\.$/.test(local) || !mailboxLocalPart.test(local)) return null;
   return { domain, mailbox: `${local}@${domain}` };
+}
+
+export function merchantEmailShape(mailbox: string): MerchantEmailShape | undefined {
+  const at = mailbox.indexOf("@");
+  if (at < 1) return undefined;
+  const localPart = mailbox.slice(0, at);
+  if (!localPart || localPart.length > 64 || !/^[\x21-\x7e]+$/.test(localPart)) return undefined;
+
+  const shape = { length: localPart.length, letters: 0, digits: 0, transitions: 0 };
+  let previousClass = "";
+  for (const character of localPart) {
+    const characterClass = /[A-Za-z]/.test(character) ? "letters" : /[0-9]/.test(character) ? "digits" : "";
+    if (characterClass) {
+      shape[characterClass]++;
+      if (previousClass && previousClass !== characterClass) shape.transitions++;
+    }
+    previousClass = characterClass;
+  }
+  return shape;
 }
 
 export function containsMailbox(instruction: string): boolean {

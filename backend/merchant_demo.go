@@ -79,6 +79,7 @@ type mockTransactionInput struct {
 	SimulateTimeout       bool                       `json:"simulateTimeout"`
 	CustomerEmailDomain   string                     `json:"customerEmailDomain,omitempty"`
 	CustomerMailboxDigest string                     `json:"customerMailboxDigest,omitempty"`
+	CustomerEmailShape    *merchantEmailShape        `json:"customerEmailShape,omitempty"`
 	CustomerID            string                     `json:"customerId,omitempty"`
 	AccountAgeDays        *int64                     `json:"accountAgeDays,omitempty"`
 	CustomSignals         map[string]json.RawMessage `json:"customSignals,omitempty"`
@@ -114,6 +115,7 @@ type mockTransaction struct {
 	JevConfigurationVersion int64      `json:"jevConfigurationVersion,omitempty"`
 	simulateTimeout         bool
 	customerMailboxRef      string
+	customerEmailRandom     *bool
 	customerIDRef           string
 	AccountAgeDays          *int64                     `json:"accountAgeDays,omitempty"`
 	CustomSignals           map[string]json.RawMessage `json:"customSignals,omitempty"`
@@ -467,6 +469,10 @@ func (s mockMerchantService) createTransaction(w http.ResponseWriter, r *http.Re
 			problem(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
+	}
+	if input.CustomerEmailShape != nil && (input.CustomerMailboxDigest == "" || input.CustomerEmailDomain == "" || !input.CustomerEmailShape.valid()) {
+		problem(w, http.StatusUnprocessableEntity, "Email shape requires a valid domain, mailbox digest, and local-part counts.")
+		return
 	}
 	// Preserve an idempotently recoverable result even when the UI disconnects.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 12*time.Second)

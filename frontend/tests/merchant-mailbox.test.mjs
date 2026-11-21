@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { containsMailbox, merchantMailboxDigest, parseMailboxBlock, parseScenarioEmail } from "../app/merchant-mailbox.ts";
+import { containsMailbox, merchantEmailShape, merchantMailboxDigest, parseMailboxBlock, parseScenarioEmail } from "../app/merchant-mailbox.ts";
+
+test("shares only ASCII username shape counts for a full mailbox", () => {
+  assert.deepEqual(merchantEmailShape("k8p2x9q4m7z6@gmail.com"), { length: 12, letters: 6, digits: 6, transitions: 11 });
+  assert.deepEqual(merchantEmailShape("buyer+order24@gmail.com"), { length: 13, letters: 10, digits: 2, transitions: 1 });
+  assert.equal(merchantEmailShape("gmail.com"), undefined);
+  assert.equal(merchantEmailShape("ลูกค้า@gmail.com"), undefined);
+});
 
 test("interprets a standalone exact block in English or Thai", () => {
   const expected = { mailbox: "buyer@example.test", durationHours: 12 };

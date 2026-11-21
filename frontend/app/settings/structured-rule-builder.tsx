@@ -11,6 +11,8 @@ const actions: PolicyAction[] = ["BLOCK", "REVIEW", "CHALLENGE"];
 export const merchantFieldLabels: Record<string, string> = {
   "product.type": "Product",
   "customer.email_domain": "Customer email domain",
+  "customer.email_disposable": "Disposable email domain",
+  "customer.email_local_part_random": "Random-looking email username",
   "customer.mailbox_ref": "Exact email address",
   "order.amount_minor": "Order amount in minor units",
   "transaction.description": "Transaction description",
