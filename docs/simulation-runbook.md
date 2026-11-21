@@ -4,7 +4,7 @@ Follow the [local startup steps](../README.md). PostgreSQL initializes its demo 
 
 ## Local keys and Omise sandbox preparation
 
-Docker Compose reads the repository-root `.env`. Create it from the [example template](../.env.example) if it does not already exist.
+Docker Compose reads the repository-root `.env` for demo merchant tokens and optional enrichment settings. Create it from the [example template](../.env.example) if it does not already exist.
 
 ```sh
 test -e .env || (umask 077; cp .env.example .env)
@@ -12,22 +12,19 @@ test -e .env || (umask 077; cp .env.example .env)
 
 Run `openssl rand -hex 32` separately for each demo merchant you want to enable, then assign each generated value to its matching `PAYGUARD_DEMO_MERCHANT_A_TOKEN` or `PAYGUARD_DEMO_MERCHANT_B_TOKEN` in `.env`. The template also has optional `PAYGUARD_IPAPI_IS_KEY` and `PAYGUARD_PROXYCHECK_KEY` fields. Set `PAYGUARD_ENRICHMENT_ENABLED=true` to enable outbound provider lookups. Local masters work with the default setting.
 
-After changing the keys for a running Compose stack, apply the new environment with `docker compose up -d --wait backend` from the repository root.
+For sandbox checkout, get the keys from **Omise Dashboard → Test mode → Keys** and put the pair in the ignored `backend/.env`. Set `OMISE_PUBLIC_KEY` to the `pkey_test_` key and `OMISE_SECRET_KEY` to the `skey_test_` key. Keep the secret key in the backend environment. Compose loads `backend/.env` for the Go service. After changing the file for a running stack, apply it with `docker compose up -d --wait backend`. [Finding Omise API keys](https://docs.omise.co/how-to-access-omise-api-keys)
 
-Go reads exported variables when running directly on the host. From the repository root, source your trusted shell-compatible `.env` if you use one. You can keep using an existing trusted `backend/.env` as your source.
+When running Go directly on the host, export values from your trusted shell-compatible key file. From the repository root, run the following after starting PostgreSQL and Redis. If you also use the root `.env` for demo tokens or enrichment, export those variables before starting Go.
 
 ```sh
 (
+  cd backend || exit
   set -a
   . ./.env || exit
   set +a
-  cd backend && go run .
+  go run .
 )
 ```
-
-The commented Omise variables are proposed for the next sandbox integration and the current application does not read them. Get the test public and secret keys from **Omise Dashboard → Test mode → Keys**. The future host frontend would read `NEXT_PUBLIC_OMISE_TEST_PUBLIC_KEY` from `frontend/.env.local`. Keep `PAYGUARD_OMISE_TEST_SECRET_KEY` in the backend's private environment. [Finding Omise API keys](https://docs.omise.co/how-to-access-omise-api-keys)
-
-The planned sandbox flow uses Omise.js in the browser to tokenize an official test card. Go receives the token and uses the test secret key to create a sandbox charge. [Omise authentication](https://docs.omise.co/api-authentication), [Omise testing](https://docs.omise.co/api-testing)
 
 ## Booking event intake
 
@@ -77,10 +74,24 @@ The example produces 24 decisions, skips 12 duplicate PSP retries, and reports 1
 
 ### Verify checkout contact and merchant policy
 
-1. Select **OTA → Flight ticket** and **Normal** traffic. Set **Accounts** to `1`. Leave **Omit payment token** and **Mock Jev timeout** off.
+1. Select **Travel → Bangkok to Singapore**. In **Simulation settings**, select **Normal traffic**, set **Accounts** to `1`, and leave **Omit payment token** and **Mock Jev timeout** off.
 2. Enter a synthetic contact such as **Test Buyer**, `buyer@restricted.test`, and `+1 202-555-0142`. Enable **Block flights for restricted.test**, then run the scenario. In the first order's **PRE PAYMENT** evidence, check that the contact is visible, **Event email domain** reads `restricted.test`, the merchant policy and final action are `BLOCK`, and the final action source is `MERCHANT_POLICY`. The platform decision is `ALLOW` for this fixture.
 3. Change the email to `buyer@traveler.test` and run again. Check that the contact reflects the new submission, **Event email domain** reads `traveler.test`, the merchant policy is `PASS`, and the final action is `ALLOW`. A subdomain such as `sub.restricted.test` also passes because the rule matches the exact hostname.
 4. Clear the contact and run again to use the original seeded domain. To verify product and stage boundaries, inspect **BOOKING**, disable the policy before rerunning, or repeat with a hotel or e-commerce product. Merchant policy is `NOT_APPLICABLE` in those cases.
+
+## Omise sandbox checkout
+
+1. Configure the [test-mode keys](#local-keys-and-omise-sandbox-preparation) and start the app. Confirm `GET /api/v1/simulation/checkout/config` reports checkout available before opening the lab.
+2. Choose a product in **Travel** or **Online store** and set the quantity. For a simple eligible run, open **Simulation settings**, select **Normal traffic**, and set **Accounts** to `1`. Leave merchant blocking, **Omit payment token**, and **Mock Jev timeout** off. Select **Run simulation** in the inline **Trip summary** or **Your cart**.
+3. Choose **Pay in test mode** in the same panel. The first order must have final action `ALLOW` at `PRE_PAYMENT` for Travel or `PAYMENT` for Online store. If the checkout settings changed, run the simulation again before paying. Fill the Omise-hosted form with an official test card. [Omise.js hosted form](https://docs.omise.co/omise-js), [Official test cards](https://docs.omise.co/api-testing)
+4. Review the payment status in the inline summary. If the status is pending or unknown, check the Test dashboard for the provider's outcome. The existing attempt remains associated with the saved run.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/v1/simulation/checkout/config` | Returns `enabled`, `currency`, and the per-product `prices` in satang, plus `publicKey` when sandbox checkout is configured. |
+| `POST /api/v1/simulation/checkout/charges` | Accepts `{runId, token}`. Go verifies the saved run, calculates the THB total from its product and quantity, and records one charge attempt per run in PostgreSQL. A recorded attempt prevents another sandbox charge for the same run. |
+
+Omise.js tokenizes the test card in the hosted form. PayGuard receives the token, and Go authenticates the sandbox charge with the test secret key. Full card numbers and security codes stay in the hosted form. [Omise authentication](https://docs.omise.co/api-authentication)
 
 ## System Rules
 

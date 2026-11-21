@@ -1,0 +1,120 @@
+.storefront-shell {
+  background: #f4eef9;
+  color: #2d203c;
+}
+
+.storefront-shell :focus-visible {
+  outline-color: #713899;
+}
+
+.shop-panel {
+  min-width: 0;
+  border: 1px solid #e8ddef;
+  border-radius: 1.125rem;
+  background: white;
+  box-shadow: 0 2px 4px #38204d06;
+}
+
+.shop-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 42px;
+  padding-inline: 0.9rem;
+  border: 1px solid #e3d4ed;
+  border-radius: 999px;
+  background: white;
+  color: #543b69;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.shop-pill:hover,
+.shop-pill[aria-pressed="true"] {
+  border-color: #d3b7e7;
+  background: #eadbf4;
+  color: #522470;
+}
+
+.shop-product {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(83px, 33%) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #e5d7ed;
+  border-radius: 1.125rem;
+  background: white;
+  box-shadow: 0 3px 5px #38204d08;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+@media (width >= 40rem) {
+  .shop-product {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.shop-product-select {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.shop-product-select:focus-visible {
+  outline-offset: -3px;
+}
+
+.shop-product:hover,
+.shop-product[data-selected="true"] {
+  border-color: #935eb4;
+  box-shadow: 0 0 0 1px #935eb4, 0 4px 10px #55326614;
+}
+
+.storefront-shell .control {
+  min-height: 42px;
+  border-color: #e1d4eb;
+  border-radius: .625rem;
+  color: #31223f;
+}
+
+.shop-primary,
+.shop-secondary {
+  display: inline-flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding-inline: .9rem;
+  border: 1px solid transparent;
+  border-radius: .7rem;
+  font-size: .875rem;
+  font-weight: 600;
+}
+
+.shop-primary {
+  background: #4a245e;
+  color: white;
+}
+
+.shop-primary:hover:not(:disabled) {
+  background: #5e3175;
+}
+
+.shop-secondary {
+  border-color: #dbcae7;
+  background: white;
+  color: #512968;
+}
+
+.shop-secondary:hover:not(:disabled) {
+  background: #f6eefb;
+}
+
+.shop-primary:disabled,
+.shop-secondary:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}

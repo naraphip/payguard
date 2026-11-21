@@ -4,7 +4,7 @@ A local sandbox for synthetic OTA bookings and e-commerce checkout risk. It runs
 
 ## Run locally
 
-The repository-root [`.env.example`](.env.example) lists the demo merchant and optional provider variables. For authenticated API requests or external enrichment, follow the [local keys setup](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
+The repository-root [`.env.example`](.env.example) lists the demo merchant and optional provider variables. For Omise Sandbox checkout, put `OMISE_PUBLIC_KEY` and `OMISE_SECRET_KEY` from Omise Test mode in the ignored `backend/.env`. Compose loads that file for the Go backend. See the [local keys setup](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
 
 Requires Docker with Docker Compose. From the repository root, build and start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis:
 
@@ -12,7 +12,7 @@ Requires Docker with Docker Compose. From the repository root, build and start t
 docker compose up --build -d --wait
 ```
 
-Open [Simulation Lab](http://127.0.0.1:3000). Select **Run simulation**, inspect a decision, then select **Score run** to calculate the synthetic QA metrics. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
+Open [Simulation Lab](http://127.0.0.1:3000). Choose a product in **Travel** or **Online store**, then select **Run simulation** in the inline **Trip summary** or **Your cart**. An eligible first order can proceed to [Omise Sandbox checkout](docs/simulation-runbook.md#omise-sandbox-checkout). **Simulation results** below the checkout contains the event evidence and **Score run**. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
 
 ### Run the application directly on the host
 
@@ -24,7 +24,7 @@ For Go 1.26+ and Node.js 24+ development on the host, start only PostgreSQL and 
    docker compose up -d --wait postgres redis
    ```
 
-2. Start the Go API in a terminal.
+2. Start the Go API in a terminal. For sandbox checkout, use the [host setup that exports the backend keys](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
 
    ```sh
    cd backend
@@ -39,7 +39,7 @@ For Go 1.26+ and Node.js 24+ development on the host, start only PostgreSQL and 
    npm run dev
    ```
 
-4. Open [Simulation Lab](http://127.0.0.1:3000). Select **Run simulation**, inspect a decision, then select **Score run** to calculate the synthetic QA metrics.
+4. Open [Simulation Lab](http://127.0.0.1:3000) and run the same storefront flow.
 
 Go listens on port 8081, PostgreSQL on 55432, and Redis on 56379. The default bindings use loopback. `docker compose down` stops the data stores and preserves the PostgreSQL volume.
 

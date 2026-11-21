@@ -60,6 +60,7 @@ func main() {
 		defer enrichment.cache.Close()
 	}
 	a := app{repository{db}, cache, []byte(env("ENTITY_KEY_SECRET", "payguard-local-synthetic-v1"))}
+	checkout := newOmiseCheckout(a.repo, os.Getenv("OMISE_PUBLIC_KEY"), os.Getenv("OMISE_SECRET_KEY"))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("POST /api/v1/booking/events", bookingHandler{a.repo, bookingAuth}.create)
@@ -67,6 +68,8 @@ func main() {
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)
+	mux.HandleFunc("GET /api/v1/simulation/checkout/config", checkout.config)
+	mux.HandleFunc("POST /api/v1/simulation/checkout/charges", checkout.create)
 	mux.HandleFunc("GET /api/v1/system/rules", a.readRules)
 	mux.HandleFunc("POST /api/v1/system/rules", a.createRule)
 	mux.HandleFunc("PUT /api/v1/system/rules/{id}", a.updateRule)

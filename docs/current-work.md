@@ -1,5 +1,14 @@
 # Current work
 
+## Simulation Lab storefront and Omise Sandbox
+
+Implemented and verified locally on `codex/omise-simulation-checkout`. The lab offers **Travel** and **Online store**, an inline THB summary, and the existing synthetic controls and contact. Eligible first orders can use the Omise-hosted test card form. [Storefront UI](ui/simulation-lab.md), [sandbox runbook](simulation-runbook.md#omise-sandbox-checkout)
+
+- Go tests, race checks, and vet passed. Frontend type checking and the Next.js production build passed on Node.js 24.
+- The Omise Thailand test-account check confirmed THB support. Sandbox API tests completed a flight for two travelers at 918,000 satang and two physical items at 498,000 satang. Duplicate and concurrent requests for the same run returned its original charge ID. Runs with final decisions of `BLOCK` and `UNSUCCESSFUL` were denied at checkout.
+- Chrome completed the official Omise-hosted form on localhost and showed successful test payments for the Travel flight at 459,000 satang and the Online store digital gift card at 75,000 satang on mobile.
+- Independent Chrome checks covered all four product images and selection, booking and delivery controls, quantity and THB totals, contact and decision evidence, and Offline QA. A changed cart or blocked first checkout disabled payment. A fresh `ALLOW` enabled it. The page fit 390 px and 320 px viewports without horizontal scrolling. Independent Go race and vet checks passed, and Rule Base and enrichment paths matched their branch base.
+
 ## Provider enrichment
 
 Implemented and verified locally on `codex/provider-enrichment`. The authenticated Go endpoint returns IP, BIN, and email-domain evidence. Local BIN and domain masters operate with external services disabled. Rule Base files match the upstream base at `a97fcbe`. [Requirements](requirements/provider-enrichment.md), [runbook](simulation-runbook.md#provider-enrichment)
@@ -40,4 +49,4 @@ Local implementation and verification complete for the [requirements](requiremen
 - Go race tests and vet passed. Frontend clean install, type check and Next.js production build passed on Node.js 24.
 - A live Go API smoke test with PostgreSQL 16 and Redis 7 passed for all four products, concurrent idempotent replay, conflicting run IDs, deterministic results across run IDs, event ordering, duplicate PSP retries, shared Wi-Fi, rotating ring IPs, isolated labels, exact-domain policy, missing token and mock timeout. A Redis outage returned 503 and left no completed run.
 - Chrome smoke checks exercised the setup, decisions and offline QA for normal e-commerce and mixed OTA, including the mobile layout. The default mixed run produced 24 decisions, deduplicated 12 PSP retries and scored 12 synthetic payment samples.
-- The [Google Drive System Handbook](https://docs.google.com/document/d/1RtzQI1VIRXabDKUBPGcfQM8NxJZs1u_geFWFYC8Hq_I/edit) records the implemented local scope in section 12. Production rollout, merchant authentication, live Jev and payment integrations are future work.
+- The [Google Drive System Handbook](https://docs.google.com/document/d/1RtzQI1VIRXabDKUBPGcfQM8NxJZs1u_geFWFYC8Hq_I/edit) records the original local scope in section 12. Production rollout, production merchant authentication, live Jev, and production payment integration are future work.

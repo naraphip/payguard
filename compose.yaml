@@ -19,6 +19,9 @@ services:
   backend:
     build:
       context: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
     environment:
       DATABASE_URL: postgres://payguard:payguard@postgres:5432/payguard?sslmode=disable
       REDIS_URL: redis://redis:6379/0
