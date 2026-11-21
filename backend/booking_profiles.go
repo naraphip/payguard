@@ -15,6 +15,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+var errGovernedProfile = errors.New("Use a governed change to replace the active profile.")
+
 const (
 	bookingStage     = "booking"
 	bookingTimestamp = "occurredAt"
@@ -154,6 +156,10 @@ func (h bookingRiskHandler) approveProfile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	version, err := h.repo.activateBookingProfile(r.Context(), merchant, profile)
+	if errors.Is(err, errGovernedProfile) {
+		problem(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		bookingRiskUnavailable(w, err)
 		return
@@ -169,6 +175,22 @@ func (r repository) activateBookingProfile(ctx context.Context, merchant string,
 	sum := sha256.Sum256(raw)
 	version := "profile-v1-" + hex.EncodeToString(sum[:])
 	err = pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if err := lockBookingMerchant(ctx, tx, merchant); err != nil {
+			return err
+		}
+		var governed bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM booking_active_changes WHERE merchant_id=$1 AND kind='profile')`, merchant).Scan(&governed); err != nil {
+			return err
+		}
+		if governed {
+			err := tx.QueryRow(ctx, `
+				SELECT p.version FROM booking_active_profiles a JOIN booking_profiles p USING (merchant_id,version)
+				WHERE a.merchant_id=$1 AND p.approved_profile=$2::jsonb`, merchant, raw).Scan(&version)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errGovernedProfile
+			}
+			return err
+		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO booking_profiles (merchant_id, version, approved_profile)
 			VALUES ($1, $2, $3::jsonb) ON CONFLICT DO NOTHING`, merchant, version, raw)

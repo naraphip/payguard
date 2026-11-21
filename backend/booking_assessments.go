@@ -72,10 +72,12 @@ type bookingBaseline struct {
 }
 
 type bookingAssessment struct {
+	ListVersion    string           `json:"listVersion,omitempty"`
 	EventID        string           `json:"eventId"`
 	AssessedAt     *time.Time       `json:"assessedAt,omitempty"`
 	ProfileVersion string           `json:"profileVersion"`
 	RuleVersion    string           `json:"ruleVersion"`
+	JevRuleVersion string           `json:"jevRuleVersion,omitempty"`
 	Baseline       bookingBaseline  `json:"baseline"`
 	Features       []bookingFeature `json:"features"`
 	Jev            bookingJevResult `json:"jev"`
@@ -92,7 +94,7 @@ func evaluateBooking(booking bookingEvent, version string, profile profileCandid
 		Baseline:       bookingBaseline{State: "COLD_START"},
 		Features: []bookingFeature{
 			{bookingTimestamp, booking.OccurredAt.UTC().Format(time.RFC3339Nano), "OBSERVED", "BOOKING_EVENT"},
-			{"bookingVelocity60s", velocity, "OBSERVED", "BOOKING_EVENT_HISTORY"},
+			{bookingVelocitySignal, velocity, "OBSERVED", "BOOKING_EVENT_HISTORY"},
 		},
 		Jev: bookingJevResult{
 			Question: bookingRiskQuestion, Status: bookingJevStatusMock, Answer: bookingJevLow,
@@ -169,15 +171,19 @@ func (r repository) assessBooking(ctx context.Context, cache *redis.Client, merc
 	var result json.RawMessage
 	var created bool
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		// Pin a consistent profile and policy while approvals publish tenant changes.
+		if err := lockBookingMerchant(ctx, tx, merchant); err != nil {
+			return err
+		}
 		// Serialize first assessments of the same booking before pinning the profile.
 		var baselineID *int64
 		var sampleCount *int
 		err := tx.QueryRow(ctx, `
-			SELECT e.stage, e.occurred_at, e.amount_minor, e.received_at, b.id, b.sample_count
+			SELECT e.stage, e.occurred_at, e.amount_minor, e.received_at, e.product, b.id, b.sample_count
 			FROM booking_events e
 			LEFT JOIN booking_baselines b ON e.merchant_id = b.merchant_id AND e.baseline_id = b.id
 			WHERE e.merchant_id = $1 AND e.event_id = $2::text::uuid
-			FOR UPDATE OF e`, merchant, eventID).Scan(&booking.Stage, &booking.OccurredAt, &booking.AmountMinor, &booking.ReceivedAt, &baselineID, &sampleCount)
+			FOR UPDATE OF e`, merchant, eventID).Scan(&booking.Stage, &booking.OccurredAt, &booking.AmountMinor, &booking.ReceivedAt, &booking.Product, &baselineID, &sampleCount)
 		if err != nil {
 			return err
 		}
@@ -212,6 +218,16 @@ func (r repository) assessBooking(ctx context.Context, cache *redis.Client, merc
 			return err
 		}
 		computed := evaluateBooking(booking, version, profile.Candidate, velocity, mode)
+		policy, err := loadBookingGovernance(ctx, tx, merchant)
+		if err != nil {
+			return err
+		}
+		policy.apply(&computed, booking.Product, velocity, mode)
+		rules, err := readJevRules(ctx, tx, merchant)
+		if err != nil {
+			return err
+		}
+		computed.applyJevRules(rules)
 		assessedAt := time.Now().UTC().Truncate(time.Microsecond)
 		computed.AssessedAt = &assessedAt
 		if baselineID != nil {
