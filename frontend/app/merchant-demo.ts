@@ -52,6 +52,16 @@ type MerchantPolicyDecisionPart = {
   ruleVersions?: Record<string, number>;
   missingSignals?: string[];
   missingRuleIds?: string[];
+  jevConditions?: {
+    ruleId: string;
+    version: number;
+    conditionIndex?: number;
+    field: string;
+    answer?: string;
+    status: string;
+    model?: string;
+    decisionId?: string;
+  }[];
 };
 
 export type MerchantPolicyDecision = {

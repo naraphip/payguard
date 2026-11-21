@@ -1,15 +1,15 @@
 # Merchant rule testing and legacy scenarios
 
-Platform Admin sets up a merchant and its evidence in **Merchants**, configures policies and Jev review rules in the merchant's **Merchant Rules** tab, and selects the merchant and a product in Mock Checkout or Simulation Lab. Both tools evaluate the merchant's current rules and save an assessment to the same tenant's ledger. Scenario selection and scenario thresholds are legacy. Earlier records retain their stored scenario, version and threshold, and direct API replays return their saved results. [Local evaluation](../simulation-runbook.md#merchant-scenarios-and-jev) · [Decision Engine](decision-engine.md)
+Platform Admin sets up a merchant and its evidence in **Merchants**, configures merchant policies in the **AI Rule** tab and manages existing amount-based review rules in its saved list, and selects the merchant and a product in Mock Checkout or Simulation Lab. Both tools evaluate the merchant's current rules and save an assessment to the same tenant's ledger. Scenario selection and scenario thresholds are legacy. Earlier records retain their stored scenario, version and threshold, and direct API replays return their saved results. [Local evaluation](../simulation-runbook.md#merchant-scenarios-and-jev) · [Decision Engine](decision-engine.md)
 
 ## Current contract
 
 | Area | Behavior |
 | --- | --- |
 | Local administrator | The opt-in loopback preview uses a server-side demo administrator credential for merchant management, scoped policies, Jev review rules, Platform drafts and AI Configuration. Platform Admin can view transactions across merchants and resolve pending cases. Independent checker approval still governs publishing global Platform drafts. |
-| Merchant | The issued tenant credential grants access to the merchant's own read-only ledger and versioned Merchant Policies. Scoped administrative routes require Platform Admin. |
+| Merchant | The issued tenant credential grants access to the merchant's own read-only ledger, versioned Merchant Policies, and editing or removal of its existing booking review rules. Platform-wide routes require Platform Admin. |
 | Configuration | Declare products and signals on the merchant record. The shared typed field catalogue supplies conditions in the rule editor and evidence inputs in both test tools. Product determines the booking or checkout stage. |
-| Decision | The tools evaluate built-in and approved Platform Rules, active Merchant Policies, published amount-based Jev review rules, and the configured Jev advisory. Unsupported or omitted signals appear as unavailable for applicable rules. |
+| Decision | The tools evaluate built-in and approved Platform Rules, active Merchant Policies including semantic conditions, published amount-based booking review rules, and the configured Jev advisory. Unsupported or omitted signals appear as unavailable for applicable rules. |
 | Evidence | A saved assessment records the independent rule decisions, final action and its source, applicable rule and Jev configuration versions, and the selected merchant and product. A downstream disposition has its own actor and time. |
 | Compatibility | The test tools submit through the existing tenant transaction endpoint without `scenarioId`. Historical API callers may submit it explicitly for the legacy scenario path. The same transaction ID and input replay the saved result. A changed input under the same ID returns a conflict. |
 
@@ -23,11 +23,11 @@ Platform Admin sets up a merchant and its evidence in **Merchants**, configures 
 | Review and Review | Appears under **Needs decision** for manual review. |
 | Review (unresolved) and Unresolved | Appears under **Needs decision** when the final decision cannot be resolved. Saved API outcome is `UNRESOLVED`. |
 
-Final actions rank Block, Review, Challenge, Unresolved, and Allow in descending order. A Platform decision wins a tie with Merchant Policy. A local decision wins a tie with Jev. The original Jev answer, served model, provider ID, and failure status are available separately whenever returned. Mock is the deployment default. In live configuration, the server sends the bounded booking amount and local review requirement to Jev. [Jev configuration](decision-engine.md#jev-configuration)
+Final actions normally rank Block, Review, Challenge, Unresolved, and Allow in descending order. An applicable semantic condition that remains unresolved sends the transaction to **Review (unresolved)** unless another rule conclusively blocks it. A Platform decision wins a tie with Merchant Policy. A local decision wins a tie with the Jev advisory. The original Jev answers, served model, provider ID, and failure status are available whenever returned. Mock is the deployment default. Live Jev uses bounded booking evidence for the advisory and bounded text for needed semantic checks. [Jev configuration](decision-engine.md#jev-configuration)
 
 ## Acceptance checks
 
-1. Create two merchants and register different products or fields. Use the Platform Admin preview to create, read, update and delete a merchant policy and an amount-based Jev review rule. Verify that a merchant credential can use only its own ledger and policy editor, and that changes to one merchant leave the other merchant's config intact.
+1. Create two merchants and register different products or fields. Use the Platform Admin preview to create, read, update and delete a merchant policy. Edit and remove an existing amount-based booking review rule under Saved rules. Verify that a merchant credential can use only its own ledger and policy editor, and that changes to one merchant leave the other merchant's config intact.
 2. Submit equivalent product and evidence in both test tools for a merchant with zero scenarios. Compare final action, merchant and product, matching rule versions, missing signals and Jev outcome. Select a different merchant while a test is in flight and check each saved record in its own ledger.
 3. Use a compound custom policy with a literal text comparison and a country code. Test both inputs present, a nonmatching value, an omitted signal, and an invalid type. Verify that the omitted input is recorded as unavailable and an invalid value is rejected. Test explicit zero and false separately when registered.
 4. Exercise an amount-based review, a temporary exact-email block and a simulated Jev timeout. Verify the ledger outcome, evidence and review state. Record a disposition on a pending case as Platform Admin and replay the initial submission.

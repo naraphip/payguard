@@ -29,7 +29,7 @@ var customSignalKey = regexp.MustCompile(`^custom_[a-z][a-z0-9_]{0,39}$`)
 func customSignalOperators(kind string) []string {
 	switch kind {
 	case "text":
-		return []string{"eq", "contains"}
+		return []string{"eq", "contains", semanticOperator}
 	case "country", "boolean":
 		return []string{"eq", "ne"}
 	case "number":
@@ -90,6 +90,9 @@ func validateTransactionCustomSignals(ctx context.Context, tx pgx.Tx, merchant s
 		return err
 	}
 	for key, value := range values {
+		if key == policyDescription && validCustomValue("text", value) {
+			continue
+		}
 		if integration != nil && slices.ContainsFunc(integration.CustomFields, func(f customSignalDefinition) bool {
 			return f.Key == key && validCustomValue(f.Type, value)
 		}) {

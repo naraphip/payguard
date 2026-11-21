@@ -6,6 +6,7 @@ import {
   LocalMerchantPreviewDisabled, MerchantDemoError, merchantDemoRequest, setMerchantDemoToken,
 } from "../../merchant-demo";
 import type { DemoDirectory } from "../../merchant-demo";
+import { useLocalAdminPreview } from "../../local-admin-preview";
 import { useRuleCredential } from "../rule-composer";
 import { outlineButton, primaryButton } from "../system-rules/contracts";
 import type { MerchantDirectoryPage } from "./management-contracts";
@@ -21,16 +22,20 @@ export function MerchantManagementAccess({ merchant, children }: {
   children: (token: string) => ReactNode;
 }) {
   const token = useRuleCredential(merchant ? "MERCHANT" : "PLATFORM");
+  const localAdmin = useLocalAdminPreview();
   const [preview, setPreview] = useState<"checking" | "enabled" | "disabled">("checking");
   const [credential, setCredential] = useState("");
   const [error, setError] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const signIn = useRef<AbortController>(null);
 
   useEffect(() => () => signIn.current?.abort(), []);
   useEffect(() => {
     if (merchant || token) return;
     const controller = new AbortController();
+    setPreview("checking");
+    setError("");
     void merchantDemoRequest<MerchantDirectoryPage>(directoryProbe, "", { signal: controller.signal })
       .then(result => { if (!controller.signal.aborted) setPreview(result.role === "admin" ? "enabled" : "disabled"); })
       .catch(error => {
@@ -39,7 +44,7 @@ export function MerchantManagementAccess({ merchant, children }: {
         if (!(error instanceof LocalMerchantPreviewDisabled)) setError(managementError(error));
       });
     return () => controller.abort();
-  }, [merchant, token]);
+  }, [merchant, token, previewRevision]);
 
   async function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,6 +89,10 @@ export function MerchantManagementAccess({ merchant, children }: {
     {children(token)}
   </>;
   if (!merchant && preview === "checking") return <p role="status" className="text-sm text-muted">Opening merchant workspace…</p>;
+  if (!merchant && localAdmin) return <section className="max-w-lg space-y-3 rounded-xl border border-line bg-white p-4">
+    <p role="alert" className="text-sm text-red-800">{error || "Could not open the local merchant workspace."}</p>
+    <button type="button" className={outlineButton} onClick={() => setPreviewRevision(value => value + 1)}>Retry opening workspace</button>
+  </section>;
 
   return <form className="max-w-lg space-y-3 rounded-xl border border-line bg-white p-4" onSubmit={connect}>
     <label className="block text-sm font-semibold">

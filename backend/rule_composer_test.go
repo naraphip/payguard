@@ -106,7 +106,7 @@ func TestSensitiveComposerText(t *testing.T) {
 
 type testComposerProvider func(context.Context, string, string, string) ([]byte, error)
 
-func (provider testComposerProvider) interpret(ctx context.Context, scope, policy, instruction string) ([]byte, error) {
+func (provider testComposerProvider) interpret(ctx context.Context, scope, policy, instruction string, _ merchantPolicyProfile) ([]byte, error) {
 	return provider(ctx, scope, policy, instruction)
 }
 
@@ -200,7 +200,7 @@ func TestOpenAIComposerRequestsStrictSchemaAndRetries(t *testing.T) {
 
 	provider := openAIComposer{client: server.Client(), endpoint: server.URL, apiKey: "test-openai-key",
 		model: "gpt-4.1-mini", attemptTimeout: time.Second}
-	result, err := provider.interpret(t.Context(), composerPlatform, "Allowed fields only", "ตรวจสอบการจอง")
+	result, err := provider.interpret(t.Context(), composerPlatform, "Allowed fields only", "ตรวจสอบการจอง", merchantPolicyProfile{})
 	if err != nil || string(result) != validPlatformComposition || calls.Load() != 2 {
 		t.Fatalf("expected successful retry, calls=%d error=%v", calls.Load(), err)
 	}
@@ -241,7 +241,7 @@ func TestOpenAIComposerFailureHandling(t *testing.T) {
 			}))
 			defer server.Close()
 			provider := openAIComposer{client: server.Client(), endpoint: server.URL, attemptTimeout: time.Second}
-			result, err := provider.interpret(t.Context(), composerPlatform, "System", "Instruction")
+			result, err := provider.interpret(t.Context(), composerPlatform, "System", "Instruction", merchantPolicyProfile{})
 			if len(result) != 0 || !errors.Is(err, testCase.want) || calls.Load() != int32(testCase.calls) {
 				t.Fatalf("calls=%d error=%v output length=%d", calls.Load(), err, len(result))
 			}

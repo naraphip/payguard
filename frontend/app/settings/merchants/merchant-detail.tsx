@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState } from "react";
 import { MerchantDemoError, merchantDemoRequest, merchantJevStatus, merchantOutcomeLabels, merchantPolicyProducts, policyActionLabels } from "../../merchant-demo";
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
 import { useWorkspaceView } from "../../workspace-view";
-import { JevRulesPanel } from "../jev-rules/panel";
 import { AdminMerchantPolicyWorkspace } from "../rule-composer";
 import { outlineButton } from "../system-rules/contracts";
 import { SystemRulesDashboard } from "../system-rules/dashboard";
@@ -72,7 +71,7 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
     </h1>
     <p role="alert" className="text-sm text-muted">{failure.error}</p>
     <div className="flex flex-wrap gap-3 text-sm">
-      {!failure.status && <button type="button" className={outlineButton} onClick={reload}>Retry</button>}
+      {(!failure.status || failure.status >= 500) && <button type="button" className={outlineButton} onClick={reload}>Retry</button>}
       <Link className={link} href={merchantView ? "/settings/merchants?view=transactions" : "/settings/merchants"}>Back to {merchantView ? "transactions" : "merchants"}</Link>
     </div>
   </section>;
@@ -105,22 +104,7 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
     {tab === "overview" && <MerchantOverview detail={response} merchant={merchant} token={token} onSave={setUpdated}
       onDelete={() => router.push("/settings/merchants")} />}
     {tab === "transactions" && <MerchantTransactions token={token} merchant={merchant} canDecide={!merchantView} initialTransaction={transaction} />}
-    {tab === "rules" && <>
-      <AdminMerchantPolicyWorkspace merchantId={merchant.id} token={token} />
-      <section id="booking-review-rules" className={`${panel} scroll-mt-28`} aria-label="Booking review rules">
-        <JevRulesPanel merchant={{ id: merchant.id, name: merchant.name, token, canEdit: true }} />
-        <h3 className="font-semibold">Recent Jev assessments</h3>
-        {!response.recentTransactions.length && <p className="text-sm text-muted">No recorded assessments.</p>}
-        <ul className="divide-y divide-line">
-          {response.recentTransactions.map(item => <li key={item.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm">
-            <Link href={merchantDetailsHref(merchant.id, "transactions", item.id)} className={link}>
-              {item.product ? products[item.product] ?? item.product : "Transaction"} · {merchantDate(item.createdAt)}
-            </Link>
-            <span className="wrap-anywhere">{merchantJevStatus(item)}{item.jevVersion && ` · ${item.jevVersion}`}{item.jevRuleVersion && ` · Rules ${item.jevRuleVersion}`}{item.jevAnswer && ` · ${merchantOutcomeLabels[item.jevAnswer]}`}</span>
-          </li>)}
-        </ul>
-      </section>
-    </>}
+    {tab === "rules" && <AdminMerchantPolicyWorkspace merchantId={merchant.id} token={token} />}
     {tab === "profiles" && <Profiles detail={response} />}
     {tab === "integrations" && <Integrations detail={response} />}
     {tab === "audit" && <MerchantAudit path={path} token={token} />}

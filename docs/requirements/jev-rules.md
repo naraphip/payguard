@@ -1,10 +1,10 @@
 # Jev Rules
 
-Status **Local demo implemented and verified**. A merchant can use the demo to turn a rule from AI chat into a review policy for booking assessments. SEON's custom rule builder provides the reference for translating natural language into typed conditions, reviewing those conditions, and testing a candidate on saved data before publication. [SEON custom rules and parameters](https://docs.seon.io/knowledge-base/transactions-scoring/custom-rules-and-parameters)
+Status **Legacy Booking API supported**. It accepts typed review policies for booking assessments. Merchant-selected checkout and simulation use the unified [AI Rule](ai-rule-management.md) workspace. SEON's custom rule builder provides the reference for translating natural language into typed conditions, reviewing those conditions, and testing a candidate on saved data before publication. [SEON custom rules and parameters](https://docs.seon.io/knowledge-base/transactions-scoring/custom-rules-and-parameters)
 
 The evaluator uses the evidence and lineage from the existing mock Jev booking flow. Score adjustments, payment actions, production Jev and AI provider connections, and the maker-checker policy in PG-15 and DEC-07 are outside the demo scope. [Booking assessment](booking-assessment.md) · [PayGuard task list](../payguard-tasks.md) · [Jev Rules UI](../ui/jev-rules.md)
 
-Platform Admin manages a selected merchant's review rules under **Merchant Details → Merchant Rules**. The merchant test tools evaluate conditions on `amountMinor`. Publish, edit and removal create new ruleset revisions. Existing results retain the revision used. The legacy Booking API uses the demo booking credential and its own rule catalogue with both signals below. Configure or test the advisory provider in the separate AI Configuration workspace. [Merchant workflow and APIs](../simulation-runbook.md#composer-and-policy-apis) · [AI Configuration](decision-engine.md#jev-configuration)
+Platform Admin and the authorized merchant can edit or remove the selected merchant's existing amount-based rules under **AI Rule → Saved rules**. The merchant test tools evaluate those rules on `amountMinor`. Changes create a new ruleset revision. Existing results retain the revision used. New rules use AI Rule proposals. The legacy Booking API uses the demo booking credential and its own rule catalogue with both signals below. Configure or test the advisory provider in AI Configuration. [Merchant workflow and APIs](../simulation-runbook.md#composer-and-policy-apis) · [AI Configuration](decision-engine.md#jev-configuration)
 
 ## Rule contract
 
@@ -43,7 +43,7 @@ part Jev cannot express.
 Policy: <describe the bookings you want reviewed>
 ```
 
-Paste the resulting JSON into **Rule chat** to inspect and preview the draft before pushing it. See the [Jev Rules runbook](../simulation-runbook.md#jev-rules) for HTTP use.
+Review the resulting JSON and preview it through the legacy API before publishing it. [Jev Rules runbook](../simulation-runbook.md#jev-rules)
 
 ## API and evaluation
 

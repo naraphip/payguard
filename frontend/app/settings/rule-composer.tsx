@@ -10,6 +10,8 @@ import { adminRulePath, useLocalAdminPreview } from "../local-admin-preview";
 import { useWorkspaceView } from "../workspace-view";
 import type { ReactNode } from "react";
 import { merchantDate } from "./merchants/management-contracts";
+import { LegacyJevRuleItem, type LegacyJevRules } from "./jev-rules/panel";
+import type { Proposal as LegacyJevProposal } from "./jev-rules/proposal";
 import { merchantFieldLabels, merchantOperatorLabels, policyFieldLabel, StructuredRuleBuilder } from "./structured-rule-builder";
 import { outlineButton, primaryButton, ruleRequest, rulesEndpoint, stages } from "./system-rules/contracts";
 import type { Preview, PreviewRun, Rule, RuleCatalogue, RuleInput } from "./system-rules/contracts";
@@ -37,9 +39,10 @@ type Interpretation = {
   proposal?: Proposal;
   message?: string;
   validation: { valid: boolean; errors?: string[]; warnings?: string[] };
+  semanticDraft?: { field: string };
 };
 
-type PolicyPreview = { evaluated: number; matched: number; missing: number; conflictRuleIds?: string[]; approvalReason?: string };
+type PolicyPreview = { evaluated: number; matched: number; missing: number; requiresJev?: number; conflictRuleIds?: string[]; approvalReason?: string };
 type PolicyRule = {
   id: string;
   version: number;
@@ -50,7 +53,6 @@ type PolicyRule = {
   expiresAt?: string;
 };
 type PolicySave = { rule: PolicyRule; status: PolicyRule["status"] };
-export type MerchantPolicyVersion = PolicyRule & { createdAt?: string; createdBy?: string; actor?: string; changeReason?: string };
 type PlatformSave = { rule: Rule; status: "DRAFT"; preview?: Preview };
 export type PolicyField = {
   fieldName: string;
@@ -70,7 +72,7 @@ export type BusinessProfile = {
   fieldRegistry?: PolicyField[];
 };
 
-const scopeLabels = { MERCHANT: "Merchant policy", PLATFORM: "Platform fraud rule" };
+const scopeLabels = { MERCHANT: "Merchant AI Rule", PLATFORM: "Platform fraud rule" };
 const products: Record<string, string> = merchantPolicyProducts;
 const mailboxField = "customer.mailbox_ref";
 const mailboxExample = "Block email buyer@example.test for 12 hours";
@@ -87,7 +89,7 @@ const statusLabels = {
   ACTIVE: "Active", PENDING_APPROVAL: "Pending approval", DISABLED: "Disabled", EXPIRED: "Expired", DRAFT: "Draft",
 };
 const prompts: Record<Scope, string> = {
-  MERCHANT: "If a customer books a flight ticket using an email address from skycannner.com, block the booking.",
+  MERCHANT: "Review all products when amount is at least 50000 minor units",
   PLATFORM: "Send a booking for review if the device placed at least four orders within 60 seconds.",
 };
 
@@ -212,9 +214,17 @@ export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal
           const capability = profile?.fieldRegistry?.find(entry => entry.fieldName === field);
           const label = capability ? policyFieldLabel(capability) : fields[field] ?? field;
           const display = field === mailboxField ? mailbox ?? "the specified address" : field === "product.type" ? products[String(value)] ?? value : String(value);
-          return <li key={index} className="wrap-anywhere">{label} {merchantOperatorLabels[operator] ?? operator} {display}</li>;
+          return <li key={index} className="wrap-anywhere">
+            {label} {merchantOperatorLabels[operator] ?? operator} {display}
+            {merchant && <span className="ml-2 rounded-md bg-white px-1.5 py-0.5 text-xs font-medium text-muted">
+              {operator === "semantic_match" ? "Checked by Jev" : "Checked by PayGuard"}
+            </span>}
+          </li>;
         })}
       </ul>
+      {merchant && conditions.some(condition => condition.operator === "semantic_match") && <p className="mt-2 text-xs text-muted">
+        Jev evaluates the meaning from transaction evidence. If a required condition remains unresolved, the transaction goes to manual review.
+      </p>}
     </div>
     {!hasMailbox && <details>
       <summary className="cursor-pointer text-xs font-semibold text-accent">Advanced rule details</summary>
@@ -230,24 +240,37 @@ export function PolicyExpiry({ expiresAt, status }: Pick<PolicyRule, "expiresAt"
   </p>;
 }
 
-export function RuleComposer({ scope, onSaved, edit, onCancel }: {
+export function RuleComposer({ scope, onSaved }: {
   scope: Scope;
   onSaved?: () => void;
-  edit?: PolicyRule;
-  onCancel?: () => void;
 }) {
   const token = useRuleCredential(scope);
   const localAdmin = useLocalAdminPreview();
-  return (token || (scope === "PLATFORM" && localAdmin)) && <ConnectedComposer key={`${token}:${edit?.id ?? ""}:${edit?.version ?? ""}`}
-    scope={scope} token={token} localAdmin={localAdmin} onSaved={onSaved} edit={edit} onCancel={onCancel} />;
+  return (token || (scope === "PLATFORM" && localAdmin)) && <ConnectedComposer key={token}
+    scope={scope} token={token} localAdmin={localAdmin} onSaved={onSaved} />;
 }
 
-function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, onSaved, edit, onCancel }: {
+function useMerchantRuleProfile(token: string, adminMerchantId?: string) {
+  const [profile, setProfile] = useState<BusinessProfile | null>(null);
+  const [profileError, setProfileError] = useState("");
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setProfileError("");
+    void merchantPolicyRequest<BusinessProfile>("profile", token, { signal: controller.signal }, adminMerchantId)
+      .then(result => { if (!controller.signal.aborted) setProfile(result); })
+      .catch(cause => { if (!controller.signal.aborted) setProfileError(errorText(cause)); });
+    return () => controller.abort();
+  }, [token, revision, adminMerchantId]);
+  return { profile, profileError, retryProfile: () => setRevision(value => value + 1) };
+}
+
+function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, onSaved, edit, onCancel, merchantProfile }: {
   scope: Scope; token: string; localAdmin?: boolean; adminMerchantId?: string; onSaved?: () => void; edit?: PolicyRule; onCancel?: () => void;
+  merchantProfile?: ReturnType<typeof useMerchantRuleProfile>;
 }) {
   const exactEmailEdit = edit?.proposal.conditions.rules.some(condition => condition.field === mailboxField);
   const canUseBuilder = scope === "MERCHANT" && !exactEmailEdit;
-  const [method, setMethod] = useState<"structured" | "ai">(canUseBuilder ? "structured" : "ai");
   const [instruction, setInstruction] = useState("");
   const [draft, setDraft] = useState<Interpretation | null>(null);
   const [pending, setPending] = useState<"interpret" | "save" | null>(null);
@@ -256,21 +279,19 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
   const [runId, setRunId] = useState("");
   const [runs, setRuns] = useState<PreviewRun[]>([]);
   const [runError, setRunError] = useState("");
-  const [profile, setProfile] = useState<BusinessProfile | null>(null);
-  const [profileError, setProfileError] = useState("");
+  const [showConditions, setShowConditions] = useState(Boolean(edit) && !exactEmailEdit);
+  const [builderProposal, setBuilderProposal] = useState<MerchantProposal | undefined>(edit?.proposal);
+  const [builderRevision, setBuilderRevision] = useState(0);
+  const [semanticField, setSemanticField] = useState<string>();
+  const { profile, profileError, retryProfile } = merchantProfile ?? {};
   const request = useRef<AbortController>(null);
   const id = useId();
-  const mailboxBlock = scope === "MERCHANT" && method === "ai" ? parseMailboxBlock(instruction) : null;
+  const mailboxBlock = scope === "MERCHANT" ? parseMailboxBlock(instruction) : null;
 
   useEffect(() => {
     const controller = new AbortController();
     const init = { signal: controller.signal };
-    if (scope === "MERCHANT") {
-      void merchantPolicyRequest<BusinessProfile>("profile", token, init, adminMerchantId)
-        .then(result => { if (!controller.signal.aborted) setProfile(result); }).catch(cause => {
-          if (!controller.signal.aborted) setProfileError(errorText(cause));
-        });
-    } else {
+    if (scope === "PLATFORM") {
       void authenticatedRequest<RuleCatalogue>(adminRulePath(rulesEndpoint, localAdmin, token), token, init).then(result => {
         if (!controller.signal.aborted) setRuns(result.runs ?? []);
       }).catch(cause => {
@@ -281,11 +302,11 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       controller.abort();
       request.current?.abort();
     };
-  }, [scope, token, localAdmin, adminMerchantId]);
+  }, [scope, token, localAdmin]);
 
   async function interpret(event: FormEvent) {
     event.preventDefault();
-    if (request.current || !instruction.trim()) return;
+    if (request.current || !instruction.trim() || (scope === "MERCHANT" && !profile)) return;
     const controller = new AbortController();
     request.current = controller;
     setPending("interpret");
@@ -312,8 +333,16 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       if (controller.signal.aborted) return;
       if (result.proposal && result.proposal.scope !== scope) throw new Error("The proposal belongs to another rule system.");
       setDraft(result);
+      if (result.proposal?.scope === "MERCHANT" && !result.proposal.conditions.rules.some(condition => condition.field === mailboxField)) {
+        setBuilderProposal(result.proposal);
+        setBuilderRevision(value => value + 1);
+        setSemanticField(undefined);
+      }
     } catch (cause) {
-      if (!controller.signal.aborted) setError(errorText(cause));
+      if (!controller.signal.aborted) {
+        if (canUseBuilder && !mailboxBlock) setShowConditions(true);
+        setError(errorText(cause));
+      }
     } finally {
       if (!controller.signal.aborted) setPending(null);
       request.current = null;
@@ -351,6 +380,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
     : saved?.status === "PENDING_APPROVAL" ? "Review the validation evidence before activating this version." : "";
   const preview = saved && "preview" in saved.rule ? saved.rule.preview : saved && "preview" in saved ? saved.preview : undefined;
   const messages = [...(draft?.validation.errors ?? []), ...(draft?.validation.warnings ?? [])];
+  const suggestedField = draft?.semanticDraft?.field;
 
   function resetDraft() {
     setDraft(null);
@@ -358,18 +388,24 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
     setError("");
   }
 
-  function chooseMethod(next: "structured" | "ai") {
-    if (method === next) return;
-    setMethod(next);
-    resetDraft();
+  function startJevCondition(field: string) {
+    setBuilderProposal(undefined);
+    setBuilderRevision(value => value + 1);
+    setSemanticField(field);
+    setShowConditions(true);
+    setDraft(null);
   }
 
   return <section className={panel} aria-labelledby={`${id}-title`}>
     <div>
-      <h2 id={`${id}-title`} className="text-lg font-semibold">{scope === "MERCHANT" ? "Merchant rule editor" : "AI rule composer"}</h2>
-      {method === "ai" && <p className="mt-1 text-sm text-muted">Describe the rule in Thai or English, then review the proposal before saving.</p>}
+      <h2 id={`${id}-title`} className="text-lg font-semibold">{scope === "MERCHANT" ? "AI Rule" : "AI rule composer"}</h2>
+      <p className="mt-1 text-sm text-muted">Describe the rule in Thai or English, then review the proposal before saving.</p>
     </div>
-    {profileError && <p role="alert" className="text-sm text-red-800">{profileError}</p>}
+    {scope === "MERCHANT" && !profile && !profileError && <p role="status" className="text-sm text-muted">Loading available rule fields…</p>}
+    {profileError && <div className="space-y-2">
+      <p role="alert" className="text-sm text-red-800">Could not load the merchant’s rule fields. {profileError}</p>
+      <button type="button" className={outlineButton} onClick={retryProfile}>Retry loading rule fields</button>
+    </div>}
     {profile && <details className="text-sm text-muted">
       <summary className="cursor-pointer font-semibold text-ink">{profile.businessName} business profile</summary>
       <ProfileDetails profile={profile} />
@@ -378,37 +414,45 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       <p>New version of <strong>{edit.proposal.name}</strong></p>
       <button type="button" className={outlineButton} disabled={pending !== null} onClick={onCancel}>{saved ? "Done" : "Cancel edit"}</button>
     </div>}
-    {canUseBuilder && <div role="group" aria-label="Rule authoring mode" className="flex flex-wrap gap-2">
-      <button type="button" className={method === "structured" ? primaryButton : outlineButton} aria-pressed={method === "structured"}
-        disabled={pending !== null} onClick={() => chooseMethod("structured")}>Build rule</button>
-      <button type="button" className={method === "ai" ? primaryButton : outlineButton} aria-pressed={method === "ai"}
-        disabled={pending !== null} onClick={() => chooseMethod("ai")}>AI rule composer</button>
-    </div>}
-    {method === "structured" && (profile
-      ? <StructuredRuleBuilder profile={profile} initial={edit?.proposal} disabled={pending !== null} onChange={resetDraft}
-          onPreview={proposal => {
-            setSaved(null);
-            setError("");
-            setDraft({ status: "READY", proposal, validation: { valid: true } });
-          }} />
-      : !profileError && <p role="status" className="text-sm text-muted">Loading available rule fields…</p>)}
-    {method === "ai" && <form className="space-y-2.5" onSubmit={interpret}>
+    <form className="space-y-2.5" onSubmit={interpret}>
       <label htmlFor={`${id}-instruction`} className="block text-sm font-semibold">Describe your rule</label>
-      <textarea id={`${id}-instruction`} rows={3} maxLength={1000} className="control min-h-24 resize-y"
+      <textarea id={`${id}-instruction`} rows={3} maxLength={2000} className="control min-h-24 resize-y"
         aria-describedby={`${id}-instruction-help`} placeholder={prompts[scope]} value={instruction} disabled={pending !== null} onChange={event => {
           setInstruction(event.currentTarget.value);
           resetDraft();
         }} />
       <p id={`${id}-instruction-help`} className="text-xs text-muted">
-        {scope === "MERCHANT" ? <>For a temporary block on one address, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out card details and credentials.</>
+        {scope === "MERCHANT" ? <>For a temporary exact-address block, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out IP addresses, card details, and credentials.</>
           : "Use policy conditions and domains. Leave out customer identities and card details."}
       </p>
-      <button type="submit" className={ready ? outlineButton : primaryButton} disabled={!instruction.trim() || pending !== null}>
+      <button type="submit" className={ready ? outlineButton : primaryButton}
+        disabled={!instruction.trim() || pending !== null || (scope === "MERCHANT" && !profile)}>
         {pending === "interpret" ? "Generating preview…" : "Generate preview"}
       </button>
-    </form>}
+    </form>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-    {draft && <div className="space-y-3">
+    {suggestedField && canUseBuilder && profile && <div className="space-y-2 rounded-lg bg-paper p-3 text-sm">
+      {draft?.message && <p role="status">{draft.message}</p>}
+      <button className={outlineButton} type="button" disabled={pending !== null}
+        onClick={() => startJevCondition(suggestedField)}>Set up Jev condition</button>
+    </div>}
+    {canUseBuilder && profile && <details className="rounded-lg border border-line p-3" open={showConditions}
+      onToggle={event => setShowConditions(event.currentTarget.open)}>
+      <summary className="cursor-pointer text-sm font-semibold">Rule fields</summary>
+      <div className="mt-3 space-y-3">
+        {semanticField && <p className="text-xs text-muted">
+          Enter the meaning Jev should look for. Add any other conditions from your instruction before reviewing.
+        </p>}
+        <StructuredRuleBuilder key={builderRevision} profile={profile} initial={builderProposal} semanticField={semanticField}
+          disabled={pending !== null} onChange={resetDraft}
+          onPreview={proposal => {
+            setSaved(null);
+            setError("");
+            setDraft({ status: "READY", proposal, validation: { valid: true } });
+          }} />
+      </div>
+    </details>}
+    {draft && (!suggestedField || !canUseBuilder) && <div className="space-y-3">
       {draft.message && <p role="status" className="text-sm text-muted">{draft.message}</p>}
       {messages.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
         {messages.map((message, index) => <li key={index}>{message}</li>)}
@@ -439,8 +483,8 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
 
 type RuleHistory = { rule: PolicyRule; versions: PolicyRule[] };
 
-function ConnectedPolicyRules({ token, adminMerchantId, refreshKey, onEdit, onDelete }: {
-  token: string; adminMerchantId?: string; refreshKey: number;
+function ConnectedPolicyRules({ token, adminMerchantId, profile, refreshKey, onEdit, onDelete }: {
+  token: string; adminMerchantId?: string; profile: BusinessProfile | null; refreshKey: number;
   onEdit: (rule: PolicyRule) => void; onDelete: (ruleId: string) => void;
 }) {
   const [rules, setRules] = useState<PolicyRule[]>([]);
@@ -452,7 +496,12 @@ function ConnectedPolicyRules({ token, adminMerchantId, refreshKey, onEdit, onDe
   const [history, setHistory] = useState<RuleHistory | null>(null);
   const [simulation, setSimulation] = useState<{ id: string; preview: PolicyPreview } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState("");
+  const [legacy, setLegacy] = useState<LegacyJevRules>();
+  const [legacyError, setLegacyError] = useState("");
+  const [legacyLoading, setLegacyLoading] = useState(false);
   const lifecycle = useRef<AbortController>(null);
+  const scopedMerchantId = adminMerchantId ?? profile?.merchantId;
+  const legacyPath = scopedMerchantId ? `/${encodeURIComponent(scopedMerchantId)}/jev/rules` : "";
 
   useEffect(() => () => lifecycle.current?.abort(), []);
   useEffect(() => {
@@ -465,6 +514,44 @@ function ConnectedPolicyRules({ token, adminMerchantId, refreshKey, onEdit, onDe
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [token, adminMerchantId, refreshKey, revision]);
+
+  useEffect(() => {
+    if (!legacyPath) return;
+    const controller = new AbortController();
+    setLegacyLoading(true);
+    setLegacyError("");
+    void merchantDemoRequest<LegacyJevRules>(legacyPath, token, { signal: controller.signal })
+      .then(result => { if (!controller.signal.aborted) setLegacy(result); })
+      .catch(cause => { if (!controller.signal.aborted) setLegacyError(errorText(cause)); })
+      .finally(() => { if (!controller.signal.aborted) setLegacyLoading(false); });
+    return () => controller.abort();
+  }, [legacyPath, token, revision]);
+
+  async function changeLegacy(id: string, proposal?: LegacyJevProposal) {
+    if (!legacy || !legacyPath || lifecycle.current) return false;
+    const controller = new AbortController();
+    lifecycle.current = controller;
+    setBusy(id);
+    setLegacyError("");
+    setNotice("");
+    try {
+      const result = await merchantDemoRequest<LegacyJevRules>(`${legacyPath}/${encodeURIComponent(id)}`, token, {
+        method: proposal ? "PUT" : "DELETE",
+        body: JSON.stringify({ expectedVersion: legacy.version, ...(proposal ? { definition: proposal } : {}) }),
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return false;
+      setLegacy(result);
+      setNotice(proposal ? "Rule updated." : "Rule deleted.");
+      return true;
+    } catch (cause) {
+      if (!controller.signal.aborted) setLegacyError(errorText(cause));
+      return false;
+    } finally {
+      if (!controller.signal.aborted) setBusy("");
+      lifecycle.current = null;
+    }
+  }
 
   async function change(rule: PolicyRule, operation: "disable" | "activate" | "rollback" | "simulate" | "history" | "delete", version?: number) {
     if (lifecycle.current) return;
@@ -512,17 +599,23 @@ function ConnectedPolicyRules({ token, adminMerchantId, refreshKey, onEdit, onDe
   }
 
   return <section className={panel} aria-labelledby="merchant-policy-list">
-    <h2 id="merchant-policy-list" className="text-lg font-semibold">Saved policies</h2>
-    {loading && <p role="status" className="text-sm text-muted">Loading policies…</p>}
+    <div className="flex items-center justify-between gap-2">
+      <h2 id="merchant-policy-list" className="text-lg font-semibold">Saved rules</h2>
+      <button type="button" className={outlineButton} disabled={loading || legacyLoading || !!busy}
+        onClick={() => setRevision(value => value + 1)}>Refresh rules</button>
+    </div>
+    {(loading || legacyLoading) && <p role="status" className="text-sm text-muted">Loading rules…</p>}
     {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
+    {legacyError && <p role="alert" className="text-sm text-red-800">Could not load or save booking review rules. {legacyError}</p>}
     {notice && <p role="status" className="text-sm text-emerald-900">{notice}</p>}
-    {!loading && !error && rules.length === 0 && <p className="text-sm text-muted">No merchant policies saved.</p>}
-    {rules.length > 0 && <ul className="divide-y divide-line">
+    {!loading && !legacyLoading && !error && !legacyError && !rules.length && !legacy?.rules.length && <p className="text-sm text-muted">No saved rules.</p>}
+    {(rules.length > 0 || !!legacy?.rules.length) && <ul className="divide-y divide-line">
       {rules.map(rule => <li className="space-y-3 py-3" key={rule.id}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold wrap-anywhere">{rule.proposal.name}</p>
             <p className="mt-1 text-xs text-muted">{statusLabels[rule.status]} · Version {rule.version} · {policyActionLabels[rule.proposal.action]}
+              {rule.proposal.conditions.rules.some(condition => condition.operator === "semantic_match") && " · Jev condition"}
               {rule.activeVersion && rule.activeVersion !== rule.version ? ` · Version ${rule.activeVersion} remains active` : ""}
             </p>
             <PolicyExpiry expiresAt={rule.expiresAt} status={rule.status} />
@@ -567,7 +660,7 @@ function ConnectedPolicyRules({ token, adminMerchantId, refreshKey, onEdit, onDe
                   Version {version.version} · {statusLabels[version.status]} · {version.proposal.name}
                 </summary>
                 <PolicyExpiry expiresAt={version.expiresAt} status={version.status} />
-                <div className="mt-2"><RulePreview proposal={version.proposal} /></div>
+                <div className="mt-2"><RulePreview proposal={version.proposal} profile={profile} /></div>
               </details>
               {version.version !== rule.version && <button type="button" className={outlineButton}
                 disabled={Boolean(busy)} onClick={() => void change(rule, "rollback", version.version)}>Restore version {version.version}</button>}
@@ -575,6 +668,8 @@ function ConnectedPolicyRules({ token, adminMerchantId, refreshKey, onEdit, onDe
           </li>)}
         </ul>}
       </li>)}
+      {legacy?.rules.map(rule => <LegacyJevRuleItem key={rule.id} rule={rule} version={legacy.version} busy={!!busy || legacyLoading}
+        onChange={proposal => changeLegacy(rule.id, proposal)} />)}
     </ul>}
   </section>;
 }
@@ -583,6 +678,7 @@ function PolicySample({ preview }: { preview: PolicyPreview }) {
   return <div className="mt-1 text-xs text-muted">
     <p>
       {preview.matched} of {preview.evaluated} matched · {preview.missing} with missing signals
+      {!!preview.requiresJev && ` · ${preview.requiresJev} require Jev at transaction time`}
       {!!preview.conflictRuleIds?.length && ` · Conflicts with ${preview.conflictRuleIds.length} active policies`}
     </p>
     {preview.approvalReason && <p className="mt-1">{preview.approvalReason}</p>}
@@ -592,12 +688,13 @@ function PolicySample({ preview }: { preview: PolicyPreview }) {
 function MerchantPolicyWorkspace({ token, adminMerchantId }: { token: string; adminMerchantId?: string }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [edit, setEdit] = useState<PolicyRule>();
+  const merchantProfile = useMerchantRuleProfile(token, adminMerchantId);
   return <>
     <div id="merchant-policy-editor" tabIndex={-1}>
       <ConnectedComposer key={`${edit?.id ?? ""}:${edit?.version ?? ""}`} scope="MERCHANT" token={token} adminMerchantId={adminMerchantId}
-        edit={edit} onCancel={() => setEdit(undefined)} onSaved={() => setRefreshKey(value => value + 1)} />
+        merchantProfile={merchantProfile} edit={edit} onCancel={() => setEdit(undefined)} onSaved={() => setRefreshKey(value => value + 1)} />
     </div>
-    <ConnectedPolicyRules token={token} adminMerchantId={adminMerchantId} refreshKey={refreshKey} onEdit={setEdit}
+    <ConnectedPolicyRules token={token} adminMerchantId={adminMerchantId} profile={merchantProfile.profile} refreshKey={refreshKey} onEdit={setEdit}
       onDelete={id => setEdit(current => current?.id === id ? undefined : current)} />
   </>;
 }
@@ -611,13 +708,11 @@ export function MerchantRulesWorkspace() {
   return <main className="mx-auto max-w-[1050px] space-y-5 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <header>
       <h1 className="text-[30px] font-semibold tracking-tight sm:text-[36px]">Merchant AI Rules</h1>
-      <p className="mt-2 text-sm text-muted">Create policies for your merchant’s products and transaction signals.</p>
     </header>
     <RuleAccess scope="MERCHANT" />
     {token && <MerchantPolicyWorkspace key={token} token={token} />}
     <div className="flex flex-wrap gap-4 text-sm font-semibold text-accent">
       <Link href="/settings/merchants?view=transactions" className="hover:underline">Open transactions</Link>
-      <Link href="/settings/merchant-rules?tab=review" className="hover:underline">Legacy booking review rules</Link>
     </div>
   </main>;
 }

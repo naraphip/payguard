@@ -54,10 +54,15 @@ type composerValidation struct {
 }
 
 type composerInterpretation struct {
-	Status     string             `json:"status"`
-	Proposal   any                `json:"proposal,omitempty"`
-	Validation composerValidation `json:"validation"`
-	Message    string             `json:"message,omitempty"`
+	Status        string                 `json:"status"`
+	Proposal      any                    `json:"proposal,omitempty"`
+	Validation    composerValidation     `json:"validation"`
+	Message       string                 `json:"message,omitempty"`
+	SemanticDraft *composerSemanticDraft `json:"semanticDraft,omitempty"`
+}
+
+type composerSemanticDraft struct {
+	Field string `json:"field"`
 }
 
 type mailboxBlockInstruction struct {
@@ -174,7 +179,8 @@ func composerMerchantPrompt(profile merchantPolicyProfile) string {
 		Fields   []productSignal `json:"supportedFieldsByProduct"`
 	}{profile.Products, profile.Stages, signals, fields})
 	return commonComposerPrompt + `
-Draft a MERCHANT policy using only the provided products, stages, and observed signals. Include 1 to 5 conditions in one AND or OR group. Actions: BLOCK, REVIEW, CHALLENGE. product.type supports eq with a selected product ID. customer.email_domain supports eq with an exact normalized bare host name, without a username, @, wildcard, or subdomain matching. Input such as *@example.com or @example.com means an exact match for example.com. order.amount_minor requires a nonnegative integer and supports eq, ne, gt, gte, lt, lte. If THB or baht is explicit, convert baht to satang exactly; if the amount unit is unspecified, ask. Travel products flight_ticket and hotel_room use BOOKING. Store products physical and digital use CHECKOUT. payment_gateway uses CHECKOUT in scenario simulation only; it is not available for mock checkout. For an unambiguous named product, use its corresponding stage. Never broaden to other products. If the operator explicitly requests all travel or all store products, select only matching listed products. Clearly explain unsupported products, stages, fields or operators and ask for an available alternative. Registered custom fields use the listed type and operators. Text contains is a case-insensitive literal substring. Country values are uppercase ISO alpha-2 codes. Boolean and whole-number values must use JSON booleans and numbers. Capabilities: ` + string(capabilities)
+Draft a MERCHANT policy using only the provided products, stages, and observed signals. Include 1 to 5 conditions in one AND or OR group. Actions: BLOCK, REVIEW, CHALLENGE. product.type supports eq with a selected product ID. customer.email_domain supports eq with an exact normalized bare host name, without a username, @, wildcard, or subdomain matching. Input such as *@example.com or @example.com means an exact match for example.com. order.amount_minor requires a nonnegative integer and supports eq, ne, gt, gte, lt, lte. If THB or baht is explicit, convert baht to satang exactly; if the amount unit is unspecified, ask. Travel products flight_ticket and hotel_room use BOOKING. Store products physical and digital use CHECKOUT. payment_gateway uses CHECKOUT in Simulation Lab only. For an unambiguous named product, use its corresponding stage. Never broaden to other products. If the operator explicitly requests all travel or all store products, select only matching listed products.
+Use a listed literal comparison when it represents the condition. Text contains is a case-insensitive literal substring. Use semantic_match only for a meaning-based comparison against an available text field that lists this operator, e.g. an observed ticket title compared with "Hong Kong Disneyland admission ticket". The value is only the expected meaning, never the original rule or an instruction. Keep every literal condition alongside the meaning-based condition when requested. Only use transaction.description when the intended comparison can be based on the transaction description. If an expected source is unregistered, required, or unclear, ask for a usable source instead of guessing or moving it to transaction.description. Never use semantic_match for identities, locations inferred from IP, or numeric thresholds. Country values use uppercase ISO alpha-2 codes. Boolean and whole-number values must use JSON booleans and numbers. Field labels are names that help identify the source. Capabilities: ` + string(capabilities)
 }
 
 func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
@@ -241,12 +247,6 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusUnprocessableEntity, "Remove email addresses, IP addresses, payment card numbers, card security codes, and credentials. Bare email domains can be used.")
 		return
 	}
-	if s.provider == nil {
-		s.audit("interpret", input.Scope, actor, "DISABLED", "", started)
-		problem(w, http.StatusServiceUnavailable, "AI rule interpretation is unavailable. You can create a rule manually.")
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
 	defer cancel()
 	prompt := composerPlatformPrompt()
@@ -259,12 +259,34 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 			demoWriteError(w, err)
 			return
 		}
+		if len(profile.Products) == 0 {
+			s.audit("interpret", input.Scope, actor, "CLARIFICATION", "", started)
+			respond(w, http.StatusOK, composerInterpretation{
+				Status: "CLARIFICATION", Message: "Add at least one supported product in Merchant Details to create an AI Rule.",
+			})
+			return
+		}
+		if output, handled := interpretLocalMerchantRule(instruction, profile); handled {
+			s.audit("interpret_local", input.Scope, actor, output.Status, "", started)
+			respond(w, http.StatusOK, output)
+			return
+		}
 		prompt = composerMerchantPrompt(profile)
 	}
-	data, err := s.provider.interpret(ctx, input.Scope, prompt, instruction)
+	if s.provider == nil {
+		s.audit("interpret", input.Scope, actor, "DISABLED", "", started)
+		if input.Scope == composerMerchant {
+			respond(w, http.StatusOK, localComposerClarification(profile))
+			return
+		}
+		problem(w, http.StatusServiceUnavailable, "Natural-language drafting is disabled. Use a structured rule draft.")
+		return
+	}
+
+	data, err := s.provider.interpret(ctx, input.Scope, prompt, instruction, profile)
 	if err != nil {
 		result := "PROVIDER_UNAVAILABLE"
-		message := "AI rule interpretation failed. Try again or create the rule manually."
+		message := "AI Rule drafting could not reach OpenAI. Try again or use the rule fields."
 		if errors.Is(err, errComposerOutput) {
 			result = "INVALID_PROVIDER_OUTPUT"
 		}
@@ -279,7 +301,7 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	output, err := parseComposerInterpretation(data, input.Scope, profile)
 	if err != nil {
 		s.audit("interpret", input.Scope, actor, "INVALID_PROVIDER_OUTPUT", "", started)
-		problem(w, http.StatusBadGateway, "AI rule interpretation returned an invalid response. Try again or create the rule manually.")
+		problem(w, http.StatusBadGateway, "OpenAI returned an invalid AI Rule draft. Try again or use the rule fields.")
 		return
 	}
 	s.audit("interpret", input.Scope, actor, output.Status, "", started)

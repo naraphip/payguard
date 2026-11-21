@@ -22,18 +22,18 @@ func TestMerchantRuleDecisionUsesObservedEvidence(t *testing.T) {
 	}}
 	var run mockTransactionInput
 	run.Product, run.AmountMinor = "physical", &zero
-	withoutAge := evaluateMerchantRuleDecision(t.Context(), run, []activePlatformRule{platform}, policyDecisionPart{}, jevRulesSnapshot{}, merchantJev{})
+	withoutAge := evaluateMerchantRuleDecision(t.Context(), run, []activePlatformRule{platform}, nil, merchantPolicyEvidence{}, jevRulesSnapshot{}, merchantJev{})
 	if withoutAge.Outcome != "LOW_RISK" || !slices.Contains(withoutAge.PolicyDecision.Platform.MissingRuleIDs, platform.ID) {
 		t.Fatalf("omitted age was not treated as unavailable: %+v", withoutAge)
 	}
 	run.AccountAgeDays = &zero
-	observedZero := evaluateMerchantRuleDecision(t.Context(), run, []activePlatformRule{platform}, policyDecisionPart{}, jevRulesSnapshot{}, merchantJev{})
+	observedZero := evaluateMerchantRuleDecision(t.Context(), run, []activePlatformRule{platform}, nil, merchantPolicyEvidence{}, jevRulesSnapshot{}, merchantJev{})
 	if observedZero.Outcome != "REVIEW" || observedZero.PolicyDecision.Final.Source != "PLATFORM" ||
 		observedZero.PolicyDecision.Platform.RuleVersions[platform.ID] != 2 {
 		t.Fatalf("observed zero did not apply the governed rule: %+v", observedZero)
 	}
 	run.Product = "flight_ticket"
-	differentStage := evaluateMerchantRuleDecision(t.Context(), run, []activePlatformRule{platform}, policyDecisionPart{}, jevRulesSnapshot{}, merchantJev{})
+	differentStage := evaluateMerchantRuleDecision(t.Context(), run, []activePlatformRule{platform}, nil, merchantPolicyEvidence{}, jevRulesSnapshot{}, merchantJev{})
 	if differentStage.Outcome != "LOW_RISK" || slices.Contains(differentStage.PolicyDecision.Platform.MissingRuleIDs, platform.ID) {
 		t.Fatalf("checkout rule affected a booking: %+v", differentStage)
 	}
@@ -58,19 +58,19 @@ func TestMerchantRuleDecisionKeepsJevEvidenceSeparate(t *testing.T) {
 		}
 		return testJevResponse(200, `{"id":"gen-rule-check","model":"typesafe/jev-1.14","answers":{"booking_risk":{"type":"choice","choice":"LOW_RISK"}}}`), nil
 	})
-	result := evaluateMerchantRuleDecision(t.Context(), input, nil, policyDecisionPart{Action: "BLOCK"}, jevRulesSnapshot{}, jev)
+	result := resolveMerchantRuleDecision(t.Context(), input, policyDecisionPart{Action: "ALLOW"}, "rules-v1", policyDecisionPart{Action: "BLOCK"}, jevRulesSnapshot{}, jev)
 	if result.Outcome != "HIGH_RISK" || result.ReviewState != "NONE" || result.PolicyDecision.Final.Source != "MERCHANT_POLICY" ||
 		result.JevStatus != "LIVE" || result.JevAnswer != "LOW_RISK" || result.JevDecisionID != "gen-rule-check" ||
 		result.PolicyDecision.Jev.Action != "ALLOW" || !strings.Contains(result.JevReason, "low risk") {
 		t.Fatalf("merchant block obscured Jev evidence: %+v", result)
 	}
 	input.SimulateTimeout = true
-	timeout := evaluateMerchantRuleDecision(t.Context(), input, nil, policyDecisionPart{}, jevRulesSnapshot{}, jev)
+	timeout := evaluateMerchantRuleDecision(t.Context(), input, nil, nil, merchantPolicyEvidence{}, jevRulesSnapshot{}, jev)
 	if timeout.Outcome != "UNRESOLVED" || timeout.ReviewState != "NEEDS_DECISION" || timeout.PolicyDecision.Final.Source != "JEV" {
 		t.Fatalf("missing Jev decision did not open manual review: %+v", timeout)
 	}
 	input.AmountMinor, input.SimulateTimeout = nil, false
-	missing := evaluateMerchantRuleDecision(t.Context(), input, nil, policyDecisionPart{}, jevRulesSnapshot{}, jev)
+	missing := evaluateMerchantRuleDecision(t.Context(), input, nil, nil, merchantPolicyEvidence{}, jevRulesSnapshot{}, jev)
 	if missing.Outcome != "UNRESOLVED" || missing.JevStatus != "NOT_RUN" || !slices.Contains(missing.PolicyDecision.Jev.MissingSignals, policyAmount) {
 		t.Fatalf("missing amount did not show incomplete Jev evidence: %+v", missing)
 	}

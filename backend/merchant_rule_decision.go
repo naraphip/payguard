@@ -69,11 +69,16 @@ func evaluateMerchantPlatformRules(input mockTransactionInput, approved []active
 	return part
 }
 
-func evaluateMerchantRuleDecision(ctx context.Context, input mockTransactionInput, platformRules []activePlatformRule, policies policyDecisionPart, rules jevRulesSnapshot, jev merchantJev) mockTransaction {
+func evaluateMerchantRuleDecision(ctx context.Context, input mockTransactionInput, platformRules []activePlatformRule, merchantRules []merchantPolicyRule, evidence merchantPolicyEvidence, rules jevRulesSnapshot, jev merchantJev) mockTransaction {
 	platform := evaluateMerchantPlatformRules(input, platformRules)
+	policies := evaluateMerchantPoliciesWithJev(ctx, merchantRules, evidence, jev, input.SimulateTimeout, platform.Action == "BLOCK")
+	return resolveMerchantRuleDecision(ctx, input, platform, platformRulesetVersion(platformRules), policies, rules, jev)
+}
+
+func resolveMerchantRuleDecision(ctx context.Context, input mockTransactionInput, platform policyDecisionPart, platformVersion string, policies policyDecisionPart, rules jevRulesSnapshot, jev merchantJev) mockTransaction {
 	baseReview := platform.Action == "REVIEW" || policies.Action == "REVIEW"
 	result := evaluateJevWithoutScenario(ctx, input, rules, baseReview, jev)
-	result.RuleVersion = platformRulesetVersion(platformRules)
+	result.RuleVersion = platformVersion
 
 	jevDecision := policyDecisionPart{Action: result.Outcome, ReasonCodes: []string{}}
 	if jevDecision.Action == "LOW_RISK" {
@@ -93,9 +98,16 @@ func evaluateMerchantRuleDecision(ctx context.Context, input mockTransactionInpu
 	if policyActionRank(jevDecision.Action) > policyActionRank(policy.Final.Action) {
 		policy.Final = policyFinal{Action: jevDecision.Action, Source: "JEV"}
 	}
+	policy.requireReviewForUnresolvedMerchantPolicy()
 	result.PolicyDecision = &policy
 	result.applyMerchantRuleOutcome()
 	return result
+}
+
+func (policy *transactionPolicyDecision) requireReviewForUnresolvedMerchantPolicy() {
+	if policy.Final.Action != "BLOCK" && slices.Contains(policy.Merchant.ReasonCodes, merchantJevUnresolved) {
+		policy.Final = policyFinal{Action: "UNRESOLVED", Source: "MERCHANT_POLICY"}
+	}
 }
 
 func (result *mockTransaction) applyMerchantRuleOutcome() {
@@ -105,6 +117,9 @@ func (result *mockTransaction) applyMerchantRuleOutcome() {
 		result.Reason = "A platform rule requires the " + final.Action + " action."
 	case "MERCHANT_POLICY":
 		result.Reason = "A merchant rule requires the " + final.Action + " action."
+		if final.Action == "UNRESOLVED" && slices.Contains(result.PolicyDecision.Merchant.ReasonCodes, merchantJevUnresolved) {
+			result.Reason = "A merchant rule could not be resolved with the available evidence and Jev response. Manual review is required."
+		}
 	}
 	switch final.Action {
 	case "BLOCK":

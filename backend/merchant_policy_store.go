@@ -61,6 +61,7 @@ type merchantPolicyPreview struct {
 	Evaluated       int      `json:"evaluated"`
 	Matched         int      `json:"matched"`
 	Missing         int      `json:"missing"`
+	RequiresJev     int      `json:"requiresJev,omitempty"`
 	ConflictRuleIDs []string `json:"conflictRuleIds,omitempty"`
 	ApprovalReason  string   `json:"approvalReason,omitempty"`
 }
@@ -150,10 +151,13 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 		profile.Signals = append(profile.Signals, policyDomain)
 	}
 	if len(profile.Products) > 0 {
-		profile.Signals = append(profile.Signals, policyMailbox)
+		profile.Signals = append(profile.Signals, policyMailbox, policyDescription)
 	}
 	for _, signal := range profile.Signals {
 		entry := merchantCapability{Name: signal, policyField: merchantPolicyFields[signal], Products: []string{}, Stages: []string{}}
+		if signal == policyDescription {
+			entry.Label = "Transaction description"
+		}
 		for _, product := range profile.Products {
 			if (signal == policyAmount && !declaredAmount && !observedAmount[product]) ||
 				(signal == policyDomain && !declaredDomain && !observedDomain[product]) {
@@ -185,6 +189,18 @@ func previewMerchantPolicy(proposal merchantPolicyProposal, evidence []merchantP
 			continue
 		}
 		preview.Evaluated++
+		if slices.ContainsFunc(proposal.Conditions.Rules, func(c merchantPolicyCondition) bool { return c.Operator == semanticOperator }) {
+			matched, missing, deferred := previewSemanticGroup(proposal.Conditions, item)
+			switch {
+			case matched:
+				preview.Matched++
+			case missing:
+				preview.Missing++
+			case deferred:
+				preview.RequiresJev++
+			}
+			continue
+		}
 		matched, missing := proposal.evaluate(item)
 		if matched {
 			preview.Matched++
@@ -194,6 +210,30 @@ func previewMerchantPolicy(proposal merchantPolicyProposal, evidence []merchantP
 		}
 	}
 	return preview
+}
+
+// Historical samples are previewed locally. Only unresolved semantic comparisons
+// with available evidence would send a question during an actual transaction.
+func previewSemanticGroup(group merchantPolicyConditions, item merchantPolicyEvidence) (matched, missing, deferred bool) {
+	for _, c := range group.Rules {
+		if c.Operator == semanticOperator {
+			if validCustomValue("text", item.custom[c.Field]) {
+				deferred = true
+			} else {
+				missing = true
+			}
+			continue
+		}
+		match, unavailable := c.evaluate(item)
+		if !unavailable && ((group.Logic == "AND" && !match) || (group.Logic == "OR" && match)) {
+			return match, false, false
+		}
+		missing = missing || unavailable
+	}
+	if group.Logic == "OR" && deferred {
+		return false, false, true
+	}
+	return false, missing, deferred
 }
 
 const merchantPolicyExpiry = `(CASE WHEN status='ACTIVE' THEN created_at+((proposal->>'durationHours')::integer * interval '1 hour') END)`

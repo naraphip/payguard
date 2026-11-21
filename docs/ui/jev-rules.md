@@ -1,10 +1,10 @@
 # Jev Rules
 
-Open **Merchant Rules** from **Decision Engine**, then select a merchant and open **Booking review rules**. The old `/settings/jev-rules` route remains available for compatibility. [Rule contract](../requirements/jev-rules.md) · [Runbook](../simulation-runbook.md#jev-rules)
+Open **Merchant AI Rules** from **Decision Engine** and select a merchant, or open **Merchant AI Rules** in the Merchant workspace. The old `/settings/jev-rules` route opens the unified rule entry. [Rule contract](../requirements/jev-rules.md) · [Runbook](../simulation-runbook.md#jev-rules)
 
-1. Connect as Platform Admin for a selected merchant's demo rules, or use the legacy booking demo token on the legacy review tab. Load the active rules. The page keeps the credential in memory.
-2. Choose an example prompt or paste structured rule JSON from an AI chat. Local prompts use a limited grammar such as “Review bookings when amount is at least 50000 minor units.” Use **Draft rule** to see the parsed conditions and action. Unsupported prompts return guidance in the conversation.
-3. Select **Preview on saved assessments** to see the sample size, matches, and assessments missing required evidence. The draft is still local at this point.
-4. Select **Push to Jev** to publish. The active rule list shows the updated version and the published conditions. A failed API request displays the error and leaves the draft available to retry.
+1. Describe a new rule in Thai or English and select **Generate preview**. Expand **Rule fields** to supply or adjust supported conditions.
+2. Check the product, stage and action. The preview shows **Checked by PayGuard** for exact comparisons and **Checked by Jev** for comparisons based on meaning. Save the reviewed proposal.
+3. Open **Saved rules** to manage merchant policy versions, see expiry where present, and edit or delete existing amount-based review rules.
+4. Run a merchant-selected test and open its saved transaction to inspect the decision and any recorded Jev answers.
 
-The rule action goes to manual review. The active list shows the default threshold for the 60-second velocity rule and the named custom rules with their IDs for the entered merchant.
+For the legacy Booking workflow, use the [booking review rule API](../simulation-runbook.md#jev-rules).

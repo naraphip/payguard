@@ -20,6 +20,8 @@ const (
 	policyMailbox                  = "customer.mailbox_ref"
 	policyAmount                   = "order.amount_minor"
 	policyProduct                  = "product.type"
+	policyDescription              = "transaction.description"
+	semanticOperator               = "semantic_match"
 	merchantScenarioProfileVersion = "merchant-scenario-amount-v1"
 )
 
@@ -72,10 +74,11 @@ type merchantCapability struct {
 }
 
 var merchantPolicyFields = map[string]policyField{
-	policyDomain:  {"string", []string{"eq"}, "merchant transaction email domain", "normalized-domain", "no_match"},
-	policyMailbox: {"string", []string{"eq"}, "merchant transaction mailbox reference", "merchant-scoped-reference", "no_match"},
-	policyAmount:  {"number", []string{"eq", "ne", "gt", "gte", "lt", "lte"}, "merchant transaction amount", "transaction-amount", "no_match"},
-	policyProduct: {"enum", []string{"eq"}, "merchant transaction product", "catalog-metadata", "no_match"},
+	policyDescription: {"text", customSignalOperators("text"), "transaction description supplied by the merchant", "non-identifying metadata", "no_match"},
+	policyDomain:      {"string", []string{"eq"}, "merchant transaction email domain", "normalized-domain", "no_match"},
+	policyMailbox:     {"string", []string{"eq"}, "merchant transaction mailbox reference", "merchant-scoped-reference", "no_match"},
+	policyAmount:      {"number", []string{"eq", "ne", "gt", "gte", "lt", "lte"}, "merchant transaction amount", "transaction-amount", "no_match"},
+	policyProduct:     {"enum", []string{"eq"}, "merchant transaction product", "catalog-metadata", "no_match"},
 }
 
 // Only stages that the merchant transaction intake actually evaluates belong here.
@@ -194,7 +197,7 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 				}
 			}
 		}
-		if customSignalKey.MatchString(condition.Field) {
+		if condition.Field == policyDescription || customSignalKey.MatchString(condition.Field) {
 			if !validCustomValue(field.DataType, condition.Value) {
 				return fmt.Errorf("Enter a valid %s value without sensitive data for %s.", field.DataType, condition.Field)
 			}
@@ -278,7 +281,11 @@ func (p merchantPolicyProposal) evaluate(evidence merchantPolicyEvidence) (match
 }
 
 func (condition merchantPolicyCondition) evaluate(evidence merchantPolicyEvidence) (bool, bool) {
-	if customSignalKey.MatchString(condition.Field) {
+	if condition.Operator == semanticOperator {
+		// A local preview has no provider answer for this comparison.
+		return false, true
+	}
+	if condition.Field == policyDescription || customSignalKey.MatchString(condition.Field) {
 		return evaluateCustomCondition(condition, evidence.custom)
 	}
 	switch condition.Field {
@@ -329,12 +336,13 @@ func compareRuleNumber(actual int64, operator string, expected int64) bool {
 }
 
 type policyDecisionPart struct {
-	Action         string         `json:"action"`
-	MatchedRuleIDs []string       `json:"matchedRuleIds,omitempty"`
-	MissingRuleIDs []string       `json:"missingRuleIds,omitempty"`
-	MissingSignals []string       `json:"missingSignals,omitempty"`
-	ReasonCodes    []string       `json:"reasonCodes"`
-	RuleVersions   map[string]int `json:"ruleVersions,omitempty"`
+	Action         string                       `json:"action"`
+	MatchedRuleIDs []string                     `json:"matchedRuleIds,omitempty"`
+	MissingRuleIDs []string                     `json:"missingRuleIds,omitempty"`
+	MissingSignals []string                     `json:"missingSignals,omitempty"`
+	ReasonCodes    []string                     `json:"reasonCodes"`
+	RuleVersions   map[string]int               `json:"ruleVersions,omitempty"`
+	JevConditions  []merchantJevConditionResult `json:"jevConditions,omitempty"`
 }
 
 type policyFinal struct {
@@ -389,17 +397,8 @@ func evaluateMerchantPolicies(rules []merchantPolicyRule, evidence merchantPolic
 				}
 			}
 		}
-		if !matched {
-			continue
-		}
-		if part.RuleVersions == nil {
-			part.RuleVersions = make(map[string]int)
-		}
-		part.MatchedRuleIDs = append(part.MatchedRuleIDs, rule.ID)
-		part.RuleVersions[rule.ID] = rule.Version
-		part.ReasonCodes = append(part.ReasonCodes, "MERCHANT_POLICY_"+rule.Proposal.Action)
-		if policyActionRank(rule.Proposal.Action) > policyActionRank(part.Action) {
-			part.Action = rule.Proposal.Action
+		if matched {
+			part.addMerchantPolicyMatch(rule)
 		}
 	}
 	if part.Action == "NOT_APPLICABLE" && len(part.MissingSignals) > 0 {
@@ -407,4 +406,16 @@ func evaluateMerchantPolicies(rules []merchantPolicyRule, evidence merchantPolic
 		part.ReasonCodes = append(part.ReasonCodes, "MERCHANT_POLICY_SIGNAL_UNAVAILABLE")
 	}
 	return part
+}
+
+func (part *policyDecisionPart) addMerchantPolicyMatch(rule merchantPolicyRule) {
+	if part.RuleVersions == nil {
+		part.RuleVersions = make(map[string]int)
+	}
+	part.MatchedRuleIDs = append(part.MatchedRuleIDs, rule.ID)
+	part.RuleVersions[rule.ID] = rule.Version
+	part.ReasonCodes = append(part.ReasonCodes, "MERCHANT_POLICY_"+rule.Proposal.Action)
+	if policyActionRank(rule.Proposal.Action) > policyActionRank(part.Action) {
+		part.Action = rule.Proposal.Action
+	}
 }

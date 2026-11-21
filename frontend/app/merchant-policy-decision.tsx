@@ -1,9 +1,12 @@
 import { policyActionLabels } from "./merchant-demo";
 import type { MerchantPolicyDecision } from "./merchant-demo";
+import { merchantFieldLabels } from "./settings/structured-rule-builder";
 
 const sources: Record<string, string> = {
   PLATFORM: "Platform fraud rules", MERCHANT_POLICY: "Merchant policy", JEV: "Jev", JEV_TIMEOUT: "Jev timeout", NONE: "No restrictive rule",
 };
+const jevAnswers: Record<string, string> = { MATCH: "Match", NO_MATCH: "No match", UNKNOWN: "Unresolved" };
+const jevStatuses: Record<string, string> = { LIVE: "Live", MOCKED: "Mock", TIMEOUT: "Timed out", UNAVAILABLE: "Unavailable", NOT_RUN: "Not run" };
 
 function DecisionPartDetails({ label, part }: { label: string; part: MerchantPolicyDecision["merchantPolicyDecision"] }) {
   return <div>
@@ -18,6 +21,16 @@ function DecisionPartDetails({ label, part }: { label: string; part: MerchantPol
         const version = part.ruleVersions?.[id];
         return version ? `${id} (v${version})` : id;
       }).join(", ")}
+    </dd>}
+    {!!part.jevConditions?.length && <dd className="mt-2 text-xs text-muted">
+      <p className="font-semibold text-ink">Jev condition results</p>
+      <ul className="mt-1 space-y-1">
+        {part.jevConditions.map(({ ruleId, version, conditionIndex, field, answer, status, model, decisionId }, index) => <li
+          className="wrap-anywhere" key={`${ruleId}:${version}:${field}:${conditionIndex ?? index}`}>
+          <p>{merchantFieldLabels[field] ?? field} · {answer ? jevAnswers[answer] ?? answer : "Unresolved"} · {jevStatuses[status] ?? status}</p>
+          <p>Rule {ruleId} (v{version}){conditionIndex !== undefined && ` · Condition ${conditionIndex + 1}`}{model && ` · ${model}`}{decisionId && ` · Decision ${decisionId}`}</p>
+        </li>)}
+      </ul>
     </dd>}
   </div>;
 }

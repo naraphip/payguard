@@ -84,6 +84,14 @@ type merchantJevChoice struct {
 	Confidence *float64 `json:"confidence"`
 }
 
+type merchantJevQuestionDefinition struct {
+	Type         string            `json:"type"`
+	Instructions string            `json:"instructions"`
+	Criteria     map[string]string `json:"criteria"`
+}
+
+type merchantJevQuestions map[string]merchantJevQuestionDefinition
+
 type merchantJevResponse struct {
 	FallbackUsed bool                         `json:"-"`
 	ID           string                       `json:"id"`
@@ -181,8 +189,34 @@ func assessLiveWithoutScenario(ctx context.Context, result *mockTransaction, rev
 }
 
 func (j merchantJev) requestDecision(ctx context.Context, state merchantJevState) (merchantJevResponse, string, string) {
+	riskQuestion := merchantJevQuestionDefinition{
+		Type:         "choice",
+		Instructions: "Assess this synthetic booking using only the provided evidence and the configured review rule result.",
+		Criteria: map[string]string{
+			"LOW_RISK": "The amount is below the review threshold and no configured review rule matched.",
+			"REVIEW":   "The configured review rule matched, including when the amount meets or exceeds the review threshold.",
+		},
+	}
+	if state.ReviewThresholdMinor == nil {
+		riskQuestion.Instructions = "Assess this synthetic transaction using only the observed amount and the configured review rule result. Apply no assumed review threshold."
+		riskQuestion.Criteria = map[string]string{
+			"LOW_RISK": "The supplied evidence shows no elevated risk and no configured review rule matched.",
+			"REVIEW":   "The supplied evidence shows elevated risk or a configured review rule matched.",
+		}
+	}
+	if instructions := jevAdvisoryRubrics[j.rubric]; instructions != "" {
+		if state.ReviewThresholdMinor == nil {
+			riskQuestion.Instructions += " " + instructions
+		} else {
+			riskQuestion.Instructions = instructions
+		}
+	}
+	return j.requestChoices(ctx, state, merchantJevQuestions{merchantJevQuestion: riskQuestion})
+}
+
+func (j merchantJev) requestChoices(ctx context.Context, state any, questions merchantJevQuestions) (merchantJevResponse, string, string) {
 	if j.timeout == 0 || j.key == "" {
-		return j.requestDecisionOnce(ctx, state)
+		return j.requestChoicesOnce(ctx, state, questions)
 	}
 	ctx, cancel := context.WithTimeout(ctx, j.timeout)
 	defer cancel()
@@ -191,64 +225,27 @@ func (j merchantJev) requestDecision(ctx context.Context, state merchantJevState
 		primaryBudget /= 2
 	}
 	primary, stop := context.WithTimeout(ctx, primaryBudget)
-	answer, status, reason := j.requestDecisionOnce(primary, state)
+	answer, status, reason := j.requestChoicesOnce(primary, state, questions)
 	stop()
 	if status == "LIVE" || j.fallbackModel == "" || ctx.Err() != nil {
 		return answer, status, reason
 	}
 	j.model = j.fallbackModel
-	answer, status, reason = j.requestDecisionOnce(ctx, state)
+	answer, status, reason = j.requestChoicesOnce(ctx, state, questions)
 	answer.FallbackUsed = true
 	return answer, status, reason
 }
 
-func (j merchantJev) requestDecisionOnce(ctx context.Context, state merchantJevState) (merchantJevResponse, string, string) {
+func (j merchantJev) requestChoicesOnce(ctx context.Context, state any, questions merchantJevQuestions) (merchantJevResponse, string, string) {
 	var result merchantJevResponse
 	if j.key == "" {
 		return result, "UNAVAILABLE", "Live Jev is missing its OpenRouter API key. Review is required."
 	}
-
-	type question struct {
-		Type         string            `json:"type"`
-		Instructions string            `json:"instructions"`
-		Criteria     map[string]string `json:"criteria"`
-	}
 	payload := struct {
-		Model     string              `json:"model"`
-		State     merchantJevState    `json:"state"`
-		Questions map[string]question `json:"questions"`
-	}{
-		Model: j.model,
-		State: state,
-		Questions: map[string]question{
-			merchantJevQuestion: {
-				Type:         "choice",
-				Instructions: "Assess this synthetic booking using only the provided evidence and the configured review rule result.",
-				Criteria: map[string]string{
-					"LOW_RISK": "The amount is below the review threshold and no configured review rule matched.",
-					"REVIEW":   "The configured review rule matched, including when the amount meets or exceeds the review threshold.",
-				},
-			},
-		},
-	}
-	if state.ReviewThresholdMinor == nil {
-		riskQuestion := payload.Questions[merchantJevQuestion]
-		riskQuestion.Instructions = "Assess this synthetic transaction using only the observed amount and the configured review rule result. Apply no assumed review threshold."
-		riskQuestion.Criteria = map[string]string{
-			"LOW_RISK": "The supplied evidence shows no elevated risk and no configured review rule matched.",
-			"REVIEW":   "The supplied evidence shows elevated risk or a configured review rule matched.",
-		}
-		payload.Questions[merchantJevQuestion] = riskQuestion
-	}
-	if instructions := jevAdvisoryRubrics[j.rubric]; instructions != "" {
-		riskQuestion := payload.Questions[merchantJevQuestion]
-		if state.ReviewThresholdMinor == nil {
-			riskQuestion.Instructions += " " + instructions
-		} else {
-			riskQuestion.Instructions = instructions
-		}
-		payload.Questions[merchantJevQuestion] = riskQuestion
-	}
+		Model     string               `json:"model"`
+		State     any                  `json:"state"`
+		Questions merchantJevQuestions `json:"questions"`
+	}{j.model, state, questions}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return result, "UNAVAILABLE", "Live Jev request could not be prepared. Review is required."
@@ -276,23 +273,32 @@ func (j merchantJev) requestDecisionOnce(ctx context.Context, state merchantJevS
 	default:
 		return result, "UNAVAILABLE", fmt.Sprintf("Live Jev returned HTTP %d. Review is required.", response.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, merchantJevMaxResponse+1))
+	// Bound the response by the number of questions our server requested.
+	maxResponse := max(merchantJevMaxResponse, 2048*len(questions))
+	data, err := io.ReadAll(io.LimitReader(response.Body, int64(maxResponse)+1))
 	if err != nil {
 		status, reason := merchantJevRequestFailure(err)
 		return result, status, reason
 	}
-	if len(data) > merchantJevMaxResponse || json.Unmarshal(data, &result) != nil || !result.validFor(j.model) {
+	if len(data) > maxResponse || json.Unmarshal(data, &result) != nil || !result.validFor(j.model, questions) {
 		return merchantJevResponse{}, "UNAVAILABLE", "Live Jev returned an invalid decision. Review is required."
 	}
 	return result, "LIVE", ""
 }
 
-func (r merchantJevResponse) validFor(model string) bool {
-	choice := r.Answers[merchantJevQuestion]
-	return (r.ID == "" || merchantJevIDPattern.MatchString(r.ID)) &&
-		merchantJevModelPattern.MatchString(r.Model) && (r.Model == model || strings.HasPrefix(r.Model, model+"-")) &&
-		choice.Type == "choice" && (choice.Choice == "LOW_RISK" || choice.Choice == "REVIEW") &&
-		(choice.Confidence == nil || (*choice.Confidence >= 0 && *choice.Confidence <= 1))
+func (r merchantJevResponse) validFor(model string, questions merchantJevQuestions) bool {
+	if (r.ID != "" && !merchantJevIDPattern.MatchString(r.ID)) || !merchantJevModelPattern.MatchString(r.Model) ||
+		(r.Model != model && !strings.HasPrefix(r.Model, model+"-")) || len(r.Answers) != len(questions) {
+		return false
+	}
+	for key, question := range questions {
+		answer := r.Answers[key]
+		if _, ok := question.Criteria[answer.Choice]; !ok || answer.Type != question.Type ||
+			(answer.Confidence != nil && (*answer.Confidence < 0 || *answer.Confidence > 1)) {
+			return false
+		}
+	}
+	return true
 }
 
 func merchantJevRequestFailure(err error) (status, reason string) {

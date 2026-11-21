@@ -50,7 +50,7 @@ export type MerchantAuditEvent = {
 export const merchantTabs = {
   overview: "Overview",
   transactions: "Transactions",
-  rules: "Merchant Rules",
+  rules: "AI Rule",
   profiles: "Advanced Risk Configuration",
   integrations: "Integrations",
   audit: "Audit Logs",

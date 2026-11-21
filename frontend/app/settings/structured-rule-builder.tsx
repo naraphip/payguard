@@ -13,6 +13,7 @@ export const merchantFieldLabels: Record<string, string> = {
   "customer.email_domain": "Customer email domain",
   "customer.mailbox_ref": "Exact email address",
   "order.amount_minor": "Order amount in minor units",
+  "transaction.description": "Transaction description",
 };
 export const merchantOperatorLabels: Record<string, string> = {
   eq: "equals", ne: "does not equal", gt: "is greater than", gte: "is at least",
@@ -50,13 +51,14 @@ function conditionValue(field: PolicyField, value: string) {
   }
 }
 
-function ConditionValue({ field, value, products, onChange }: {
+function ConditionValue({ field, value, products, semantic, onChange }: {
   field?: PolicyField;
   value: string;
   products: string[];
+  semantic: boolean;
   onChange: (value: string) => void;
 }) {
-  return <label className="block min-w-0 text-sm font-medium">Value
+  return <label className="block min-w-0 text-sm font-medium">{semantic ? "Meaning to match" : "Value"}
     {field?.dataType === "boolean" || field?.dataType === "enum" ? <select className="control mt-1.5" value={value}
       onChange={event => onChange(event.currentTarget.value)}>
       <option value="">Select value</option>
@@ -66,25 +68,26 @@ function ConditionValue({ field, value, products, onChange }: {
     </select> : <input className="control mt-1.5" disabled={!field} value={value} autoComplete="off"
       maxLength={field?.dataType === "country" ? 2 : field?.dataType === "text" ? 120 : 253}
       inputMode={field?.dataType === "number" ? "numeric" : "text"}
-      placeholder={field?.dataType === "country" ? "e.g. IN" : field?.fieldName === "customer.email_domain" ? "example.test" : undefined}
+      placeholder={semantic ? "e.g. a Hong Kong Disneyland admission ticket" : field?.dataType === "country" ? "e.g. IN" : field?.fieldName === "customer.email_domain" ? "example.test" : undefined}
       onChange={event => onChange(event.currentTarget.value)} />}
   </label>;
 }
 
-export function StructuredRuleBuilder({ profile, initial, disabled, onChange, onPreview }: {
+export function StructuredRuleBuilder({ profile, initial, semanticField, disabled, onChange, onPreview }: {
   profile: BusinessProfile;
   initial?: MerchantProposal;
+  semanticField?: string;
   disabled: boolean;
   onChange: () => void;
   onPreview: (proposal: MerchantProposal) => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [products, setProducts] = useState(initial?.product_types ?? (profile.products.length === 1 ? profile.products.slice() : []));
-  const [action, setAction] = useState<PolicyAction>(initial?.action ?? "REVIEW");
+  const [products, setProducts] = useState(initial?.product_types ?? (!semanticField && profile.products.length === 1 ? profile.products.slice() : []));
+  const [action, setAction] = useState<PolicyAction | "">(initial?.action ?? (semanticField ? "" : "REVIEW"));
   const [logic, setLogic] = useState<"AND" | "OR">(initial?.conditions.logic ?? "AND");
   const [conditions, setConditions] = useState<DraftCondition[]>(() => initial?.conditions.rules.map((condition, id) => ({
     ...condition, id, value: String(condition.value),
-  })) ?? [{ id: 0, field: "", operator: "", value: "" }]);
+  })) ?? [{ id: 0, field: semanticField ?? "", operator: semanticField ? "semantic_match" : "", value: "" }]);
   const nextId = useRef(conditions.length);
   const [error, setError] = useState("");
   const fieldOptions = (profile.fieldRegistry ?? []).filter(field => field.fieldName !== "customer.mailbox_ref" &&
@@ -110,6 +113,7 @@ export function StructuredRuleBuilder({ profile, initial, disabled, onChange, on
     event.preventDefault();
     try {
       if (!name.trim()) throw new Error("Enter a rule name.");
+      if (!action) throw new Error("Choose the action to take when the rule matches.");
       if (!products.length || products.some(product => !profile.products.includes(product))) {
         throw new Error("Choose at least one product in the merchant’s catalogue.");
       }
@@ -146,9 +150,12 @@ export function StructuredRuleBuilder({ profile, initial, disabled, onChange, on
         </label>
         <label className="text-sm font-medium">Action
           <select className="control mt-1.5" value={action} onChange={event => {
-            setAction(event.currentTarget.value as PolicyAction);
+            setAction(event.currentTarget.value as PolicyAction | "");
             clearPreview();
-          }}>{actions.map(value => <option key={value} value={value}>{policyActionLabels[value]}</option>)}</select>
+          }}>
+            {!action && <option value="">Choose an action</option>}
+            {actions.map(value => <option key={value} value={value}>{policyActionLabels[value]}</option>)}
+          </select>
         </label>
       </div>
       <fieldset>
@@ -194,7 +201,8 @@ export function StructuredRuleBuilder({ profile, initial, disabled, onChange, on
                   {field?.allowedOperators.map(operator => <option key={operator} value={operator}>{merchantOperatorLabels[operator] ?? operator}</option>)}
                 </select>
               </label>
-              <ConditionValue field={field} value={condition.value} products={products} onChange={value => updateCondition(condition.id, { value })} />
+              <ConditionValue field={field} value={condition.value} products={products} semantic={condition.operator === "semantic_match"}
+                onChange={value => updateCondition(condition.id, { value })} />
             </div>
             {conditions.length > 1 && <button type="button" className="mt-2 text-xs font-semibold text-red-800 hover:underline" onClick={() => {
               setConditions(previous => previous.filter(item => item.id !== condition.id));

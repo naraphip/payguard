@@ -42,7 +42,7 @@ func (failure *composerProviderFailure) Error() string { return failure.outcome 
 func (failure *composerProviderFailure) Unwrap() error { return errComposerUpstream }
 
 type ruleComposerProvider interface {
-	interpret(ctx context.Context, scope, policy, instruction string) ([]byte, error)
+	interpret(ctx context.Context, scope, policy, instruction string, profile merchantPolicyProfile) ([]byte, error)
 }
 
 type openAIComposer struct {
@@ -114,7 +114,40 @@ func composerList(item composerSchema) composerSchema {
 	return composerSchema{Type: "array", Items: &item}
 }
 
-func proposalSchema(scope string) composerSchema {
+func merchantConditionSchema(profile merchantPolicyProfile) composerSchema {
+	conditions := make([]composerSchema, 0, len(profile.Signals))
+	for _, signal := range profile.Signals {
+		if signal == policyMailbox {
+			continue
+		}
+		field, known := merchantPolicyFields[signal]
+		for _, capability := range profile.FieldRegistry {
+			if capability.Name == signal {
+				field, known = capability.policyField, true
+				break
+			}
+		}
+		if !known || len(field.Operators) == 0 {
+			continue
+		}
+		value := composerSchema{Type: "string"}
+		switch field.DataType {
+		case "number":
+			value.Type = "integer"
+		case "boolean":
+			value.Type = "boolean"
+		}
+		if signal == policyProduct && len(profile.Products) > 0 {
+			value = composerEnum(profile.Products...)
+		}
+		conditions = append(conditions, composerObject(map[string]composerSchema{
+			"field": composerEnum(signal), "operator": composerEnum(field.Operators...), "value": value,
+		}, "field", "operator", "value"))
+	}
+	return composerSchema{AnyOf: conditions}
+}
+
+func proposalSchema(scope string, profile merchantPolicyProfile) composerSchema {
 	var proposal composerSchema
 	if scope == composerPlatform {
 		signals := make([]string, 0, len(ruleSignals))
@@ -137,18 +170,13 @@ func proposalSchema(scope string) composerSchema {
 			"scope": composerEnum(composerPlatform), "rule": rule,
 		}, "scope", "rule")
 	} else {
-		condition := composerObject(map[string]composerSchema{
-			"field":    composerEnum("product.type", "customer.email_domain", "order.amount_minor"),
-			"operator": composerEnum("eq", "ne", "gt", "gte", "lt", "lte"),
-			"value":    {AnyOf: []composerSchema{{Type: "string"}, {Type: "integer"}}},
-		}, "field", "operator", "value")
 		proposal = composerObject(map[string]composerSchema{
 			"scope":         composerEnum(composerMerchant),
 			"name":          {Type: "string"},
-			"product_types": composerList(composerSchema{Type: "string"}),
-			"stages":        composerList(composerEnum("BOOKING", "CHECKOUT")),
+			"product_types": composerList(composerEnum(profile.Products...)),
+			"stages":        composerList(composerEnum(profile.Stages...)),
 			"conditions": composerObject(map[string]composerSchema{
-				"logic": composerEnum("AND", "OR"), "rules": composerList(condition),
+				"logic": composerEnum("AND", "OR"), "rules": composerList(merchantConditionSchema(profile)),
 			}, "logic", "rules"),
 			"action": composerEnum("BLOCK", "REVIEW", "CHALLENGE"),
 		}, "scope", "name", "product_types", "stages", "conditions", "action")
@@ -176,7 +204,7 @@ type composerChatBody struct {
 	} `json:"response_format"`
 }
 
-func (provider *openAIComposer) interpret(ctx context.Context, scope, policy, instruction string) ([]byte, error) {
+func (provider *openAIComposer) interpret(ctx context.Context, scope, policy, instruction string, profile merchantPolicyProfile) ([]byte, error) {
 	body := composerChatBody{
 		Model: provider.model, MaxCompletionTokens: 1400,
 		Store:    false,
@@ -185,7 +213,7 @@ func (provider *openAIComposer) interpret(ctx context.Context, scope, policy, in
 	body.ResponseFormat.Type = "json_schema"
 	body.ResponseFormat.JSONSchema.Name = "payguard_rule_proposal"
 	body.ResponseFormat.JSONSchema.Strict = true
-	body.ResponseFormat.JSONSchema.Schema = proposalSchema(scope)
+	body.ResponseFormat.JSONSchema.Schema = proposalSchema(scope, profile)
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, errComposerUpstream

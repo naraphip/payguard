@@ -72,12 +72,15 @@ const emptyProducts: SimulationProduct[] = [];
 
 function sourceProducts(source: ScenarioSource, declared: string[]) {
   return catalog.filter(product => (source === "simulation" || product !== "payment_gateway") &&
-    (!declared.length || declared.includes(product)));
+    declared.includes(product));
 }
 
 function customFields(context?: DemoScenarioContext, product?: SimulationProduct) {
-  return context?.fieldRegistry?.filter(field => field.fieldName.startsWith("custom_") &&
-    product && field.supportedProductTypes.includes(product)) ?? [];
+  if (!context || !product) return [];
+  const usesDescription = context.policies.some(policy => policy.products.includes(product) &&
+    policy.conditions.rules.some(condition => condition.field === "transaction.description"));
+  return context.fieldRegistry?.filter(field => field.supportedProductTypes.includes(product) &&
+    (field.fieldName.startsWith("custom_") || (usesDescription && field.fieldName === "transaction.description"))) ?? [];
 }
 
 function readAccountAge(input?: string) {
@@ -411,7 +414,10 @@ export function DemoScenarioCustomSignals({ flow, values, onChange }: {
   const fields = customFields(flow.context, flow.product);
   if (!fields.length) return null;
   return <fieldset className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
-    <legend className="mb-1 text-sm font-semibold">Custom evidence</legend>
+    <legend className="mb-1 text-sm font-semibold">Additional rule evidence</legend>
+    {fields.some(field => field.fieldName === "transaction.description") && <p className="text-xs text-muted sm:col-span-2">
+      Use non-identifying test details in the transaction description. Jev may use it to assess meaning.
+    </p>}
     {fields.map(field => {
       const name = field.fieldName;
       const fieldValue = values[name] ?? "";
@@ -442,7 +448,7 @@ function describePolicyCondition(condition: TestPolicyCondition, fieldRegistry: 
   const label = condition.field === "product.type" ? productLabel ?? value : value;
   const customField = fieldRegistry.find(field => field.fieldName === condition.field);
   const field = customField ? policyFieldLabel(customField) : merchantFieldLabels[condition.field] ?? condition.field;
-  return `${field} ${merchantOperatorLabels[condition.operator] ?? condition.operator.replaceAll("_", " ")} ${label}`;
+  return `${field} ${merchantOperatorLabels[condition.operator] ?? condition.operator.replaceAll("_", " ")} ${label}${condition.operator === "semantic_match" ? " (Jev)" : ""}`;
 }
 
 export function DemoScenarioPolicyContext({ flow }: { flow: DemoScenarioState }) {
@@ -466,17 +472,6 @@ export function DemoScenarioPolicyContext({ flow }: { flow: DemoScenarioState })
         This test can supply account age. Signals that require earlier activity or real payment data are unavailable.
       </p>}
     </div>}
-    {!!context.jevRules.rules.length && <div className="space-y-1">
-      <p className="font-semibold">Published Jev review rules · {context.jevRules.version}</p>
-      <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
-        {context.jevRules.rules.map(rule => <li key={rule.id} className="wrap-anywhere">
-          <span className="font-medium">{rule.name} · {policyActionLabels[rule.action] ?? rule.action}</span>
-          <span> when {rule.conditions.map(({ signal, operator, value }) =>
-            `${jevTestSignals[signal] ?? signal} ${merchantOperatorLabels[operator] ?? operator} ${value ?? ""}`).join(" and ")}</span>
-        </li>)}
-      </ul>
-    </div>}
-    {context.products.length === 0 && <p className="text-muted">This merchant has no product catalogue yet. Choose a synthetic product for the first test.</p>}
     {!products.length && <p className="text-muted">
       {source === "checkout" && context.products.includes("payment_gateway") ? <>
         Gateway payments run in Simulation Lab.{" "}
@@ -487,7 +482,7 @@ export function DemoScenarioPolicyContext({ flow }: { flow: DemoScenarioState })
         <Link href={merchantDetailsHref(merchant.id)} className="font-semibold text-accent underline underline-offset-2">Open merchant details</Link>
       </>}
     </p>}
-    {product && (policies.length ? <ul className="space-y-2">
+    {product && (policies.length || context.jevRules.rules.length ? <ul className="space-y-2">
       {policies.map(policy => <li key={policy.id} className="space-y-1 rounded-md border border-line bg-white p-2.5 wrap-anywhere">
         <p className="font-semibold">{policy.name} · v{policy.version} · {policyActionLabels[policy.action] ?? policy.action}</p>
         <p className="text-xs text-muted">
@@ -495,7 +490,12 @@ export function DemoScenarioPolicyContext({ flow }: { flow: DemoScenarioState })
         </p>
         {policy.expiresAt && <p className="text-xs text-muted">Expires <time dateTime={policy.expiresAt}>{merchantDate(policy.expiresAt)}</time></p>}
       </li>)}
-    </ul> : <p className="text-muted">No active merchant policies apply to {merchantPolicyProducts[product]}.</p>)}
+      {context.jevRules.rules.map(rule => <li key={rule.id} className="space-y-1 rounded-md border border-line bg-white p-2.5 wrap-anywhere">
+        <p className="font-semibold">{rule.name} · {context.jevRules.version} · {policyActionLabels[rule.action] ?? rule.action}</p>
+        <p className="text-xs text-muted">{rule.conditions.map(({ signal, operator, value }) =>
+          `${jevTestSignals[signal] ?? signal} ${merchantOperatorLabels[operator] ?? operator} ${value ?? ""}`).join(" and ")}</p>
+      </li>)}
+    </ul> : <p className="text-muted">No active merchant rules apply to {merchantPolicyProducts[product]}.</p>)}
   </section>;
 }
 

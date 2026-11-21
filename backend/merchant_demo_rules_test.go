@@ -127,7 +127,9 @@ func TestMerchantJevRuleRevisionsPostgres(t *testing.T) {
 	edit := map[string]any{"definition": revised, "expectedVersion": original.Version}
 	remove := map[string]string{"expectedVersion": original.Version}
 	call(http.MethodPut, rule, "", edit, http.StatusUnauthorized, nil)
-	call(http.MethodDelete, rule, merchantToken, remove, http.StatusForbidden, nil)
+	call(http.MethodGet, rules, merchantToken, nil, http.StatusOK, nil)
+	call(http.MethodPost, rules, merchantToken, revised, http.StatusForbidden, nil)
+	call(http.MethodDelete, merchantDemoPath+"/"+other.ID+"/jev/rules/"+id, merchantToken, remove, http.StatusNotFound, nil)
 	call(http.MethodPut, rule, admin, map[string]any{"definition": revised}, http.StatusUnprocessableEntity, nil)
 	call(http.MethodDelete, merchantDemoPath+"/"+other.ID+"/jev/rules/"+id, admin,
 		map[string]string{"expectedVersion": bookingRuleVersion}, http.StatusNotFound, nil)
@@ -146,7 +148,7 @@ func TestMerchantJevRuleRevisionsPostgres(t *testing.T) {
 	}
 	call(http.MethodPut, rule, admin, edit, http.StatusConflict, nil)
 	call(http.MethodDelete, rule, admin, remove, http.StatusConflict, nil)
-	call(http.MethodDelete, rule, admin, map[string]string{"expectedVersion": updated.Version}, http.StatusOK, &updated)
+	call(http.MethodDelete, rule, merchantToken, map[string]string{"expectedVersion": updated.Version}, http.StatusOK, &updated)
 	if updated.Version != "booking-rules-v4" || len(updated.Rules) != 0 {
 		t.Fatalf("removal did not produce a new empty ruleset: %+v", updated)
 	}

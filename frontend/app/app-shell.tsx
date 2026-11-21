@@ -42,7 +42,7 @@ const groups: { label: string; items: Destination[] }[] = [
     label: "Decision Engine",
     items: [
       { href: "/settings/system-rules", label: "Platform Rules", Icon: SlidersHorizontal, platformOnly: true },
-      { href: "/settings/merchants?view=rules", label: "Merchant Rules", Icon: Store, platformOnly: true },
+      { href: "/settings/merchants?view=rules", label: "Merchant AI Rules", Icon: Store, platformOnly: true },
       { href: "/settings/ai-configuration", label: "AI Configuration", Icon: Sparkles, platformOnly: true },
     ],
   },

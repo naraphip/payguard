@@ -7,6 +7,14 @@ Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4
 - Independent fixture and workflow YAML checks passed. A live local sync changed 18 activity records in Notion. The GitHub Actions repository secret and variable are configured.
 - The [manual GitHub Actions run](https://github.com/pwatakul/payguard/actions/runs/44868685163) succeeded. The Notion health row showed Last Success at 11:59 Bangkok time on 21 November 2026. Verification of two scheduled runs is ongoing.
 
+## Unified merchant AI Rule
+
+Platform Admin and Merchant now share **AI Rule** for merchant rule authoring and the saved list. Existing amount-based booking review rules stay editable in that list. Merchant access stays scoped to its own rules and read-only ledger. The local proxy distinguishes missing API routes, connection failures, timeouts and unreadable replies. Rule field loading provides a retry action. [Rule contract](requirements/ai-rule-management.md) · [Runbook](simulation-runbook.md#ai-rule-composer)
+
+- A live OpenRouter Jev check on an isolated synthetic merchant used `typesafe/jev-1.14-20261014` with the general-purpose OpenAI composer disabled. Hong Kong Disneyland park admission produced `MATCH` and **Block** in Mock Checkout. Airport shuttle transport produced `NO_MATCH` and **Allow** in Simulation Lab. A missing transaction description produced `UNKNOWN` with `NOT_RUN` and **Review (unresolved)**. The live answers recorded provider decision IDs. Exact retries returned the original saved results.
+- Focused backend unit and PostgreSQL integration tests passed for scoped authoring, local short-circuiting, approved outbound evidence, provider failure, tool parity and replay after disabling a rule. Run `go test -count=1 -run 'TestMerchantSemantic|TestManagedAuthoringWithoutComposerPostgres' ./...` from `backend` with a disposable `PAYGUARD_POLICY_TEST_DATABASE_URL`. The full Go test suite and race suite passed against disposable PostgreSQL, and Go vet passed. The frontend typecheck and isolated production build passed. The browser showed the semantic preview under the unified rule editor.
+- The local assessment backend was healthy on port 8082. The page's profile, saved policies, existing booking review rules, and test context reads returned HTTP 200 through the Next.js proxy on port 3001.
+
 ## Merchant rule testing and local Platform Admin
 
 Mock Checkout and Simulation Lab run the selected merchant's Platform Rules, Merchant Policies, published Jev review rules and configured Jev advisory. Choose a merchant and a product to run a test. Open its **Transactions** to compare each decision and saved version. Previous scenario transactions retain their original results and can still replay through the API. [Requirements](requirements/merchant-scenarios.md) · [Local evaluation](simulation-runbook.md#merchant-scenarios-and-jev)
@@ -46,7 +54,7 @@ The team Sheet records **Done (Sandbox)** for `ADM-MER-001` through `ADM-MER-006
 
 ## AI Rule Management
 
-The [AI Rule Management slice](requirements/ai-rule-management.md) uses direct OpenAI Chat Completions to compose merchant policies and Platform Rules drafts. It reuses the existing merchant registration and evidence, applies active policies to new demo merchant transactions in Go, and records the separate decision sources and matched policy versions. The mock or live Jev merchant assessment runs separately. [Local configuration and API](simulation-runbook.md#ai-rule-composer)
+The original [AI Rule Management slice](requirements/ai-rule-management.md) uses direct OpenAI Chat Completions to compose merchant policies and Platform Rules drafts. It reuses the existing merchant registration and evidence, applies active policies to new demo merchant transactions in Go, and records the separate decision sources and matched policy versions. The later unified workflow adds conditions checked by Jev at transaction time. [Local configuration and API](simulation-runbook.md#ai-rule-composer)
 
 - The dedicated PostgreSQL policy suite passed tenant isolation, exact-domain normalization, spoof and subdomain rejection, missing and stage-specific evidence, conflicts, disable and rollback, replay, and decision precedence. The latest run across 200 local samples with one rule measured a p95 of 0.401 ms for the policy configuration read and 1.084 µs for evaluation.
 - The isolated booking smoke passed two fixture runs covering baseline activation, replay, tenant isolation, and lineage.

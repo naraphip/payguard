@@ -492,19 +492,34 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		if err != nil {
 			return err
 		}
-		merchant := evaluateMerchantPolicies(activePolicies, merchantPolicyEvidence{
+		evidence := merchantPolicyEvidence{
 			product: input.Product, stage: merchantPolicyStage(input.Product), domain: input.CustomerEmailDomain,
 			mailboxRef: mailboxRef, amount: input.AmountMinor, custom: input.CustomSignals,
-		})
+		}
+		// Reserve time for writing the decision after Jev, including after waiting for the merchant lock.
+		decisionDeadline := time.Now().Add(10 * time.Second)
+		if deadline, ok := ctx.Deadline(); ok && deadline.Add(-time.Second).Before(decisionDeadline) {
+			decisionDeadline = deadline.Add(-time.Second)
+		}
+		decisionCtx, cancelDecision := context.WithDeadline(ctx, decisionDeadline)
+		defer cancelDecision()
 		if input.ScenarioID == "" {
 			platformRules, err := readActivePlatformRules(ctx, tx)
 			if err != nil {
 				return err
 			}
-			result = evaluateMerchantRuleDecision(ctx, input, platformRules, merchant, jevRules, jev)
+			result = evaluateMerchantRuleDecision(decisionCtx, input, platformRules, activePolicies, evidence, jevRules, jev)
 		} else {
-			result = evaluateMerchantJev(ctx, input, scenario, jevRules, jev)
+			merchant := evaluateMerchantPoliciesWithJev(decisionCtx, activePolicies, evidence, jev, input.SimulateTimeout, false)
+			result = evaluateMerchantJev(decisionCtx, input, scenario, jevRules, jev)
 			result.applyLegacyMerchantPolicyDecision(merchant)
+			result.PolicyDecision.requireReviewForUnresolvedMerchantPolicy()
+			if result.PolicyDecision.Final.Source == "MERCHANT_POLICY" &&
+				(slices.Contains(merchant.ReasonCodes, merchantJevUnresolved) || slices.ContainsFunc(activePolicies, func(rule merchantPolicyRule) bool {
+					return slices.Contains(merchant.MatchedRuleIDs, rule.ID) && hasSemanticMerchantCondition(rule)
+				})) {
+				result.applyMerchantRuleOutcome()
+			}
 		}
 		result.JevConfigurationVersion = savedConfig.Version
 		result.MerchantID = merchantID

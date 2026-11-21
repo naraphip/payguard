@@ -11,7 +11,7 @@ export default async function MerchantDetailsPage({ params, searchParams }: {
 }) {
   const [{ merchantId }, search] = await Promise.all([params, searchParams]);
   const transaction = typeof search.transaction === "string" ? search.transaction : undefined;
-  if (!transaction && search.tab === "jev") redirect(`${merchantDetailsHref(merchantId, "rules")}#booking-review-rules`);
+  if (!transaction && search.tab === "jev") redirect(merchantDetailsHref(merchantId, "rules"));
   const tab = transaction ? "transactions" : asMerchantTab(search.tab);
   return <main className="mx-auto max-w-[1400px] px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <MerchantDetail merchantId={merchantId} key={merchantId} tab={tab} transaction={transaction} />

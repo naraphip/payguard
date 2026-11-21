@@ -66,23 +66,47 @@ async function proxy(request: NextRequest, { params }: RouteContext) {
   const backend = process.env.PAYGUARD_BOOKING_API_URL ?? process.env.PAYGUARD_API_URL ?? "http://127.0.0.1:8081";
   const resource = path[0] === "admin" ? path.slice(1) : ["booking", "demo", "merchants", ...path];
   const endpoint = `${backend.replace(/\/$/, "")}/api/v1/${resource.join("/")}${write ? "" : request.nextUrl.search}`;
+  const timeout = AbortSignal.timeout(65_000);
+  let response: Response;
+  let body: string;
   try {
     const headers = new Headers({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
     const creationKey = path.length === 0 && request.method === "POST" ? request.headers.get("Idempotency-Key") : null;
     if (creationKey) headers.set("Idempotency-Key", creationKey);
-    const response = await fetch(endpoint, {
+    response = await fetch(endpoint, {
       method: request.method,
       headers,
       body: write ? await request.text() : undefined,
       cache: "no-store",
       redirect: "error",
-      signal: request.signal,
+      signal: AbortSignal.any([request.signal, timeout]),
     });
-    const data = await response.json();
-    return Response.json(data, { status: response.status, headers: noStore });
+    body = await response.text();
   } catch {
-    return Response.json({ error: "The local merchant API is unavailable. Try again." }, { status: 502, headers: noStore });
+    return timeout.aborted
+      ? Response.json({ code: "MERCHANT_API_TIMEOUT", error: "The local PayGuard backend did not respond in time. Retry the request." }, { status: 504, headers: noStore })
+      : Response.json({ code: "MERCHANT_API_UNREACHABLE", error: "The preview could not connect to the local PayGuard backend. Check that the backend is running, then retry." }, { status: 502, headers: noStore });
   }
+
+  let data: unknown;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    data = null;
+  }
+  if (data === null) {
+    if (response.status === 404 || response.status === 405) {
+      return Response.json({
+        code: "MERCHANT_API_ROUTE_UNAVAILABLE",
+        error: "The local PayGuard backend does not have this API route. Restart it with the current build, then retry.",
+      }, { status: response.status, headers: noStore });
+    }
+    return Response.json({
+      code: "MERCHANT_API_INVALID_RESPONSE",
+      error: `The local PayGuard backend returned an unreadable response (HTTP ${response.status}). Check the backend logs, then retry.`,
+    }, { status: response.ok ? 502 : response.status, headers: noStore });
+  }
+  return Response.json(data, { status: response.status, headers: noStore });
 }
 
 export const GET = proxy;
