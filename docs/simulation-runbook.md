@@ -108,6 +108,26 @@ If a valid merchant save returns **Expected one valid JSON request object.**, ve
 
 Edit a merchant's products, signals, and custom fields on **Overview**. Select **Delete merchant** and confirm to remove a test merchant from the active directory and test pickers and end its credential access. The database keeps the historical records.
 
+### Rule scope, fraud labels, and email evidence
+
+- **Platform Rules** contain a shared built-in baseline and approved global revisions. The rule applies across merchants when the transaction's stage and available signals match. A Platform Admin's draft takes effect only after an independent checker approves it. Open the **Platform** section of a transaction to see matched rules, their versions, or missing signals. [Decision Engine](requirements/decision-engine.md)
+- **Merchant AI Rules** apply to the selected merchant. A block from its exact-email rule is a business policy action. To test scope, save a block for a synthetic mailbox on Merchant A, then submit a new transaction with the same mailbox for A and B. Expect A's policy to match and B's decision to use B's own rules. Changing the mailbox also changes the input to that exact-match rule. [Temporary exact-email block](#temporary-exact-email-block)
+- **Booking v1 outcomes** record a label against the authenticated merchant and its booking event UUID. The v1 outcome payload has no mailbox field. Verify scope by reading the outcomes for the same event UUID under each merchant's own credential. [Booking v1 outcomes](#mock-checkout-and-booking-lineage)
+- **Disposable-email enrichment** classifies the supplied domain with a separate lookup. If a customer changes from a disposable domain to `gmail.com`, the lookup only describes the new domain. Mailbox ownership requires separate verification. [Provider enrichment](#provider-enrichment)
+
+#### Verify global approval with an independent checker
+
+1. In the automatic loopback preview, open a merchant's **Platform Rules** tab as Platform Admin. The server supplies the administrator credential. Save a shared batch run in **Simulation Lab** and create a rule with **New draft**. For a synthetic approval-only check, use **Review** with `account_age_days > 36500`, above the maximum age accepted by the merchant test form.
+2. Open **Platform rule approval**. Select the **Platform draft** and **Saved simulation run**, enter a **Reason for submission**, then select **Submit for approval**. The run must contain eligible events.
+3. On macOS, run the following from the repository root to copy the unquoted checker token from `.env` to the clipboard without displaying it.
+
+   ```sh
+   sed -n 's/^PAYGUARD_PLATFORM_RULE_CHECKER_TOKEN=//p' .env | tr -d '\n' | pbcopy
+   ```
+
+4. In **Checker approval**, paste the token into **Checker token** and select **Load versions**. Select the pending revision under **Version for approval or rollback**, enter a **Reason for decision**, then select **Approve version**. Confirm it reports **Active version**.
+5. To undo the synthetic check, choose **Withdraw the active version**, enter a **Reason for decision**, and select **Withdraw rule**. Loading versions again shows the recorded approval and withdrawal. [System Rules](#system-rules)
+
 ### Enable live Jev for synthetic tests
 
 Set `OPENROUTER_API_KEY` in the ignored root `.env` for Compose. In **Decision Engine → AI Configuration**, save the OpenRouter provider. Before a configuration version has been saved, `PAYGUARD_AI_MODE=live` enables the deployment default. The default model is `typesafe/jev-1.14`. Recreate the backend after changing its environment and use the project arguments belonging to the selected stack. [Jev settings](#jev-ai-configuration)
