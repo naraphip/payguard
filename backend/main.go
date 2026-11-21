@@ -52,10 +52,18 @@ func main() {
 	}
 	cache := redis.NewClient(options)
 	defer cache.Close()
+	enrichment, err := newEnrichmentHandler(bookingAuth, db, options)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if enrichment.cache != nil {
+		defer enrichment.cache.Close()
+	}
 	a := app{repository{db}, cache, []byte(env("ENTITY_KEY_SECRET", "payguard-local-synthetic-v1"))}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("POST /api/v1/booking/events", bookingHandler{a.repo, bookingAuth}.create)
+	mux.HandleFunc("POST /api/v1/enrichment", enrichment.lookup)
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)

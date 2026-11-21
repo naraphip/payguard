@@ -74,3 +74,63 @@ curl -fsS http://127.0.0.1:8081/api/v1/system/rules/preview \
 ```
 
 The example uses the saved run ID from the earlier API example. The preview counts stage-matching events with all required signals as eligible and stage-matching events missing any required signal as skipped. Matching IDs identify events for which every condition passed.
+
+## Provider enrichment
+
+`POST /api/v1/enrichment` is available directly on the Go API at port 8081. Authenticate with an existing `PAYGUARD_DEMO_MERCHANT_A_TOKEN` or `PAYGUARD_DEMO_MERCHANT_B_TOKEN` as a bearer token. Missing or invalid authentication returns 401. Local BIN and email-domain lookups work with the default environment. Set `PAYGUARD_ENRICHMENT_ENABLED=true` before starting Go or Compose to allow optional external IP and BIN lookups.
+
+| Backend variable | Purpose |
+| --- | --- |
+| `PAYGUARD_ENRICHMENT_ENABLED` | Defaults to `false`. Controls external provider calls only. |
+| `PAYGUARD_IPAPI_IS_KEY` | Optional ipapi.is key. |
+| `PAYGUARD_PROXYCHECK_KEY` | Optional proxycheck.io key. |
+| `PAYGUARD_ENRICHMENT_CACHE_SECRET` | Optional HMAC secret for stable cache keys across backend restarts. Go generates a random secret for each process if unset. |
+| `PAYGUARD_EMAIL_MASTER_LOCAL` | Optional path to a local domain overlay. With the variable unset, Go loads `masterdata/local/domains.txt.gz` relative to its working directory if present. |
+
+### Prepare the local masters
+
+With PostgreSQL running, import the pinned snapshot into `enrichment_bin_master` and `enrichment_bin_snapshot`. Importing the same snapshot again reuses the stored data. The command honors `DATABASE_URL` and defaults to the loopback Compose database.
+
+```sh
+(cd backend && go run ./cmd/import-bin-master)
+```
+
+If using Docker for the backend, run the importer from the locally built image after PostgreSQL is up.
+
+```sh
+docker compose run --rm --entrypoint /usr/local/bin/payguard-import-bin-master backend
+```
+
+The backend loads the bundled email-domain master on the first email-domain lookup. To regenerate the snapshots and add the optional local-only feeds, run the refresh command and restart the backend. Compose mounts `backend/masterdata/local` read-only at `/masterdata/local`. For a custom path in Compose, use the path as seen by the container.
+
+```sh
+(cd backend && go run ./cmd/refresh-email-master -local)
+```
+
+### Request and response
+
+Send a JSON object with one or more string fields: `ip`, `bin`, or `emailDomain`. Use a literal IPv4 or IPv6 address, 6–8 ASCII digits for the BIN, and a bare domain for email. The API rejects a full card number, a full email address, and unknown fields such as `rule` or `stage`. The response contains lookup evidence only.
+
+Each requested kind returns an object with `status` (`OK` or `UNKNOWN`), `lookedUpAt`, and `cached`. Optional fields are `reason`, `provider`, `dataTimestamp`, and normalized `data`. Omitted flags are unknown, and explicit `false` flags stay visible. Backend logs record the lookup kind, status, provider, timestamps, and cache status.
+
+| Response object | Evidence |
+| --- | --- |
+| `ip.data` | Available normalized flags, risk score, and country code. |
+| `bin.data` | Canonical exact-prefix evidence with `scheme`, `funding`, `issuer`, and `countryCode` when known. `bin.fieldSources` identifies the source of each populated field. |
+| `bin.master` | `FOUND`, `NOT_FOUND`, or `UNKNOWN`, with `EXACT` or `PREFIX`, `matchedPrefix`, dataset `source` and `revision`, and `recordSource` and `seen` when available. A shorter match uses `reference` with the same BIN field names. |
+| `email.data` | Normalized `domain`, a `listed` boolean, and optional `matchedDomain` and `sources` for the most specific listed domain or parent. |
+
+An exact PostgreSQL record supplies its known fields first. When enabled, external evidence for the requested BIN may fill gaps. For a 7–8 digit request, the provider must echo the exact digits. A shorter master match stays in `bin.master.reference`. All four known fields yield `bin.status: "OK"`. An incomplete lookup returns `UNKNOWN` and can still include the known exact fields.
+
+The following request consumes no provider quota. The TEST-NET IP returns `UNKNOWN` with `reason: "NON_PUBLIC_IP"`. The bundled snapshot returns `email.status: "OK"` and lists the parent `mailinator.com` in `email.data`.
+
+```sh
+curl -fsS http://127.0.0.1:8081/api/v1/enrichment \
+  -H "Authorization: Bearer ${PAYGUARD_DEMO_MERCHANT_A_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"ip":"192.0.2.10","emailDomain":"trial.mailinator.com"}'
+```
+
+After importing the master, use `{"bin":"424242"}` for a complete exact local lookup. With external providers disabled, use `{"bin":"42424299"}` to see `bin.status: "UNKNOWN"` with the shorter `424242` record under `bin.master.reference`.
+
+See the [lookup behavior, cache policy and provider terms](requirements/provider-enrichment.md).

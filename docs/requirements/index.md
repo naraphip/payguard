@@ -4,3 +4,4 @@ Add a note for each feature with its status, user need, scope, constraints, and 
 
 - [Simulation Lab](simulation-lab.md)
 - [System Rules dashboard](system-rules.md)
+- [Provider enrichment](provider-enrichment.md)

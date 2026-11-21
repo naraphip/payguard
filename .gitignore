@@ -4,3 +4,4 @@ frontend/next-env.d.ts
 frontend/*.tsbuildinfo
 .env
 .env.local
+backend/masterdata/local/
