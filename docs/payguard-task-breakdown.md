@@ -4,6 +4,21 @@ Parent IDs match the [local task list](payguard-tasks.md) and the [live action p
 
 The [Simulation Lab](requirements/simulation-lab.md) already has synthetic storefronts, seeded event generation, run-level replay, Redis velocity, typed mock Jev results, and a tenant-scoped synthetic graph. Reuse these pieces. Verify each parent task against its own acceptance criteria before updating its Sheet status. Source review alone establishes overlap, and runtime checks remain pending because Go was unavailable in this environment.
 
+## Local development environment
+
+Environment tasks enable the demo backlog and are tracked here. The `ENV` IDs are local.
+
+| ID | Task | Dependencies | Acceptance criteria | Verification |
+| --- | --- | --- | --- | --- |
+| ENV-01 | Add a repeatable Docker Compose startup. | Docker with Compose | `docker compose config -q` passes. `docker compose up --build -d --wait` builds and starts all four services from the repo root with Docker as the only required host runtime. Published ports bind to loopback. | Passed. All four services reported healthy and published ports were loopback-only. |
+| ENV-02 | Containerize the Go backend. | ENV-04, ENV-05 | The Go image builds using the repository's Go module. The API waits for healthy PostgreSQL and Redis. `GET http://127.0.0.1:8081/healthz` returns HTTP 200 and `status: ready`. | Passed in Docker Compose. |
+| ENV-03 | Containerize the TypeScript/Next.js frontend. | ENV-02 | The production build and TypeScript checks pass in Docker. The UI responds on `http://127.0.0.1:3000/`. Requests to `/api/v1/simulation/` reach the Go API through Next.js. | Passed. The production build, UI request, and simulation proxy worked. |
+| ENV-04 | Configure PostgreSQL 16 and persistent storage. | Docker with Compose | PostgreSQL is healthy on startup and the API initializes its demo tables. Compose stores data in the named volume. A saved run remains readable after ordinary `docker compose down` and startup. | Database health, schema initialization, and saving a run passed. The volume is configured. The stop/start persistence check is pending. |
+| ENV-05 | Configure Redis 7 for simulation velocity. | Docker with Compose | Redis answers its health check, and the Go API can reach it over the Compose network. | Passed. Redis and the API both reported healthy. |
+| ENV-06 | Document and smoke-test local startup. | ENV-01 through ENV-05 | The README gives startup, app URL, logs, and shutdown commands. The runbook's synthetic scenario can be submitted through port 3000, then read back as a QA report with 12 payment samples. | Passed. The report returned 12 samples via the frontend proxy. |
+
+See the [README](../README.md) and [simulation runbook](simulation-runbook.md) for commands.
+
 ## Demo work
 
 | Parent | Implementation tasks | Dependencies | Acceptance checks |

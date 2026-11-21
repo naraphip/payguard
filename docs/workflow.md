@@ -12,7 +12,7 @@ Have `knowledge-curator` synthesize the selected sources into a feature note und
 
 ## Delivery stages
 
-For a delivery request, run the stages in order. For each delegation, supply the user's scope, relevant paths, decisions, and accepted outputs from earlier stages. At meaningful handoffs, pass the scope, stage results, and blockers to the knowledge-curator so a resumed workflow can pick up from the last verified stage.
+For a delivery request, follow stage dependencies for each task. For each delegation, supply the user's scope, relevant paths, decisions, and accepted outputs from earlier stages. At meaningful handoffs, pass the scope, stage results, and blockers to the knowledge-curator so a resumed workflow can pick up from the last verified stage.
 
 | Stage | Agent | Handoff |
 | --- | --- | --- |
@@ -26,7 +26,13 @@ For docs-driven delivery, record the accepted implementation plan in the feature
 
 Use lightweight handoffs for small changes. Resolve routine decisions with existing conventions and documented requirements. Ask the user when a material product decision is required. Have the knowledge-curator record durable decisions and commands in the relevant project documentation.
 
-If design exposes a requirements gap, return it to planning. If tests fail, send the reproducible findings to the coder, then ask the tester to rerun affected checks on the updated code. Return to design if the fix changes the agreed approach. Continue while each iteration makes progress. If the same failure recurs without new evidence, report the blocker and the checks still pending.
+### Parallel work and acceptance
+
+Have the planner identify dependencies, acceptance checks, and file ownership. Start independent tasks together when their inputs are ready. For example, the tester can prepare checks against an agreed contract while the coder implements it. Run independent implementation tasks concurrently only when they have disjoint write scopes or isolated worktrees. Sequence tasks that share files, generated outputs, or mutable test services unless those resources are isolated. The main session integrates the results before final verification.
+
+Track every in-scope acceptance criterion as pending, passed, failed, or blocked, with evidence from the tester. If a check fails, send the coder the failing criterion, reproduction steps, and observed result. Retest the fix and affected behavior, then run the applicable integrated checks on the final combined changes. Return to planning for a requirements gap or to design when a fix changes the agreed approach.
+
+Continue the fix and retest loop while there is a concrete next step. Mark the task complete once all in-scope criteria pass on the integrated changes. If a required check is blocked by a missing decision, dependency, or permission, continue independent work and record the specific blocker and pending checks. If a failure recurs with no new evidence or viable next step, report it with the last attempted check.
 
 If the user requests release readiness or rollout, have the deployer check readiness after testing passes. Execute deployment only when the user has authorized the identified target and the project has a documented deployment command, health checks, and a recovery procedure. Confirm that the revision being deployed matches the tested revision. If deployment or its health checks fail, report the observed state and follow the documented recovery procedure within the authorization given.
 

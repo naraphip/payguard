@@ -4,12 +4,22 @@ A local sandbox for synthetic OTA bookings and e-commerce checkout risk. It runs
 
 ## Run locally
 
-Requires Docker Compose, Go 1.26+, and Node.js 24+.
+Requires Docker with Docker Compose. From the repository root, build and start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis:
+
+```sh
+docker compose up --build -d --wait
+```
+
+Open [Simulation Lab](http://127.0.0.1:3000). Select **Run simulation**, inspect a decision, then select **Score run** to calculate the synthetic QA metrics. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
+
+### Run the application directly on the host
+
+For Go 1.26+ and Node.js 24+ development on the host, start only PostgreSQL and Redis with Compose.
 
 1. Start the data stores from the repo root.
 
    ```sh
-   docker compose up -d --wait
+   docker compose up -d --wait postgres redis
    ```
 
 2. Start the Go API in a terminal.
