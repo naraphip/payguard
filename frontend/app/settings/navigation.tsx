@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Building2, ClipboardCheck, FlaskConical, ShoppingBag, SlidersHorizontal } from "lucide-react";
+import { Building2, ClipboardCheck, FlaskConical, ListChecks, ShoppingBag, SlidersHorizontal } from "lucide-react";
 
 const links = [
   { href: "/", label: "Simulation Lab", Icon: FlaskConical },
   { href: "/settings/mock-checkout", label: "Mock checkout", Icon: ShoppingBag },
   { href: "/settings/merchant-setup", label: "Merchant setup", Icon: Building2 },
   { href: "/settings/booking-assessment", label: "Booking assessment", Icon: ClipboardCheck },
+  { href: "/settings/operations", label: "Risk operations", Icon: ListChecks },
   { href: "/settings/system-rules", label: "Platform Rules", Icon: SlidersHorizontal },
 ] as const;
 

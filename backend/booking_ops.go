@@ -48,6 +48,7 @@ type bookingOpsDetail struct {
 
 func registerBookingOps(mux *http.ServeMux, repo repository, auth bookingAuth, secret []byte) {
 	handler := bookingOpsHandler{repo, auth, secret}
+	mux.HandleFunc("GET "+bookingOpsPath, handler.transactions)
 	mux.HandleFunc("GET "+bookingOpsPath+"/{id}", handler.detail)
 	mux.HandleFunc("POST "+bookingOpsPath+"/{id}/reveal", handler.revealContact)
 	for _, action := range []string{"claim", "escalate", "resolve"} {
