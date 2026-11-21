@@ -1,12 +1,18 @@
 # Current work
 
-## Merchant scenarios and mocked Jev
+## Merchant scenarios and Jev
 
 The local preview implements a runnable slice of the [merchant scenarios requirements](requirements/merchant-scenarios.md). Under **Merchants**, a demo administrator can create and rename merchants and save multiple named scenarios. Each scenario previews and versions one booking amount threshold rule. Created merchants receive a scoped access token.
 
-Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab select a merchant and scenario, run the mock Jev decision, and save a transaction with its source, reasons, and versions. Platform administrators can review transactions across active merchants and record a disposition alongside the saved assessment. A merchant credential opens a read-only list of its own transactions and results. [Evaluation steps](simulation-runbook.md#merchant-scenarios-and-mock-jev)
+Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab select a merchant and scenario and save a decision with its source, reasons, and versions. Platform administrators can review transactions across active merchants and record a disposition alongside the saved assessment. A merchant credential opens a read-only list of its own transactions and results. [Evaluation steps](simulation-runbook.md#merchant-scenarios-and-jev)
 
-The [local preview](http://127.0.0.1:3001/settings/merchants) uses a structured threshold form and direct demo review. AI-assisted draft generation, a fully configurable rule set, the full HOLD lifecycle in this merchant workspace, and live Jev integration remain open.
+The [local preview](http://127.0.0.1:3001/settings/merchants) uses a structured threshold form and direct demo review. AI-assisted draft generation, a fully configurable rule set, and the full HOLD lifecycle in this merchant workspace remain open.
+
+The live Jev slice uses the OpenRouter Decisions API from Go in the two merchant-selected tools. The sandbox can enable it with `PAYGUARD_AI_MODE=live` and a server-side `OPENROUTER_API_KEY`. The pinned default model is `typesafe/jev-1.14`. With an observed amount, the stored result includes the typed Jev choice, provider decision ID, and served model when available. Local review rules can escalate the assessment, and a provider failure sends the case to manual review. The integration sends only the booking amount, scenario threshold, and whether a configured review rule matched. Credentials stay server-side. The mock configuration remains the default. [Team Blueprint](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=1604066438) · [OpenRouter Decisions API for Jev](https://openrouter.ai/typesafe/jev-1.14)
+
+Independent Chrome verification on port 3001 recorded live `REVIEW` at 50,000 against a checkout threshold of 50,000 and live `LOW_RISK` at 50,000 against a single-scenario Simulation Lab threshold of 100,000. Both saved transactions showed distinct provider decision IDs and the served `typesafe/jev-1.14-20261014` model. Exact checkout replay preserved the saved metadata. The simulated timeout saved **Unresolved** under **Needs decision** without a provider decision ID.
+
+The backend passed `go test ./...` and `go vet ./...`. Tests covered the outbound evidence fields, typed response validation, provider failures, timeout, and replay flags. The Next.js production build and both local Compose configuration checks passed. Docker reported both app services healthy.
 
 The opt-in loopback preview opens the Merchants workspace and scenario pickers as a demo administrator. Set the Next server’s `PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN` to the API’s demo administrator token to enable it. The server uses that token for the loopback proxy. After creating a merchant, the administrator can copy that merchant’s scoped access token from the one-time confirmation. The old Risk Operations route redirects to **Merchants → Transactions** in this preview. Standalone routes and the ordinary authenticated flow remain available when the opt-in is disabled.
 

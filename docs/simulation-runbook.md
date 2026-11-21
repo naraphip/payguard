@@ -84,13 +84,15 @@ For a repeatable local check, configure both distinct demo merchant tokens in yo
 python3 scripts/booking-smoke.py --base http://127.0.0.1:8081 --threshold 3
 ```
 
-## Merchant scenarios and mock Jev
+## Merchant scenarios and Jev
 
 Set `PAYGUARD_DEMO_ADMIN_TOKEN` to a local demo value before starting or rebuilding Compose. Platform Admin can manage merchant settings and view transactions across active merchants. A merchant’s own credential opens its read-only transaction list and results.
 
 For the host-run Next preview on loopback, set the Next server’s `PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN` to the same value as the API’s `PAYGUARD_DEMO_ADMIN_TOKEN`. Start Next and open `/settings/merchants` on the loopback preview. Merchants and the scenario pickers in Mock Checkout and Simulation Lab connect automatically as the demo administrator. The old `/settings/operations` route opens the merchant Transactions view. Set this variable only for the local preview.
 
 For the standard token flow, leave the Next preview variable unset. Open `/settings/merchants` and enter the administrator credential as the **Demo access token**. To check merchant isolation, open the Merchant workspace and use the credential issued to that merchant.
+
+### Check the default mock flow
 
 1. Select **Create merchant** and enter a merchant name. Choose **OTA** or **E-commerce**, confirm the **Booking** stage and required booking timestamp, and select booking amount if the merchant provides it. Save the merchant and copy its scoped access token from the one-time confirmation if you plan to check merchant access. The automatic preview opens the new merchant workspace directly. An older merchant without setup details appears as **Setup incomplete** until the details are saved.
 2. Select **Add scenario**. Create **Everyday bookings** with a review threshold of **100000** minor units, select **Generate rule preview**, and select **Save scenario and rules**. Repeat for **High-value bookings** with a threshold of **50000**. Editing a scenario and saving a new threshold creates a new revision.
@@ -99,6 +101,21 @@ For the standard token flow, leave the Next preview variable unset. Open `/setti
 5. Run either tool with a simulated Jev timeout for **High-value bookings**. Expect **Unresolved** and **Needs decision**. As Platform Admin, open **Transactions**, select **Needs decision**, and open the transaction. Clear or reject it to verify that the manual disposition appears separately from the saved mock decision.
 6. Return to **Dashboard** and follow a recent transaction link to its saved detail. Open the detail again after changing its scenario’s rule and verify that it still shows the original version.
 7. Create a second merchant and copy its token. In a separate browser session, choose **Merchant** in the workspace selector and enter that token. Verify that the sidebar has only **Transactions**, the transaction list and details belong to the second merchant, and the workspace is read-only. Try a direct link to the first merchant’s transaction and an administrator page. The merchant role stays scoped to its own ledger. The same merchant credential works in the standard token flow and the automatic preview.
+
+### Enable live Jev for synthetic tests
+
+Set `PAYGUARD_AI_MODE=live` in the ignored root `.env` file and keep the OpenRouter key there as `OPENROUTER_API_KEY`. Optionally set `OPENROUTER_MODEL_PRIMARY` to a versioned TypeSafe Jev model. The default is `typesafe/jev-1.14`. For the standard local Compose stack, rebuild and recreate the backend to reload the environment. A separately named preview stack requires its own Compose project arguments. [Team Blueprint](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=1604066438) · [OpenRouter Decisions API for Jev](https://openrouter.ai/typesafe/jev-1.14)
+
+```sh
+docker compose up -d --build --force-recreate --wait backend
+```
+
+1. In **Mock Checkout**, choose a merchant and scenario, enter a synthetic booking amount, and submit with the timeout control off.
+2. In **Simulation Lab**, use **Merchant scenario simulation** with the same merchant and scenario. Enter a synthetic amount and submit with the timeout control off. The batch simulator uses its own mock evaluator.
+3. Open **Transactions** for the merchant and select each test. Look for **Jev answer**, **Jev model**, and **Jev decision ID**. Local threshold and merchant rule hits can raise the final assessment to **Review**. Compare **Automated result** with the displayed Jev answer.
+4. Run a test with **Simulate timeout** on or omit the booking amount to exercise the **Unresolved** result. A real provider error also saves an unresolved transaction under **Needs decision**. An identical retry returns the saved result.
+
+The Go server sends bounded booking evidence and keeps the credential server-side. Use synthetic bookings for this preview. Set `PAYGUARD_AI_MODE=mock` and recreate the backend to use deterministic mock decisions. The standalone Scoring Profile and legacy booking flows continue to use their own mock assessment.
 
 ### Rules for the selected merchant
 

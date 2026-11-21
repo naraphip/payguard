@@ -98,7 +98,7 @@ func TestMockMerchantAdminRequiresConfiguredCredential(t *testing.T) {
 		{"preview-admin", "Bearer preview-admin", http.StatusOK},
 	} {
 		mux := http.NewServeMux()
-		registerMerchantDemo(mux, repository{}, test.adminToken)
+		registerMerchantDemo(mux, repository{}, test.adminToken, merchantJev{})
 		// The body is intentionally malformed so successful authentication is
 		// observable without invoking the repository.
 		request := httptest.NewRequest(http.MethodPost, merchantDemoPath, http.NoBody)

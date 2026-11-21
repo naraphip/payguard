@@ -42,7 +42,7 @@ export function MerchantDirectory() {
       <h1 className="text-[30px] leading-tight font-semibold tracking-tight sm:text-[36px]">{merchantView ? "Your transactions" : "Merchants"}</h1>
       <p className="mt-2 text-sm text-slate-600">{merchantView
         ? "Review bookings and decisions for your merchant."
-        : "Manage demo merchants, configure their scenarios, and review mock Jev decisions."}</p>
+        : "Manage demo merchants, configure their scenarios, and review Jev decisions."}</p>
     </header>
     <MerchantDirectoryContents merchantView={merchantView} />
   </>;
@@ -394,7 +394,7 @@ function MerchantWorkspace({ merchant, token, admin, onSave, onDelete }: {
           <h2 id="merchant-scenarios" className="text-lg font-semibold">Scenarios and rules</h2>
           {admin && <button className={secondary} onClick={() => setEditing("new")}>Add scenario</button>}
         </div>
-        {!merchant.scenarios.length && <p className="text-sm text-slate-600">No scenarios yet. {admin && "Add a scenario to test its mock Jev rules."}</p>}
+        {!merchant.scenarios.length && <p className="text-sm text-slate-600">No scenarios yet. {admin && "Add a scenario to test its Jev rules."}</p>}
         {merchant.scenarios.map((item) => {
           const params = new URLSearchParams({ merchant: merchant.id, scenario: item.id });
           return (

@@ -31,8 +31,11 @@ export type DemoTransaction = {
   product?: string;
   amountMinor: number | null;
   thresholdMinor: number;
-  jevStatus: "MOCKED" | "TIMEOUT";
-  jevVersion: "mock-jev-v1";
+  jevStatus: "MOCKED" | "TIMEOUT" | "LIVE" | "UNAVAILABLE" | "NOT_RUN";
+  jevVersion: string;
+  jevAnswer?: "LOW_RISK" | "REVIEW";
+  jevDecisionId?: string;
+  jevConfidence?: number;
   jevRuleVersion?: string;
   outcome: "LOW_RISK" | "REVIEW" | "UNRESOLVED";
   reason: string;
@@ -43,6 +46,20 @@ export type DemoTransaction = {
   decidedBy?: string;
   decidedAt?: string;
 };
+
+export const merchantOutcomeLabels = { LOW_RISK: "Low risk", REVIEW: "Review", UNRESOLVED: "Unresolved" } as const;
+const jevStatuses = {
+  MOCKED: "Mock Jev",
+  TIMEOUT: "Jev timed out",
+  LIVE: "Live Jev",
+  UNAVAILABLE: "Jev unavailable",
+  NOT_RUN: "Jev not run",
+} satisfies Record<DemoTransaction["jevStatus"], string>;
+
+export function merchantJevStatus(transaction: DemoTransaction) {
+  if (transaction.jevStatus === "TIMEOUT" && transaction.jevVersion === "mock-jev-v1") return "Simulated Jev timeout";
+  return jevStatuses[transaction.jevStatus];
+}
 
 let sessionToken = "";
 let sessionRole: DemoDirectory["role"] | null = null;

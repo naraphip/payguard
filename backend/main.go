@@ -44,6 +44,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	merchantJev, err := newMerchantJev(os.Getenv("PAYGUARD_AI_MODE"), os.Getenv("OPENROUTER_API_KEY"), os.Getenv("OPENROUTER_MODEL_PRIMARY"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	var baselineMinSamples int
 	if raw := os.Getenv("PAYGUARD_DEMO_BASELINE_MIN_SAMPLES"); raw != "" {
 		baselineMinSamples, err = strconv.Atoi(raw)
@@ -89,7 +93,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/booking/events/{id}/lineage", bookingRisk.readLineage)
 	mux.HandleFunc("POST /api/v1/booking/shadow", bookingRisk.shadowBookings)
 	registerBookingOps(mux, a.repo, bookingAuth, a.secret)
-	registerMerchantDemo(mux, a.repo, os.Getenv("PAYGUARD_DEMO_ADMIN_TOKEN"))
+	registerMerchantDemo(mux, a.repo, os.Getenv("PAYGUARD_DEMO_ADMIN_TOKEN"), merchantJev)
 	registerBookingDossiers(mux, a.repo, bookingAuth)
 	registerBookingGovernance(mux, a.repo, bookingAuth)
 	go a.repo.runBookingDossiers(ctx)

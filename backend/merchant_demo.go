@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -23,6 +24,7 @@ var (
 
 type mockMerchantService struct {
 	repo         repository
+	jev          merchantJev
 	adminHash    [sha256.Size]byte
 	adminEnabled bool
 }
@@ -78,15 +80,19 @@ type mockTransaction struct {
 	RuleHits        []string   `json:"ruleHits"`
 	JevStatus       string     `json:"jevStatus"`
 	JevVersion      string     `json:"jevVersion"`
+	JevAnswer       string     `json:"jevAnswer,omitempty"`
+	JevDecisionID   string     `json:"jevDecisionId,omitempty"`
+	JevConfidence   *float64   `json:"jevConfidence,omitempty"`
 	ReviewState     string     `json:"reviewState"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	Disposition     *string    `json:"disposition,omitempty"`
 	DecidedBy       *string    `json:"decidedBy,omitempty"`
 	DecidedAt       *time.Time `json:"decidedAt,omitempty"`
+	simulateTimeout bool
 }
 
-func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string) {
-	service := mockMerchantService{repo: repo, adminHash: sha256.Sum256([]byte(adminToken)), adminEnabled: adminToken != ""}
+func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string, jev merchantJev) {
+	service := mockMerchantService{repo: repo, jev: jev, adminHash: sha256.Sum256([]byte(adminToken)), adminEnabled: adminToken != ""}
 	mux.HandleFunc("GET "+merchantDemoPath, service.listMerchants)
 	mux.HandleFunc("POST "+merchantDemoPath, service.createMerchant)
 	mux.HandleFunc("PUT "+merchantDemoPath+"/{merchantId}", service.updateMerchant)
@@ -337,7 +343,11 @@ func (s mockMerchantService) createTransaction(w http.ResponseWriter, r *http.Re
 		problem(w, http.StatusUnprocessableEntity, "Enter valid transaction and scenario IDs, source, product, and optional amount in minor units.")
 		return
 	}
-	transaction, created, err := s.repo.saveMockTransaction(r.Context(), id, input)
+	// Finish a validated assessment if the caller disconnects during the provider
+	// call, so the caller can recover the saved decision with its transaction ID.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 12*time.Second)
+	defer cancel()
+	transaction, created, err := s.repo.saveMockTransaction(ctx, id, input, s.jev)
 	if err != nil {
 		demoWriteError(w, err)
 		return

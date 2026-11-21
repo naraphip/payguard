@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, setMerchantDemoToken,
+  getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantJevStatus,
+  merchantOutcomeLabels, setMerchantDemoToken,
 } from "./merchant-demo";
 import type { DemoDirectory, DemoTransaction } from "./merchant-demo";
 import type { SimulationProduct } from "./types";
@@ -166,7 +167,7 @@ export function useDemoScenario() {
       setPending(null);
     } catch (cause) {
       if (requestGeneration.current === request) {
-        setSubmissionError(cause instanceof Error ? cause.message : "The mocked Jev assessment could not be saved.");
+        setSubmissionError(cause instanceof Error ? cause.message : "The Jev assessment could not be saved.");
       }
     } finally {
       if (requestGeneration.current === request) {
@@ -247,16 +248,15 @@ export function DemoScenarioPicker({ flow, allowLegacy = false }: { flow: DemoSc
   </div>;
 }
 
-const outcomeLabels = { LOW_RISK: "Low risk", REVIEW: "Review", UNRESOLVED: "Unresolved" } as const;
 const reviewLabels = { NONE: "No manual review", NEEDS_DECISION: "Needs decision", RESOLVED: "Resolved" } as const;
 
 export function DemoScenarioResult({ transaction, merchantName }: { transaction: DemoTransaction; merchantName: string }) {
-  const query = new URLSearchParams({ merchant: transaction.merchantId, transaction: transaction.id });
-  return <section className="rounded-xl border border-line bg-white p-4 sm:p-5" aria-label="Mock Jev result">
+  const query = new URLSearchParams({ merchant: transaction.merchantId, transaction: transaction.id, view: "transactions" });
+  return <section className="rounded-xl border border-line bg-white p-4 sm:p-5" aria-label="Jev result">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <h3 className="font-semibold">Mock Jev result</h3>
+      <h3 className="font-semibold">Jev result</h3>
       <p role="status" className={`rounded-full px-3 py-1 text-xs font-semibold ${transaction.outcome === "LOW_RISK"
-        ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{outcomeLabels[transaction.outcome]}</p>
+        ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{merchantOutcomeLabels[transaction.outcome]}</p>
     </div>
     <p className="mt-2 text-sm text-muted">{transaction.reason}</p>
     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
@@ -264,6 +264,9 @@ export function DemoScenarioResult({ transaction, merchantName }: { transaction:
       <div className="min-w-0"><dt className="text-xs text-muted">Scenario</dt><dd className="break-words font-semibold">{transaction.scenarioName} · v{transaction.scenarioVersion}</dd></div>
       <div><dt className="text-xs text-muted">Rule set</dt><dd className="font-semibold">{transaction.ruleVersion}</dd></div>
       {transaction.jevRuleVersion && <div><dt className="text-xs text-muted">Merchant Jev rules</dt><dd className="font-semibold">{transaction.jevRuleVersion}</dd></div>}
+      <div className="min-w-0"><dt className="text-xs text-muted">Jev status</dt><dd className="break-words font-semibold">{merchantJevStatus(transaction)}</dd></div>
+      <div className="min-w-0"><dt className="text-xs text-muted">Jev model</dt><dd className="break-words font-semibold">{transaction.jevVersion}</dd></div>
+      {transaction.jevAnswer && <div><dt className="text-xs text-muted">Jev answer</dt><dd className="font-semibold">{merchantOutcomeLabels[transaction.jevAnswer]}</dd></div>}
       <div><dt className="text-xs text-muted">Booking amount</dt><dd className="font-semibold">{transaction.amountMinor === null ? "Unavailable" : `${transaction.amountMinor.toLocaleString()} minor units`}</dd></div>
       <div className="min-w-0"><dt className="text-xs text-muted">Rule hits</dt><dd className="break-words font-semibold">{transaction.ruleHits.join(", ") || "None"}</dd></div>
       <div><dt className="text-xs text-muted">Transaction state</dt><dd className="font-semibold">{reviewLabels[transaction.reviewState]}</dd></div>
@@ -308,7 +311,7 @@ export function DemoScenarioSimulation() {
         <label className="text-sm font-semibold">Jev response
           <select className="control mt-1.5" value={simulateTimeout ? "timeout" : "mock"}
             onChange={event => setSimulateTimeout(event.currentTarget.value === "timeout")}>
-            <option value="mock">Mock decision</option>
+            <option value="mock">Use configured Jev</option>
             <option value="timeout">Simulate timeout</option>
           </select>
         </label>

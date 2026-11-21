@@ -1,17 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { merchantDemoRequest } from "../../merchant-demo";
+import { merchantDemoRequest, merchantJevStatus, merchantOutcomeLabels } from "../../merchant-demo";
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
 
 const button = "rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-paper disabled:opacity-60 aria-pressed:border-accent aria-pressed:bg-soft aria-pressed:text-accent";
 const count = new Intl.NumberFormat("en-US");
 const time = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
-const outcomes: Record<DemoTransaction["outcome"], string> = {
-  LOW_RISK: "Low risk",
-  REVIEW: "Review",
-  UNRESOLVED: "Unresolved",
-};
 const reviewStates: Record<DemoTransaction["reviewState"], string> = {
   NONE: "No review",
   NEEDS_DECISION: "Needs decision",
@@ -99,9 +94,9 @@ export function MerchantTransactions({ token, merchant, canDecide }: { token: st
               >
                 <span className="min-w-0">
                   <span className="block break-words text-sm font-semibold">{item.scenarioName}</span>
-                  <span className="block text-xs text-slate-600">{item.source === "checkout" ? "Mock checkout" : "Simulation Lab"} · {formatTime(item.createdAt)}</span>
+                  <span className="block text-xs text-slate-600">{item.source === "checkout" ? "Mock Checkout" : "Simulation Lab"} · {merchantJevStatus(item)} · {formatTime(item.createdAt)}</span>
                 </span>
-                <span className="text-sm font-medium">{outcomes[item.outcome]}</span>
+                <span className="text-sm font-medium">{merchantOutcomeLabels[item.outcome]}</span>
                 <span className="text-xs text-slate-600">{reviewStates[item.reviewState]}</span>
               </button>
             </li>
@@ -115,14 +110,19 @@ export function MerchantTransactions({ token, merchant, canDecide }: { token: st
               <h3 id="merchant-transaction-detail" className="font-semibold">Transaction result</h3>
               <p className="mt-1 break-all font-mono text-xs text-slate-600">{selected.id}</p>
             </div>
-            <span className="rounded-full border border-line bg-white px-2.5 py-1 text-xs font-semibold">Mock Jev</span>
+            <span className="rounded-full border border-line bg-white px-2.5 py-1 text-xs font-semibold">{merchantJevStatus(selected)}</span>
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <div><dt className="font-medium">Scenario and rules</dt><dd className="break-words text-slate-600">{selected.scenarioName} v{selected.scenarioVersion} · {selected.ruleVersion}</dd></div>
             <div><dt className="font-medium">Booking amount</dt><dd className="text-slate-600">{selected.amountMinor == null ? "Unavailable" : `${count.format(selected.amountMinor)} minor units`}</dd></div>
-            <div><dt className="font-medium">Automated result</dt><dd className="text-slate-600">{outcomes[selected.outcome]}</dd></div>
+            <div><dt className="font-medium">Automated result</dt><dd className="text-slate-600">{merchantOutcomeLabels[selected.outcome]}</dd></div>
             <div><dt className="font-medium">Review state</dt><dd className="text-slate-600">{reviewStates[selected.reviewState]}</dd></div>
-            <div><dt className="font-medium">Jev response</dt><dd className="text-slate-600">{selected.jevStatus === "TIMEOUT" ? "Simulated timeout" : "Mock response"} · {selected.jevVersion}</dd></div>
+            <div className="min-w-0"><dt className="font-medium">Jev model</dt><dd className="break-words text-slate-600">{selected.jevVersion}</dd></div>
+            {selected.jevAnswer && <div><dt className="font-medium">Jev answer</dt><dd className="text-slate-600">
+              {merchantOutcomeLabels[selected.jevAnswer]}
+              {selected.jevConfidence !== undefined && ` · ${Math.round(selected.jevConfidence * 100)}% confidence`}
+            </dd></div>}
+            {selected.jevDecisionId && <div className="min-w-0"><dt className="font-medium">Jev decision ID</dt><dd className="break-all font-mono text-xs text-slate-600">{selected.jevDecisionId}</dd></div>}
             {selected.jevRuleVersion && <div><dt className="font-medium">Merchant Jev rules</dt><dd className="text-slate-600">{selected.jevRuleVersion}</dd></div>}
             <div><dt className="font-medium">Review threshold</dt><dd className="text-slate-600">{count.format(selected.thresholdMinor)} minor units</dd></div>
           </dl>

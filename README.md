@@ -6,6 +6,8 @@ A local sandbox for synthetic OTA bookings and e-commerce checkout risk. It runs
 
 The repository-root [`.env.example`](.env.example) lists the demo merchant and optional provider variables. For Omise Sandbox checkout, put `OMISE_PUBLIC_KEY` and `OMISE_SECRET_KEY` from Omise Test mode in the ignored `backend/.env`. Compose loads that file for the Go backend. See the [local keys setup](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
 
+For live Jev in merchant checkout and scenario simulation, set `PAYGUARD_AI_MODE=live` and `OPENROUTER_API_KEY` in the ignored root `.env`. The [Jev walkthrough](docs/simulation-runbook.md#enable-live-jev-for-synthetic-tests) shows how to verify the saved provider response.
+
 Requires Docker with Docker Compose. From the repository root, build and start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis:
 
 ```sh

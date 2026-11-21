@@ -165,7 +165,7 @@ export function MockCheckout() {
                 setAmountError("");
               }} />
             <p id="checkout-amount-help" role={amountError ? "alert" : undefined} className={`mt-2 text-xs ${amountError ? "text-red-800" : "text-slate-600"}`}>
-              {amountError || "Enter cents. Leave blank to omit the amount."}
+              {amountError || "Enter minor units. Leave blank to omit the amount."}
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               {!merchantCheckout && <label className="block text-sm font-semibold">SDK signal
@@ -176,7 +176,7 @@ export function MockCheckout() {
               </label>}
               <label className="block text-sm font-semibold">Jev response
                 <select className="control mt-2" value={mode} onChange={event => setMode(event.currentTarget.value === "timeout" ? "timeout" : "mock")}>
-                  <option value="mock">Mock response</option>
+                  <option value="mock">{merchantCheckout ? "Use configured Jev" : "Mock response"}</option>
                   <option value="timeout">Simulate timeout</option>
                 </select>
               </label>
