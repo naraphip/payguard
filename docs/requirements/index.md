@@ -7,3 +7,4 @@ Add a note for each feature with its status, user need, scope, constraints, and 
 - [Merchant setup](merchant-setup.md)
 - [Booking assessment](booking-assessment.md)
 - [Mock checkout, baseline and booking lineage](checkout-and-lineage.md)
+- [Jev Rules](jev-rules.md)

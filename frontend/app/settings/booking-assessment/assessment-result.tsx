@@ -9,7 +9,7 @@ export const featureLabels: Record<string, string> = {
 const sdkLabels = { observed: "Observed", unavailable: "Unavailable", unknown: "Unknown" } as const;
 
 export function AssessmentResult({ assessment, booking, context }: { assessment: Assessment; booking?: BookingReceipt; context?: string }) {
-  const { assessedAt, baseline, eventId, features, handoff, jev, outcome, profileVersion, ruleHits, ruleVersion } = assessment;
+  const { assessedAt, baseline, eventId, features, handoff, jev, jevRuleVersion, outcome, profileVersion, ruleHits, ruleVersion } = assessment;
   const unresolved = outcome === "UNRESOLVED";
   const resultLabel = unresolved ? "Unresolved" : outcome === "LOW_RISK" ? "Low risk" : "Review";
   return <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:p-6" aria-labelledby="assessment-result-heading">
@@ -26,6 +26,7 @@ export function AssessmentResult({ assessment, booking, context }: { assessment:
       {booking?.sdkStatus && <Detail label="SDK signal" value={sdkLabels[booking.sdkStatus]} />}
       <Detail label="Profile version" value={profileVersion} />
       <Detail label="Rule version" value={ruleVersion} />
+      {jevRuleVersion && <Detail label="Jev custom rules version" value={jevRuleVersion} />}
       <Detail label="Baseline" value={baseline.state === "COLD_START" ? "Cold start" : baseline.version ?? baseline.state} />
       {baseline.sampleCount !== undefined && <Detail label="Baseline samples" value={String(baseline.sampleCount)} />}
       <Detail label="Jev status" value={jev.status === "TIMEOUT" ? "Timeout" : "Mock response"} />

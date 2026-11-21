@@ -73,6 +73,9 @@ func main() {
 	bookingRisk := bookingRiskHandler{repo: a.repo, auth: bookingAuth, redis: cache, baselineMinSamples: baselineMinSamples}
 	mux.HandleFunc("POST /api/v1/booking/profiles/proposal", bookingRisk.proposeProfile)
 	mux.HandleFunc("POST /api/v1/booking/profiles/approve", bookingRisk.approveProfile)
+	mux.HandleFunc("GET /api/v1/booking/jev/rules", bookingRisk.listJevRules)
+	mux.HandleFunc("POST /api/v1/booking/jev/rules", bookingRisk.pushJevRule)
+	mux.HandleFunc("POST /api/v1/booking/jev/rules/preview", bookingRisk.testJevRule)
 	mux.HandleFunc("POST /api/v1/booking/events/{id}/assessment", bookingRisk.assessEvent)
 	mux.HandleFunc("POST /api/v1/booking/events/{id}/outcomes", bookingRisk.importOutcome)
 	mux.HandleFunc("GET /api/v1/booking/events/{id}/lineage", bookingRisk.readLineage)

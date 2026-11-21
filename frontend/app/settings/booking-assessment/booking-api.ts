@@ -36,6 +36,7 @@ export type Assessment = {
   assessedAt?: string;
   profileVersion: string;
   ruleVersion: string;
+  jevRuleVersion?: string;
   baseline: { state: string; version: string | null; sampleCount?: number };
   features: { name: string; value: number | string | null; presence: string; source: string }[];
   jev: { status: string; answer: string; modelVersion: string; rubricVersion: string; question: string };

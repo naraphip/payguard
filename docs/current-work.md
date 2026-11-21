@@ -24,6 +24,16 @@ Local evaluation uses synthetic bookings and outcomes. The [evaluation runbook](
 
 PG-20 requires approved real outcome labels and shadow results. PG-21 requires Security and Legal review.
 
+## Jev Rules
+
+Implemented and verified the local demo for drafting a booking review rule from a supported prompt or AI-generated JSON, previewing it against saved assessments, and publishing it to the merchant’s Jev ruleset. [Requirements](requirements/jev-rules.md) · [UI](ui/jev-rules.md) · [Runbook](simulation-runbook.md#jev-rules)
+
+- Independent API checks passed for unauthorized requests, strict validation, merchant isolation, read-only previews, amount threshold boundaries, missing versus zero and unselected amount, and AND conditions. New assessments pinned rule versions and hits, timeout kept its review handoff, and replay returned the prior result. Concurrent distinct pushes retained both rules. Identical and reordered-AND retries deduplicated.
+- Chrome with the isolated Go API verified navigation from Simulation Lab, loading the default rules, drafting and reviewing a prompt, preview, and publication of version `booking-rules-v2`. The token stayed out of local and session storage, and the page fit a 390 px viewport. Local parser checks and the mocked UI test also passed.
+- The isolated HTTP suite passed against a fresh database, and the published revision survived a backend rebuild and restart. `go test ./...`, `go test -race ./...`, and `go vet ./...` passed. The final frontend passed `npm run typecheck` and `npm run build`. `git diff --check` passed.
+
+Implementation lives in the [Jev rules API and evaluator](../backend/booking_jev_rules.go), [booking assessment](../backend/booking_assessments.go), [Go regression tests](../backend/booking_jev_rules_test.go), and [Jev Rules page](../frontend/app/settings/jev-rules/page.tsx).
+
 ## PG-07 through PG-10 mock checkout, baseline and booking lineage
 
 Implemented and verified the local synthetic checkout, outcome import, baseline activation, and tenant-scoped lineage. The demo runs at `/settings/mock-checkout`. [Requirements](requirements/checkout-and-lineage.md) · [Checkout UI](ui/mock-checkout.md) · [Runbook](simulation-runbook.md#mock-checkout-and-booking-lineage)

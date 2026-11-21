@@ -77,6 +77,7 @@ type bookingAssessment struct {
 	AssessedAt     *time.Time       `json:"assessedAt,omitempty"`
 	ProfileVersion string           `json:"profileVersion"`
 	RuleVersion    string           `json:"ruleVersion"`
+	JevRuleVersion string           `json:"jevRuleVersion,omitempty"`
 	Baseline       bookingBaseline  `json:"baseline"`
 	Features       []bookingFeature `json:"features"`
 	Jev            bookingJevResult `json:"jev"`
@@ -93,7 +94,7 @@ func evaluateBooking(booking bookingEvent, version string, profile profileCandid
 		Baseline:       bookingBaseline{State: "COLD_START"},
 		Features: []bookingFeature{
 			{bookingTimestamp, booking.OccurredAt.UTC().Format(time.RFC3339Nano), "OBSERVED", "BOOKING_EVENT"},
-			{"bookingVelocity60s", velocity, "OBSERVED", "BOOKING_EVENT_HISTORY"},
+			{bookingVelocitySignal, velocity, "OBSERVED", "BOOKING_EVENT_HISTORY"},
 		},
 		Jev: bookingJevResult{
 			Question: bookingRiskQuestion, Status: bookingJevStatusMock, Answer: bookingJevLow,
@@ -222,6 +223,11 @@ func (r repository) assessBooking(ctx context.Context, cache *redis.Client, merc
 			return err
 		}
 		policy.apply(&computed, booking.Product, velocity, mode)
+		rules, err := readJevRules(ctx, tx, merchant)
+		if err != nil {
+			return err
+		}
+		computed.applyJevRules(rules)
 		assessedAt := time.Now().UTC().Truncate(time.Microsecond)
 		computed.AssessedAt = &assessedAt
 		if baselineID != nil {
