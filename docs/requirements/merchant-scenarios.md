@@ -1,6 +1,42 @@
-# Merchant Scenarios and Rules
+# Merchant rule testing and legacy scenarios
 
-Status **Live Jev verified in both merchant-selected tools in the local preview.** Earlier Chrome and local API checks verified merchant transaction isolation. Platform administrators manage merchant setup, scenarios and rules, and see transactions across active merchants. A merchant sees only its own transactions and saved results. This requirement extends the browser-local [Merchant Setup](merchant-setup.md) and the existing [Risk Operations workflow](../simulation-runbook.md#local-evaluation). [Evaluation runbook](../simulation-runbook.md#merchant-scenarios-and-jev) · [Verification](../current-work.md#merchant-scenarios-and-jev)
+Platform Admin sets up a merchant and its evidence in **Merchants**, configures policies and Jev review rules in the merchant's **Merchant Rules** tab, and selects the merchant and a product in Mock Checkout or Simulation Lab. Both tools evaluate the merchant's current rules and save an assessment to the same tenant's ledger. Scenario selection and scenario thresholds are legacy. Earlier records retain their stored scenario, version and threshold, and direct API replays return their saved results. [Local evaluation](../simulation-runbook.md#merchant-scenarios-and-jev) · [Decision Engine](decision-engine.md)
+
+## Current contract
+
+| Area | Behavior |
+| --- | --- |
+| Local administrator | The opt-in loopback preview uses a server-side demo administrator credential for merchant management, scoped policies, Jev review rules, Platform drafts and AI Configuration. Platform Admin can view transactions across merchants and resolve pending cases. Independent checker approval still governs publishing global Platform drafts. |
+| Merchant | The issued tenant credential grants access to the merchant's own read-only ledger and versioned Merchant Policies. Scoped administrative routes require Platform Admin. |
+| Configuration | Declare products and signals on the merchant record. The shared typed field catalogue supplies conditions in the rule editor and evidence inputs in both test tools. Product determines the booking or checkout stage. |
+| Decision | The tools evaluate built-in and approved Platform Rules, active Merchant Policies, published amount-based Jev review rules, and the configured Jev advisory. Unsupported or omitted signals appear as unavailable for applicable rules. |
+| Evidence | A saved assessment records the independent rule decisions, final action and its source, applicable rule and Jev configuration versions, and the selected merchant and product. A downstream disposition has its own actor and time. |
+| Compatibility | The test tools submit through the existing tenant transaction endpoint without `scenarioId`. Historical API callers may submit it explicitly for the legacy scenario path. The same transaction ID and input replay the saved result. A changed input under the same ID returns a conflict. |
+
+## Current risk results
+
+| Risk and final action | Queue behavior |
+| --- | --- |
+| Low risk and Allow | Appears in the ledger with its assessment. |
+| High risk and Block | Appears with the matching platform or merchant policy evidence. |
+| Review and Challenge | Shows the challenge action. |
+| Review and Review | Appears under **Needs decision** for manual review. |
+| Review (unresolved) and Unresolved | Appears under **Needs decision** when the final decision cannot be resolved. Saved API outcome is `UNRESOLVED`. |
+
+Final actions rank Block, Review, Challenge, Unresolved, and Allow in descending order. A Platform decision wins a tie with Merchant Policy. A local decision wins a tie with Jev. The original Jev answer, served model, provider ID, and failure status are available separately whenever returned. Mock is the deployment default. In live configuration, the server sends the bounded booking amount and local review requirement to Jev. [Jev configuration](decision-engine.md#jev-configuration)
+
+## Acceptance checks
+
+1. Create two merchants and register different products or fields. Use the Platform Admin preview to create, read, update and delete a merchant policy and an amount-based Jev review rule. Verify that a merchant credential can use only its own ledger and policy editor, and that changes to one merchant leave the other merchant's config intact.
+2. Submit equivalent product and evidence in both test tools for a merchant with zero scenarios. Compare final action, merchant and product, matching rule versions, missing signals and Jev outcome. Select a different merchant while a test is in flight and check each saved record in its own ledger.
+3. Use a compound custom policy with a literal text comparison and a country code. Test both inputs present, a nonmatching value, an omitted signal, and an invalid type. Verify that the omitted input is recorded as unavailable and an invalid value is rejected. Test explicit zero and false separately when registered.
+4. Exercise an amount-based review, a temporary exact-email block and a simulated Jev timeout. Verify the ledger outcome, evidence and review state. Record a disposition on a pending case as Platform Admin and replay the initial submission.
+5. Open a stored scenario result from before the change and check that its threshold, rules, outcome, and Jev evidence still match. Change a current rule, then compare exact replays of both historical and current records.
+
+<details>
+<summary>Earlier requirements and acceptance criteria for scenario-based testing</summary>
+
+Status **Live Jev verified in both merchant-selected tools in the local preview.** Earlier Chrome and local API checks verified merchant transaction isolation. Platform administrators manage merchant setup, scenarios and rules, and see transactions across active merchants. A merchant sees only its own transactions and saved results. This requirement extends the browser-local [Merchant Setup](merchant-setup.md) and the existing [Risk Operations workflow](../simulation-runbook.md#local-evaluation). [Evaluation runbook](../simulation-runbook.md#merchant-scenarios-and-jev) · [Verification](../current-work.md#historical-merchant-scenarios-and-jev)
 
 The preview uses a structured form with one booking amount threshold per scenario. Saving the reviewed preview makes that revision available for tests. It includes a single merchant-scenario assessment panel in Simulation Lab and direct clear or reject actions for sandbox transactions. AI-generated drafts, broader scenario inputs, configurable multi-rule sets, and the full analyst HOLD lifecycle in the new merchant workspace remain requirements beyond this slice.
 
@@ -108,3 +144,5 @@ For the planned result model, check both merchant-selected tools with a complete
 - How the existing browser-local setup and any existing demo merchant profiles should be imported or linked to the new directory.
 
 Related requirements [Booking assessment](booking-assessment.md) · [Mock Checkout and lineage](checkout-and-lineage.md) · [Simulation Lab](simulation-lab.md) · [Jev Rules](jev-rules.md)
+
+</details>

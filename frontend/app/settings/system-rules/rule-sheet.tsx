@@ -59,11 +59,12 @@ type Props = {
   runs: PreviewRun[];
   onClose: () => void;
   onSaved: (rule: Rule) => void;
+  onDeleted: () => void;
   request?: RuleTransport;
   canEdit?: boolean;
 };
 
-export function RuleSheet({ rule, signals, runs, onClose, onSaved, request = globalRuleTransport, canEdit = true }: Props) {
+export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, request = globalRuleTransport, canEdit = true }: Props) {
   const readOnly = !!rule && (!canEdit || rule.status === "ACTIVE");
   const dialog = useRef<HTMLDialogElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
@@ -77,13 +78,25 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, request = glo
       conditions: [defaultCondition(signals.find(signal => signal.stages.includes("ANY")))],
     });
   const [runId, setRunId] = useState(runs[0]?.id ?? "");
-  const [task, setTask] = useState<"save" | "preview" | null>(null);
+  const [task, setTask] = useState<"save" | "delete" | "preview" | null>(null);
   const [saveError, setSaveError] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const hasPreviewFields = form.conditions.every(condition => condition.signal
     && (typeof condition.value === "boolean" || (Number.isFinite(condition.value) && Math.abs(condition.value) <= Number.MAX_SAFE_INTEGER)));
   const available = signals.filter(signal => signal.stages.includes(form.stage));
+
+  async function removeDraft() {
+    if (!rule || readOnly || task || !window.confirm(`Delete the draft "${rule.name}"?`)) return;
+    setTask("delete");
+    setSaveError("");
+    try {
+      await request(`/${encodeURIComponent(rule.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: rule.version }) });
+      onDeleted();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not delete draft.");
+    } finally { setTask(null); }
+  }
 
   useEffect(() => {
     const modal = dialog.current;
@@ -307,6 +320,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, request = glo
         {saveError && <div className="mb-3"><Message>{saveError}</Message></div>}
         <div className="flex flex-wrap items-center justify-end gap-2">
           {rule?.updatedAt && !readOnly && <span className="mr-auto text-xs text-slate-600">Revision {rule.version} · {formatDate(rule.updatedAt)}</span>}
+          {rule && !readOnly && <button type="button" className="mr-auto text-sm font-semibold text-red-700" disabled={!!task} onClick={() => void removeDraft()}>Delete draft</button>}
           <button type="button" className={outlineButton} onClick={onClose} disabled={task === "save"}>{readOnly ? "Close" : "Cancel"}</button>
           {!readOnly && <button type="submit" className={primaryButton} disabled={task !== null}>
             {task === "save" && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}

@@ -1,12 +1,5 @@
 import type { MerchantSetup } from "./settings/merchant-setup/contracts";
-
-export type DemoScenario = {
-  id: string;
-  name: string;
-  thresholdMinor: number;
-  scenarioVersion: number;
-  ruleVersion: string;
-};
+import type { CustomSignalDefinition } from "./settings/merchants/custom-signal-setup";
 
 export type DemoMerchant = {
   id: string;
@@ -14,8 +7,7 @@ export type DemoMerchant = {
   description?: string;
   createdAt?: string;
   setup?: MerchantSetup;
-  policyIntegration?: { products: string[]; emailDomain: boolean; amountMinor?: boolean };
-  scenarios: DemoScenario[];
+  policyIntegration?: { products: string[]; emailDomain: boolean; amountMinor?: boolean; customFields?: CustomSignalDefinition[] };
 };
 
 export type DemoDirectory = {
@@ -26,22 +18,23 @@ export type DemoDirectory = {
 export type DemoTransaction = {
   id: string;
   merchantId: string;
-  scenarioId: string;
-  scenarioName: string;
-  scenarioVersion: number;
+  scenarioId?: string;
+  scenarioName?: string;
+  scenarioVersion?: number;
   ruleVersion: string;
   source: "checkout" | "simulation";
   product?: string;
   amountMinor: number | null;
-  thresholdMinor: number;
+  thresholdMinor?: number;
   jevStatus: "MOCKED" | "TIMEOUT" | "LIVE" | "UNAVAILABLE" | "NOT_RUN";
   jevVersion: string;
   jevAnswer?: "LOW_RISK" | "REVIEW";
+  jevReason?: string;
   jevDecisionId?: string;
   jevConfidence?: number;
   jevConfigurationVersion?: number;
   jevRuleVersion?: string;
-  outcome: "LOW_RISK" | "REVIEW" | "UNRESOLVED";
+  outcome: "LOW_RISK" | "HIGH_RISK" | "REVIEW" | "UNRESOLVED";
   reason: string;
   ruleHits: string[];
   reviewState: "NONE" | "NEEDS_DECISION" | "RESOLVED";
@@ -52,9 +45,19 @@ export type DemoTransaction = {
   policyDecision?: MerchantPolicyDecision;
 };
 
+type MerchantPolicyDecisionPart = {
+  action: string;
+  matchedRuleIds?: string[];
+  reasonCodes?: string[];
+  ruleVersions?: Record<string, number>;
+  missingSignals?: string[];
+  missingRuleIds?: string[];
+};
+
 export type MerchantPolicyDecision = {
-  platformDecision: { action: string; reasonCodes?: string[] };
-  merchantPolicyDecision: { action: string; matchedRuleIds?: string[]; reasonCodes?: string[]; ruleVersions?: Record<string, number>; missingSignals?: string[]; missingRuleIds?: string[] };
+  platformDecision: MerchantPolicyDecisionPart;
+  merchantPolicyDecision: MerchantPolicyDecisionPart;
+  jevDecision?: MerchantPolicyDecisionPart;
   finalDecision: { action: string; source: string };
 };
 
@@ -71,7 +74,7 @@ export const policyActionLabels: Record<string, string> = {
   UNSUCCESSFUL: "Unresolved", UNRESOLVED: "Unresolved", PASS: "Pass", UNAVAILABLE: "Signal unavailable",
 };
 
-export const merchantOutcomeLabels = { LOW_RISK: "Low risk", REVIEW: "Review", UNRESOLVED: "Unresolved" } as const;
+export const merchantOutcomeLabels = { LOW_RISK: "Low risk", HIGH_RISK: "High risk", REVIEW: "Review", UNRESOLVED: "Review (unresolved)" } as const;
 const jevStatuses = {
   MOCKED: "Mock Jev",
   TIMEOUT: "Jev timed out",

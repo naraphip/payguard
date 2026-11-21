@@ -1,5 +1,4 @@
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
-import type { MerchantPolicyVersion } from "../rule-composer";
 
 export type MerchantDirectoryItem = DemoMerchant & {
   transactionCount: number;
@@ -36,8 +35,6 @@ export type MerchantDetails = {
   };
   recentTransactions: DemoTransaction[];
 };
-
-export type MerchantPolicyHistory = { rule: MerchantPolicyVersion; versions: MerchantPolicyVersion[] };
 
 export type MerchantAuditEvent = {
   id: string;

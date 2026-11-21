@@ -1,6 +1,6 @@
 # Merchant Management
 
-The Sandbox directory and merchant detail workspace reuse the existing PostgreSQL merchant records, one-time credentials, scenarios, and transaction ledger. The prior merchant IDs and saved results remain the source of truth. This slice adds administrative views and read APIs around those records. [Merchant scenario requirements](merchant-scenarios.md) · [Runbook](../simulation-runbook.md#merchant-management) · [Verification](../current-work.md#merchant-management)
+The Sandbox directory and merchant detail workspace reuse the existing PostgreSQL merchant records, one-time credentials, and transaction ledger. Historical scenario results retain their original versions. The opt-in loopback workspace gives Platform Admin merchant management through the server credential. [Merchant testing requirements](merchant-scenarios.md) · [Runbook](../simulation-runbook.md#merchant-management) · [Verification](../current-work.md#merchant-management)
 
 ## Directory and detail
 
@@ -10,13 +10,13 @@ Create a merchant using its business name, optional description, and independent
 
 On the merchant’s **Overview**, a Platform Admin can select **Get temporary token**, then **Show token** or **Copy token**. The token grants access as that merchant for one hour. The original token issued at creation remains valid. The creation receipt also supports **Show token** and **Copy token**.
 
-The transaction ledger supports a transaction ID prefix, outcome, review state, and inclusive UTC day filters. It shows saved outcomes and final decision sources, matched policies and versions when available, and separate review dispositions. Merchant Rules includes business policy inspection and the existing booking review rules with saved Jev results. Advanced Risk Configuration displays the available active profile version and signals. Integrations displays recorded products, stages, signals, and saved Sandbox scenarios. Platform Rules and AI Configuration have their own administrative workspaces. [Decision Engine](decision-engine.md)
+The transaction ledger supports a transaction ID prefix, outcome, review state, and inclusive UTC day filters. It shows saved outcomes and final decision sources, matched policies and versions when available, and separate review dispositions. Merchant Rules includes business policy authoring, saved policy versions, and versioned amount-based booking review rules with saved Jev results. Advanced Risk Configuration displays the available active profile version and signals. Integrations displays recorded products, stages, and signals. Register custom signals on the merchant’s Overview. Platform Rules and AI Configuration have their own administrative workspaces. [Decision Engine](decision-engine.md)
 
 ## Permission model
 
 | Actor | Capabilities in this slice |
 | --- | --- |
-| Platform Admin | List and create merchants, edit metadata, issue temporary merchant tokens, deactivate merchants, read a selected merchant's records and rule history, and record existing administrative dispositions. Merchant Policy inspection uses read-only endpoints. |
+| Platform Admin | List and create merchants, edit metadata, issue temporary merchant tokens, deactivate merchants, manage the selected merchant’s policies and Jev review rules, view transactions and their rule history, and record dispositions. |
 | Merchant | Read its own scoped records, compose and manage its own policies, and view its own policy versions. The API derives the tenant from the issued merchant bearer token. |
 | Platform checker | Reviews global Platform changes through the approval workflow. The checker credential does not confer merchant management access. |
 
@@ -55,6 +55,6 @@ The existing administrator `POST /api/v1/booking/demo/merchants` accepts a multi
 
 ## Booking API v1 and the target data contract
 
-The current `POST /api/v1/booking/events` uses authenticated merchant scope, an `Idempotency-Key` header, and a JSON body with `eventId`, `schemaVersion` set to `1`, `stage` set to `booking`, and `occurredAt`. It accepts optional `amountMinor`, `product`, and `sdkStatus`. The v1 parser rejects unknown fields. Merchant scenario transactions use their separate Sandbox endpoint with optional `customerEmailDomain`.
+The current `POST /api/v1/booking/events` uses authenticated merchant scope, an `Idempotency-Key` header, and a JSON body with `eventId`, `schemaVersion` set to `1`, `stage` set to `booking`, and `occurredAt`. It accepts optional `amountMinor`, `product`, and `sdkStatus`. The v1 parser rejects unknown fields. Merchant-selected transactions use their Sandbox endpoint with optional `customerEmailDomain`, `accountAgeDays`, and `customSignals` declared on the merchant.
 
 The production data dictionary describes a future contract. Its core fields are `schema_version`, `event_id`, `idempotency_key`, `occurred_at`, `event_type`, `stage`, and `vertical`. The server derives `merchant_id` from authenticated context. Conditional fields depend on the stage and product. They include a customer or guest reference, order or intent references, currency and amount, and payment attempt data once payment begins. Optional fraud signals can come from device, network, history, or PSP evidence. The target needs a published versioned API and validated required-field matrix. In particular, `hotel.guest_count` and `digital.delivery_method` have conflicting requirement levels between design sheets. Pending capabilities remain unavailable in the current composer. A missing observation stays distinct from zero or false. [Current v1 request](../simulation-runbook.md#booking-event-intake) · [Core API fields](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260105) · [Required fields matrix](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260108)

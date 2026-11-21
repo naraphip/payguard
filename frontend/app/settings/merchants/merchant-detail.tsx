@@ -7,16 +7,15 @@ import { MerchantDemoError, merchantDemoRequest, merchantJevStatus, merchantOutc
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
 import { useWorkspaceView } from "../../workspace-view";
 import { JevRulesPanel } from "../jev-rules/panel";
-import { PolicyExpiry, RuleAccess, RulePreview, useRuleCredential } from "../rule-composer";
-import type { MerchantPolicyVersion } from "../rule-composer";
+import { AdminMerchantPolicyWorkspace } from "../rule-composer";
 import { outlineButton } from "../system-rules/contracts";
 import { SystemRulesDashboard } from "../system-rules/dashboard";
 import { MerchantAccessToken } from "./access-token";
 import { MerchantTransactions } from "./transactions";
-import { MerchantWorkspace } from "./directory";
+import { MerchantNameForm } from "./directory";
 import { MerchantManagementAccess, managementError } from "./management-access";
 import { merchantDate, merchantDetailsHref, merchantTabs } from "./management-contracts";
-import type { MerchantAuditEvent, MerchantDetails, MerchantPolicyHistory, MerchantTab } from "./management-contracts";
+import type { MerchantAuditEvent, MerchantDetails, MerchantTab } from "./management-contracts";
 
 const panel = "min-w-0 space-y-3 rounded-xl border border-line bg-white p-4 sm:p-5";
 const link = "font-semibold text-accent hover:underline";
@@ -80,9 +79,7 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
   if (!response) return <p role="status" className="text-sm text-muted">Loading merchant details…</p>;
   const merchant = updated ?? response.merchant;
   const goBack = merchantView ? "/settings/merchants?view=transactions" : "/settings/merchants";
-  const scenario = merchant.scenarios?.[0];
   const sandboxQuery = new URLSearchParams({ merchant: merchant.id });
-  if (scenario && merchant.scenarios.length === 1) sandboxQuery.set("scenario", scenario.id);
 
   return <div className="space-y-5">
     <header className="space-y-2">
@@ -96,7 +93,7 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
         </div>
         {!merchantView && <div className="flex flex-wrap items-center gap-2">
           <Link className={outlineButton} href={`/settings/mock-checkout?${sandboxQuery}`}>Mock Checkout</Link>
-          <Link className={outlineButton} href={`/simulation-lab?${sandboxQuery}`}>Simulation Lab</Link>
+          <Link className={outlineButton} href={`/simulation-lab?${sandboxQuery}#merchant-rules`}>Simulation Lab</Link>
         </div>}
       </div>
     </header>
@@ -109,23 +106,25 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
       onDelete={() => router.push("/settings/merchants")} />}
     {tab === "transactions" && <MerchantTransactions token={token} merchant={merchant} canDecide={!merchantView} initialTransaction={transaction} />}
     {tab === "rules" && <>
-      <PolicyInspection key={merchant.id} path={path} token={token} />
+      <AdminMerchantPolicyWorkspace merchantId={merchant.id} token={token} />
       <section id="booking-review-rules" className={`${panel} scroll-mt-28`} aria-label="Booking review rules">
-        <MerchantJevRules merchant={merchant} />
+        <JevRulesPanel merchant={{ id: merchant.id, name: merchant.name, token, canEdit: true }} />
         <h3 className="font-semibold">Recent Jev assessments</h3>
         {!response.recentTransactions.length && <p className="text-sm text-muted">No recorded assessments.</p>}
         <ul className="divide-y divide-line">
           {response.recentTransactions.map(item => <li key={item.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm">
-            <Link href={merchantDetailsHref(merchant.id, "transactions", item.id)} className={link}>{item.scenarioName}</Link>
+            <Link href={merchantDetailsHref(merchant.id, "transactions", item.id)} className={link}>
+              {item.product ? products[item.product] ?? item.product : "Transaction"} · {merchantDate(item.createdAt)}
+            </Link>
             <span className="wrap-anywhere">{merchantJevStatus(item)}{item.jevVersion && ` · ${item.jevVersion}`}{item.jevRuleVersion && ` · Rules ${item.jevRuleVersion}`}{item.jevAnswer && ` · ${merchantOutcomeLabels[item.jevAnswer]}`}</span>
           </li>)}
         </ul>
       </section>
     </>}
     {tab === "profiles" && <Profiles detail={response} />}
-    {tab === "integrations" && <Integrations detail={response} merchant={merchant} />}
+    {tab === "integrations" && <Integrations detail={response} />}
     {tab === "audit" && <MerchantAudit path={path} token={token} />}
-    {tab === "platform-drafts" && <SandboxPlatformDrafts merchant={merchant} />}
+    {tab === "platform-drafts" && <SandboxPlatformDrafts merchant={merchant} token={token} />}
   </div>;
 }
 
@@ -161,17 +160,19 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
           <h2 className="text-lg font-semibold" id="merchant-recent-transactions">Recent Transactions</h2>
           <Link className={`text-sm ${link}`} href={merchantDetailsHref(merchant.id, "transactions")}>Open ledger</Link>
         </div>
-        {!recentTransactions.length && <p className="text-sm text-muted">No transactions yet. Run a Mock Checkout or Simulation Lab scenario.</p>}
+        {!recentTransactions.length && <p className="text-sm text-muted">No transactions yet. Submit a test in Mock Checkout or Simulation Lab.</p>}
         <ul className="divide-y divide-line">
           {recentTransactions.map(item => <li key={item.id} className="flex flex-wrap items-start justify-between gap-2 py-2">
             <div className="min-w-0 text-sm">
-              <Link href={merchantDetailsHref(merchant.id, "transactions", item.id)} className={`${link} wrap-anywhere`}>{item.scenarioName}</Link>
+              <Link href={merchantDetailsHref(merchant.id, "transactions", item.id)} className={`${link} wrap-anywhere`}>
+                {item.source === "checkout" ? "Mock Checkout" : "Simulation Lab"}
+              </Link>
               <p className="font-mono text-[11px] text-muted wrap-anywhere">{item.id}</p>
               <p className="text-xs text-muted">
                 {item.product ? products[item.product] ?? item.product : "Product unavailable"}
                 {" · "}{item.amountMinor == null ? "Amount unavailable" : `${amountFormat.format(item.amountMinor)} minor units`}
               </p>
-              <p className="text-xs text-muted">{merchantDate(item.createdAt)} · {item.source === "checkout" ? "Mock Checkout" : "Simulation Lab"}</p>
+              <p className="text-xs text-muted">{merchantDate(item.createdAt)}</p>
             </div>
             <div><p className="text-sm font-semibold">{transactionAction(item)}</p><p className="text-xs text-muted">{merchantJevStatus(item)}</p></div>
           </li>)}
@@ -182,12 +183,11 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
         <dl className="space-y-2 text-sm">
           <div><dt className="font-medium">Scoring profile</dt><dd className="text-muted">{profile.scoringProfileVersion || "No active profile recorded"}</dd></div>
           <div><dt className="font-medium">Available signals</dt><dd className="text-muted wrap-anywhere">{profile.signals?.join(", ") || "Unavailable"}</dd></div>
-          <div><dt className="font-medium">Sandbox scenarios</dt><dd className="text-muted">{merchant.scenarios.length}</dd></div>
         </dl>
         <Link href="/settings/system-rules" className={`inline-block text-sm ${link}`}>Open global Platform Rules</Link>
       </section>
     </div>
-    <MerchantWorkspace key={merchant.id} merchant={merchant} token={token} admin onSave={onSave} onDelete={onDelete} />
+    <MerchantNameForm key={merchant.id} merchant={merchant} token={token} onSave={onSave} onDelete={onDelete} />
   </div>;
 }
 
@@ -204,62 +204,17 @@ function Profiles({ detail }: { detail: MerchantDetails }) {
   </section>;
 }
 
-function Integrations({ detail, merchant }: { detail: MerchantDetails; merchant: DemoMerchant }) {
+function Integrations({ detail }: { detail: MerchantDetails }) {
   const { profile } = detail;
   return <section className={panel}>
     <h2 className="text-lg font-semibold">Integrations</h2>
     <dl className="grid gap-3 text-sm sm:grid-cols-2">
       <div><dt className="font-medium">Environment</dt><dd className="text-muted">Sandbox</dd></div>
-      <div><dt className="font-medium">Scenario testing</dt><dd className="text-muted">{merchant.scenarios.length ? `${merchant.scenarios.length} saved scenarios` : "No saved scenarios"}</dd></div>
       <div><dt className="font-medium">Products</dt><dd className="text-muted wrap-anywhere">{profile.products?.map(product => products[product] ?? product).join(", ") || "No recorded products"}</dd></div>
       <div><dt className="font-medium">Transaction stages</dt><dd className="text-muted">{profile.stages?.map(label).join(", ") || "Unavailable"}</dd></div>
       <div className="sm:col-span-2"><dt className="font-medium">Available signals</dt><dd className="text-muted wrap-anywhere">{profile.signals?.join(", ") || "Unavailable"}</dd></div>
     </dl>
   </section>;
-}
-
-function PolicyInspection({ path, token }: { path: string; token: string }) {
-  const { response, failure, reload } = useMerchantResource<{ rules: MerchantPolicyVersion[] }>(`${path}/policies`, token);
-  const [selected, setSelected] = useState("");
-  return <section className={panel}>
-    <h2 className="text-lg font-semibold">Business policies</h2>
-    <p className="text-sm text-muted">Inspect this merchant’s business policies and saved versions.</p>
-    {failure && <p role="alert" className="text-sm text-red-800">{failure.error} <button className={link} onClick={reload}>Retry</button></p>}
-    {!failure && !response && <p role="status" className="text-sm text-muted">Loading policies…</p>}
-    {response && !response.rules.length && <p className="text-sm text-muted">No business policies have been saved.</p>}
-    {!!response?.rules.length && <ul className="divide-y divide-line">
-      {response.rules.map(rule => <li key={rule.id} className="space-y-2 py-3">
-        <div className="flex flex-wrap justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold wrap-anywhere">{rule.proposal.name}</p>
-            <p className="text-xs text-muted">{label(rule.status)} · {policyActionLabels[rule.proposal.action]} · Version {rule.version}</p>
-            <PolicyExpiry expiresAt={rule.expiresAt} status={rule.status} />
-            <p className="text-xs text-muted wrap-anywhere">{rule.proposal.product_types.map(product => products[product] ?? product).join(", ")}</p>
-            {rule.createdAt && <p className="text-xs text-muted">{merchantDate(rule.createdAt)}</p>}
-            {(rule.createdBy || rule.actor) && <p className="text-xs text-muted">Created by {rule.createdBy ?? rule.actor}</p>}
-          </div>
-          <button type="button" className={outlineButton} aria-expanded={selected === rule.id} onClick={() => setSelected(value => value === rule.id ? "" : rule.id)}>Versions</button>
-        </div>
-        {selected === rule.id && <PolicyVersions path={`${path}/policies/${encodeURIComponent(rule.id)}`} token={token} />}
-      </li>)}
-    </ul>}
-  </section>;
-}
-
-function PolicyVersions({ path, token }: { path: string; token: string }) {
-  const { response, failure } = useMerchantResource<MerchantPolicyHistory>(path, token);
-  if (failure) return <p role="alert" className="text-sm text-red-800">{failure.error}</p>;
-  if (!response) return <p role="status" className="text-sm text-muted">Loading versions…</p>;
-  return <ul className="space-y-2">
-    {response.versions.map(version => <li key={version.version}>
-      <details className="rounded-lg border border-line bg-white p-3">
-        <summary className="cursor-pointer text-sm font-semibold">Version {version.version} · {label(version.status)}</summary>
-        <p className="mt-2 text-xs text-muted">{merchantDate(version.createdAt)}{(version.createdBy || version.actor) && ` · ${version.createdBy ?? version.actor}`}{version.changeReason && ` · ${version.changeReason}`}</p>
-        <PolicyExpiry expiresAt={version.expiresAt} status={version.status} />
-        <div className="mt-2"><RulePreview proposal={version.proposal} /></div>
-      </details>
-    </li>)}
-  </ul>;
 }
 
 function MerchantAudit({ path, token }: { path: string; token: string }) {
@@ -282,23 +237,13 @@ function MerchantAudit({ path, token }: { path: string; token: string }) {
   </section>;
 }
 
-function SandboxPlatformDrafts({ merchant }: { merchant: DemoMerchant }) {
-  const token = useRuleCredential("PLATFORM");
+function SandboxPlatformDrafts({ merchant, token }: { merchant: DemoMerchant; token: string }) {
   const request = useCallback(<T,>(suffix: string, init?: RequestInit) =>
     merchantDemoRequest<T>(`/${encodeURIComponent(merchant.id)}/platform/rules${suffix}`, token, init), [merchant.id, token]);
   return <section className={panel}>
     <h2 className="text-lg font-semibold">Sandbox Platform drafts</h2>
     <p className="text-sm text-muted">Review legacy Platform drafts for saved Sandbox runs. Global Platform Rules are managed in the Platform module.</p>
     <Link href="/settings/system-rules" className={`inline-block text-sm ${link}`}>Open global Platform Rules</Link>
-    {!token && <RuleAccess scope="PLATFORM" />}
-    <SystemRulesDashboard merchantName={merchant.name} canEdit={Boolean(token)} request={request} />
+    <SystemRulesDashboard merchantName={merchant.name} canEdit request={request} />
   </section>;
-}
-
-function MerchantJevRules({ merchant }: { merchant: DemoMerchant }) {
-  const token = useRuleCredential("PLATFORM");
-  return <>
-    {!token && <RuleAccess scope="PLATFORM" />}
-    <JevRulesPanel merchant={{ id: merchant.id, name: merchant.name, token, canEdit: Boolean(token) }} />
-  </>;
 }

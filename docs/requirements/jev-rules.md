@@ -4,7 +4,7 @@ Status **Local demo implemented and verified**. A merchant can use the demo to t
 
 The evaluator uses the evidence and lineage from the existing mock Jev booking flow. Score adjustments, payment actions, production Jev and AI provider connections, and the maker-checker policy in PG-15 and DEC-07 are outside the demo scope. [Booking assessment](booking-assessment.md) · [PayGuard task list](../payguard-tasks.md) · [Jev Rules UI](../ui/jev-rules.md)
 
-The administrator manages a selected merchant's demo booking review rules under **Merchant Details → Merchant Rules**. The legacy Booking API review rules continue to use the demo booking credential. Test Jev provider settings separately in [AI Configuration](decision-engine.md#jev-configuration).
+Platform Admin manages a selected merchant's review rules under **Merchant Details → Merchant Rules**. The merchant test tools evaluate conditions on `amountMinor`. Publish, edit and removal create new ruleset revisions. Existing results retain the revision used. The legacy Booking API uses the demo booking credential and its own rule catalogue with both signals below. Configure or test the advisory provider in the separate AI Configuration workspace. [Merchant workflow and APIs](../simulation-runbook.md#composer-and-policy-apis) · [AI Configuration](decision-engine.md#jev-configuration)
 
 ## Rule contract
 

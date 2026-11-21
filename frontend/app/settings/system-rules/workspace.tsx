@@ -2,20 +2,22 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
+import { adminRulePath, useLocalAdminPreview } from "../../local-admin-preview";
 import { RuleAccess, RuleComposer, useRuleCredential } from "../rule-composer";
 import { SystemRulesDashboard } from "./dashboard";
 import { PlatformGovernance } from "./governance";
-import { globalRuleTransport } from "./contracts";
+import { globalRuleTransport, ruleRequest, rulesEndpoint } from "./contracts";
 
 export function PlatformRulesWorkspace() {
   const token = useRuleCredential("PLATFORM");
+  const local = useLocalAdminPreview();
   const [revision, setRevision] = useState(0);
 
   const request = useCallback<typeof globalRuleTransport>((suffix, init) => {
     const headers = new Headers(init?.headers);
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    return globalRuleTransport(suffix, { ...init, headers });
-  }, [token]);
+    return ruleRequest(adminRulePath(rulesEndpoint + suffix, local, token), { ...init, headers });
+  }, [token, local]);
 
   return <main className="mx-auto max-w-[1360px] space-y-6 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <header>
@@ -25,7 +27,7 @@ export function PlatformRulesWorkspace() {
     <RuleAccess scope="PLATFORM" />
     <RuleComposer scope="PLATFORM" onSaved={() => setRevision(value => value + 1)} />
     <PlatformGovernance catalogueRevision={revision} />
-    <SystemRulesDashboard key={revision} request={request} canEdit={Boolean(token)} embedded />
+    <SystemRulesDashboard key={revision} request={request} canEdit={Boolean(token) || local} embedded />
     <Link href="/settings/merchants?view=platform" className="inline-block text-sm font-semibold text-accent hover:underline">
       Open merchant-specific platform drafts
     </Link>

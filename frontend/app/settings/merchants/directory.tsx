@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { merchantDemoRequest, merchantPolicyProducts } from "../../merchant-demo";
-import type { DemoDirectory, DemoMerchant, DemoScenario } from "../../merchant-demo";
+import type { DemoDirectory, DemoMerchant } from "../../merchant-demo";
 import { useWorkspaceView } from "../../workspace-view";
 import { MerchantTransactions } from "./transactions";
 import { isBusinessModel } from "../merchant-setup/contracts";
 import type { BusinessModel, MerchantSetup } from "../merchant-setup/contracts";
 import { MerchantTokenControls } from "./access-token";
+import { CustomSignalSetup } from "./custom-signal-setup";
 import { MerchantManagementAccess, managementError } from "./management-access";
 import { merchantDate, merchantDetailsHref } from "./management-contracts";
 import type { MerchantDirectoryPage, MerchantTab } from "./management-contracts";
@@ -238,6 +239,8 @@ export function MerchantNameForm({ token, merchant, onSave, onDelete, onCancel }
   const [includesAmount, setIncludesAmount] = useState(existingAmount);
   const [products, setProducts] = useState(merchant?.policyIntegration?.products ?? []);
   const [emailDomain, setEmailDomain] = useState(merchant?.policyIntegration?.emailDomain ?? false);
+  const savedCustomFields = merchant?.policyIntegration?.customFields ?? [];
+  const [customFields, setCustomFields] = useState(savedCustomFields);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -248,7 +251,9 @@ export function MerchantNameForm({ token, merchant, onSave, onDelete, onCancel }
     includesAmount === existingAmount &&
     emailDomain === (merchant.policyIntegration?.emailDomain ?? false) &&
     products.length === (merchant.policyIntegration?.products?.length ?? 0) &&
-    products.every(product => merchant.policyIntegration?.products?.includes(product));
+    products.every(product => merchant.policyIntegration?.products?.includes(product)) &&
+    customFields.length === savedCustomFields.length &&
+    customFields.every(field => savedCustomFields.some(saved => saved.key === field.key && saved.label === field.label && saved.type === field.type));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -265,10 +270,11 @@ export function MerchantNameForm({ token, merchant, onSave, onDelete, onCancel }
       const result = await merchantDemoRequest<{ merchant: DemoMerchant; token?: string }>(merchant ? `/${merchant.id}` : "", token, {
         method: merchant ? "PUT" : "POST",
         headers: merchant ? undefined : { "Idempotency-Key": creationKey.current },
-        body: JSON.stringify({ name: name.trim(), description: description.trim(), setup, policyIntegration: { products, emailDomain, amountMinor: includesAmount } }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim(), setup, policyIntegration: { products, emailDomain, amountMinor: includesAmount, customFields } }),
       });
       onSave(result.merchant, result.token);
       setName(result.merchant.name);
+      setCustomFields(result.merchant.policyIntegration?.customFields ?? []);
       setSaved(true);
     } catch (failure) {
       setError(errorMessage(failure));
@@ -305,7 +311,7 @@ export function MerchantNameForm({ token, merchant, onSave, onDelete, onCancel }
             setSaved(false);
           }} />
         </label>
-        <Field label="Booking profile type (optional)">
+        <Field label="Legacy booking profile type (optional)">
           <select className={input} value={businessModel} onChange={event => {
             const value = event.target.value;
             setBusinessModel(isBusinessModel(value) ? value : "");
@@ -316,12 +322,12 @@ export function MerchantNameForm({ token, merchant, onSave, onDelete, onCancel }
             <option value="ecommerce">{modelLabels.ecommerce}</option>
           </select>
         </Field>
-        {businessModel && <Field label="Booking profile stage">
+        {businessModel && <Field label="Legacy booking profile stage">
           <select className={input} defaultValue="booking"><option value="booking">Booking</option></select>
         </Field>}
         <fieldset className="space-y-2">
           <legend className="mb-1 text-sm font-medium">Available signals</legend>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked disabled />Booking timestamp (required)</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked disabled />Transaction timestamp (required)</label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={includesAmount} onChange={event => { setIncludesAmount(event.target.checked); setSaved(false); }} />
             Booking amount
@@ -347,6 +353,12 @@ export function MerchantNameForm({ token, merchant, onSave, onDelete, onCancel }
             Integration supplies customer email domains
           </label>
         </fieldset>
+        <div className="sm:col-span-2">
+          <CustomSignalSetup fields={customFields} onChange={fields => {
+            setCustomFields(fields);
+            setSaved(false);
+          }} />
+        </div>
       </fieldset>
       <div className="flex flex-wrap items-center gap-3">
         <button className={action} disabled={saving || deleting || confirmDelete || !name.trim() || isUnchanged}>
@@ -370,137 +382,6 @@ export function MerchantNameForm({ token, merchant, onSave, onDelete, onCancel }
       </section>}
       {saved && <p role="status" className="text-sm text-emerald-700">Merchant saved.</p>}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-    </form>
-  );
-}
-
-export function MerchantWorkspace({ merchant, token, admin, onSave, onDelete }: {
-  merchant: DemoMerchant;
-  token: string;
-  admin: boolean;
-  onSave: (merchant: DemoMerchant) => void;
-  onDelete: (merchantId: string) => void;
-}) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const scenario = merchant.scenarios.find(({ id }) => id === editing);
-
-  return (
-    <>
-      {admin ? <MerchantNameForm token={token} merchant={merchant} onSave={onSave} onDelete={onDelete} /> : <section className={card}>
-        <h2 className="text-xl font-semibold">{merchant.name}</h2>
-        {merchant.setup ? <p className="mt-2 text-sm text-slate-600">
-          {modelLabels[merchant.setup.businessModel]} · Booking · {merchant.setup.availableSignals.includes("amountMinor") ? "Timestamp and amount" : "Timestamp"}
-        </p> : <p className="mt-2 text-sm text-slate-600">Setup incomplete.</p>}
-      </section>}
-      <section className={`${card} space-y-4`} aria-labelledby="merchant-scenarios">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="merchant-scenarios" className="text-lg font-semibold">Scenarios and rules</h2>
-          {admin && <button className={secondary} onClick={() => setEditing("new")}>Add scenario</button>}
-        </div>
-        {!merchant.scenarios.length && <p className="text-sm text-slate-600">No scenarios yet. {admin && "Add a scenario to test its Jev rules."}</p>}
-        {merchant.scenarios.map((item) => {
-          const params = new URLSearchParams({ merchant: merchant.id, scenario: item.id });
-          return (
-            <div key={item.id} className="space-y-2 rounded-lg border border-line p-3">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="break-words font-semibold">{item.name}</h3>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Scenario v{item.scenarioVersion} · {item.ruleVersion}
-                  </p>
-                </div>
-                {admin && <button className={secondary} aria-label={`Edit ${item.name}`} onClick={() => setEditing(item.id)}>Edit</button>}
-              </div>
-              <p className="text-sm">Send to review at {count.format(item.thresholdMinor)} minor units or above.</p>
-              <div className="flex flex-wrap gap-2">
-                <Link className={secondary} href={`/settings/mock-checkout?${params}`}>Mock checkout</Link>
-                <Link className={secondary} href={`/simulation-lab?${params}`}>Simulation Lab</Link>
-              </div>
-            </div>
-          );
-        })}
-        {admin && editing && <ScenarioForm key={editing} token={token} merchantId={merchant.id} scenario={scenario} onCancel={() => setEditing(null)} onSave={(saved) => {
-          onSave({
-            ...merchant,
-            scenarios: scenario ? merchant.scenarios.map((item) => item.id === saved.id ? saved : item) : [...merchant.scenarios, saved],
-          });
-          setEditing(null);
-        }} />}
-      </section>
-    </>
-  );
-}
-
-function ScenarioForm({ token, merchantId, scenario, onSave, onCancel }: {
-  token: string;
-  merchantId: string;
-  scenario?: DemoScenario;
-  onSave: (scenario: DemoScenario) => void;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState(scenario?.name ?? "");
-  const [threshold, setThreshold] = useState(String(scenario?.thresholdMinor ?? 50000));
-  const [draft, setDraft] = useState<{ name: string; thresholdMinor: number } | null>(null);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  function generate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const amount = threshold.trim();
-    if (!name.trim() || !/^\d+$/.test(amount) || !Number.isSafeInteger(Number(amount))) {
-      setError("Enter a name and a whole, nonnegative amount in minor units.");
-      return;
-    }
-    setError("");
-    setDraft({ name: name.trim(), thresholdMinor: Number(amount) });
-  }
-
-  async function save() {
-    if (!draft) return;
-    setSaving(true);
-    setError("");
-    try {
-      const result = await merchantDemoRequest<{ scenario: DemoScenario }>(
-        `/${merchantId}/scenarios${scenario ? `/${scenario.id}` : ""}`,
-        token,
-        { method: scenario ? "PUT" : "POST", body: JSON.stringify(draft) },
-      );
-      onSave(result.scenario);
-    } catch (failure) {
-      setError(errorMessage(failure));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form onSubmit={generate} className="space-y-3 rounded-lg border border-line bg-paper p-3">
-      <h3 className="font-semibold">{scenario ? "Edit scenario" : "New scenario"}</h3>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Scenario name">
-          <input className={input} value={name} maxLength={80} required disabled={saving} onChange={(event) => {
-            setName(event.target.value);
-            setDraft(null);
-            setError("");
-          }} />
-        </Field>
-        <Field label="Review threshold in minor units">
-          <input className={input} inputMode="numeric" value={threshold} required disabled={saving} onChange={(event) => {
-            setThreshold(event.target.value);
-            setDraft(null);
-            setError("");
-          }} />
-        </Field>
-      </div>
-      {draft && <p role="status" className="rounded-md border border-line bg-white p-3 text-sm">
-        <strong>Mock rule preview.</strong> Send to review when the observed booking amount is at least {count.format(draft.thresholdMinor)} minor units.
-      </p>}
-      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      <div className="flex flex-wrap gap-2">
-        <button className={secondary} disabled={saving}>Generate rule preview</button>
-        <button className={action} type="button" disabled={!draft || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save scenario and rules"}</button>
-        <button className={secondary} type="button" disabled={saving} onClick={onCancel}>Cancel</button>
-      </div>
     </form>
   );
 }

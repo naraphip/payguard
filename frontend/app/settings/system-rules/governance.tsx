@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { adminRulePath, useLocalAdminPreview } from "../../local-admin-preview";
 import { useRuleCredential } from "../rule-composer";
 import { outlineButton, primaryButton, ruleRequest, rulesEndpoint } from "./contracts";
 import type { Preview, Rule, RuleCatalogue } from "./contracts";
@@ -44,6 +45,7 @@ export function PlatformGovernance({ catalogueRevision }: { catalogueRevision: n
 
 function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }) {
   const administrator = useRuleCredential("PLATFORM");
+  const local = useLocalAdminPreview();
   const [checker, setChecker] = useState("");
   const [catalogue, setCatalogue] = useState<RuleCatalogue | null>(null);
   const [selection, setSelection] = useState("");
@@ -61,11 +63,11 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
 
   useEffect(() => {
     const controller = new AbortController();
-    void request<RuleCatalogue>(rulesEndpoint, administrator, { signal: controller.signal })
+    void request<RuleCatalogue>(adminRulePath(rulesEndpoint, local, administrator), administrator, { signal: controller.signal })
       .then(result => { if (!controller.signal.aborted) setCatalogue(result); })
       .catch(cause => { if (!controller.signal.aborted) setError(failureText(cause)); });
     return () => controller.abort();
-  }, [administrator, catalogueRevision]);
+  }, [administrator, local, catalogueRevision]);
 
   useEffect(() => () => active.current?.abort(), []);
 
@@ -79,14 +81,14 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
   }
 
   async function update(token: string, operation: Operation | "load", body?: unknown) {
-    if (active.current || !draft || !token) return;
+    if (active.current || !draft || (!token && !local)) return;
     const controller = new AbortController();
     const { signal } = controller;
     active.current = controller;
     setBusy(operation);
     setNotice("");
     setError("");
-    const rulePath = `${endpoint}/${encodeURIComponent(draft.id)}`;
+    const rulePath = adminRulePath(`${endpoint}/${encodeURIComponent(draft.id)}`, local, token);
     try {
       if (operation !== "load") {
         const result = await request<GovernanceVersion>(`${rulePath}/${operation}`, token, {
@@ -140,7 +142,7 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
           {drafts.map(item => <option key={item.id} value={item.id}>{item.name} · Draft v{item.version}</option>)}
         </select>
       </label>
-      {draft && administrator && <form className="space-y-3 border-t border-line pt-3" onSubmit={submit}>
+      {draft && (administrator || local) && <form className="space-y-3 border-t border-line pt-3" onSubmit={submit}>
         <h3 className="font-semibold">Submit for approval</h3>
         <label className="block max-w-md font-semibold">Saved simulation run
           <select className="control mt-1" required value={runId} onChange={event => setRunId(event.currentTarget.value)} disabled={busy !== null}>
@@ -164,7 +166,7 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
             setVersion("");
           }} />
         </label>
-        <button className={outlineButton} type="button" disabled={busy !== null || !loaderToken} onClick={() => void update(loaderToken, "load")}>
+        <button className={outlineButton} type="button" disabled={busy !== null || (!loaderToken && !local)} onClick={() => void update(loaderToken, "load")}>
           {busy === "load" ? "Loading versions…" : "Load versions"}
         </button>
         {history && <>

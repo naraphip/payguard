@@ -6,9 +6,11 @@ import type { FormEvent } from "react";
 import { getMerchantDemoRole, getMerchantDemoToken, merchantDemoRequest, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken, subscribeMerchantDemoSession } from "../merchant-demo";
 import type { DemoDirectory } from "../merchant-demo";
 import { containsMailbox, merchantMailboxDigest, parseMailboxBlock } from "../merchant-mailbox";
+import { adminRulePath, useLocalAdminPreview } from "../local-admin-preview";
 import { useWorkspaceView } from "../workspace-view";
 import type { ReactNode } from "react";
 import { merchantDate } from "./merchants/management-contracts";
+import { merchantFieldLabels, merchantOperatorLabels, policyFieldLabel, StructuredRuleBuilder } from "./structured-rule-builder";
 import { outlineButton, primaryButton, ruleRequest, rulesEndpoint, stages } from "./system-rules/contracts";
 import type { Preview, PreviewRun, Rule, RuleCatalogue, RuleInput } from "./system-rules/contracts";
 
@@ -17,9 +19,9 @@ const policies = "/api/v1/booking/demo/merchant-policy";
 const panel = "min-w-0 space-y-4 rounded-xl border border-line bg-white p-4 sm:p-5";
 
 type Scope = "MERCHANT" | "PLATFORM";
-type PolicyAction = "BLOCK" | "REVIEW" | "CHALLENGE";
+export type PolicyAction = "BLOCK" | "REVIEW" | "CHALLENGE";
 type PolicyCondition = { field: string; operator: string; value: string | number | boolean };
-type MerchantProposal = {
+export type MerchantProposal = {
   scope: "MERCHANT";
   name: string;
   product_types: string[];
@@ -50,13 +52,22 @@ type PolicyRule = {
 type PolicySave = { rule: PolicyRule; status: PolicyRule["status"] };
 export type MerchantPolicyVersion = PolicyRule & { createdAt?: string; createdBy?: string; actor?: string; changeReason?: string };
 type PlatformSave = { rule: Rule; status: "DRAFT"; preview?: Preview };
-type BusinessProfile = {
+export type PolicyField = {
+  fieldName: string;
+  label?: string;
+  dataType: string;
+  allowedOperators: string[];
+  supportedProductTypes: string[];
+  availableStages: string[];
+};
+export type BusinessProfile = {
   merchantId: string;
   businessName: string;
   products: string[];
   stages: string[];
   signals: string[];
   scoringProfileVersion: string;
+  fieldRegistry?: PolicyField[];
 };
 
 const scopeLabels = { MERCHANT: "Merchant policy", PLATFORM: "Platform fraud rule" };
@@ -64,19 +75,13 @@ const products: Record<string, string> = merchantPolicyProducts;
 const mailboxField = "customer.mailbox_ref";
 const mailboxExample = "Block email buyer@example.test for 12 hours";
 const fields: Record<string, string> = {
-  "product.type": "Product",
-  "customer.email_domain": "Customer email domain",
-  [mailboxField]: "Exact email address",
-  "order.amount_minor": "Order amount in minor units",
+  ...merchantFieldLabels,
   account_age_days: "Account age in days",
   device_orders: "Orders from this device in 60 seconds",
   ip_orders: "Orders from this IP in 60 seconds",
   payment_token_orders: "Orders using this payment token in 60 seconds",
   payment_token_missing: "Payment token is missing",
   shared_device_or_token_orders: "Maximum orders using the device or token in 60 seconds",
-};
-const operatorLabels: Record<string, string> = {
-  eq: "equals", ne: "does not equal", gt: "is greater than", gte: "is at least", lt: "is less than", lte: "is at most",
 };
 const statusLabels = {
   ACTIVE: "Active", PENDING_APPROVAL: "Pending approval", DISABLED: "Disabled", EXPIRED: "Expired", DRAFT: "Draft",
@@ -102,20 +107,33 @@ function errorText(cause: unknown) {
 function ProfileDetails({ profile }: { profile: BusinessProfile }) {
   return <dl className="mt-2 grid gap-2 text-sm text-muted sm:grid-cols-3">
     <div><dt className="font-medium text-ink">Products</dt><dd>{profile.products?.map(product => products[product] ?? product).join(", ") || "Unavailable"}</dd></div>
-    <div><dt className="font-medium text-ink">Available signals</dt><dd>{profile.signals?.map(field => fields[field] ?? field).join(", ") || "Unavailable"}</dd></div>
+    <div><dt className="font-medium text-ink">Available signals</dt><dd>{profile.signals?.map(field => {
+      const capability = profile.fieldRegistry?.find(entry => entry.fieldName === field);
+      return capability ? policyFieldLabel(capability) : fields[field] ?? field;
+    }).join(", ") || "Unavailable"}</dd></div>
     <div><dt className="font-medium text-ink">Scoring profile</dt><dd>{profile.scoringProfileVersion || "Unavailable"}</dd></div>
   </dl>;
 }
 
 async function authenticatedRequest<T>(path: string, token: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${token}`);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init?.body) headers.set("Content-Type", "application/json");
   return ruleRequest<T>(path, { ...init, headers, cache: "no-store" });
 }
 
+function merchantPolicyRequest<T>(resource: string, token: string, init?: RequestInit, adminMerchantId?: string) {
+  if (adminMerchantId) {
+    const path = resource === "interpret" ? "policy-interpret" : resource === "profile" ? "policy-profile" : resource.replace(/^rules/, "policies");
+    return merchantDemoRequest<T>(`/${encodeURIComponent(adminMerchantId)}/${path}`, token, init);
+  }
+  const path = resource === "interpret" ? `${composer}/interpret` : `${policies}/${resource}`;
+  return authenticatedRequest<T>(path, token, init);
+}
+
 export function RuleAccess({ scope }: { scope: Scope }) {
   const token = useRuleCredential(scope);
+  const localAdmin = useLocalAdminPreview();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -148,6 +166,8 @@ export function RuleAccess({ scope }: { scope: Scope }) {
     }
   }
 
+  if (scope === "PLATFORM" && localAdmin && !token) return null;
+
   if (token) return <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
     <p className="font-semibold text-emerald-800">{roleLabel} connected</p>
     <button type="button" className={outlineButton} onClick={() => setMerchantDemoToken("")}>Disconnect</button>
@@ -167,7 +187,7 @@ export function RuleAccess({ scope }: { scope: Scope }) {
   </form>;
 }
 
-export function RulePreview({ proposal, mailbox }: { proposal: Proposal; mailbox?: string }) {
+export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal; mailbox?: string; profile?: BusinessProfile | null }) {
   const merchant = proposal.scope === "MERCHANT";
   const name = merchant ? proposal.name : proposal.rule.name;
   const action = merchant ? proposal.action : proposal.rule.action;
@@ -188,9 +208,12 @@ export function RulePreview({ proposal, mailbox }: { proposal: Proposal; mailbox
     <div>
       <p className="text-sm font-semibold">{logic}</p>
       <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
-        {conditions.map(({ field, operator, value }, index) => <li key={index} className="wrap-anywhere">
-          {fields[field] ?? field} {operatorLabels[operator] ?? operator} {field === mailboxField ? mailbox ?? "the specified address" : field === "product.type" ? products[String(value)] ?? value : String(value)}
-        </li>)}
+        {conditions.map(({ field, operator, value }, index) => {
+          const capability = profile?.fieldRegistry?.find(entry => entry.fieldName === field);
+          const label = capability ? policyFieldLabel(capability) : fields[field] ?? field;
+          const display = field === mailboxField ? mailbox ?? "the specified address" : field === "product.type" ? products[String(value)] ?? value : String(value);
+          return <li key={index} className="wrap-anywhere">{label} {merchantOperatorLabels[operator] ?? operator} {display}</li>;
+        })}
       </ul>
     </div>
     {!hasMailbox && <details>
@@ -214,13 +237,17 @@ export function RuleComposer({ scope, onSaved, edit, onCancel }: {
   onCancel?: () => void;
 }) {
   const token = useRuleCredential(scope);
-  return token && <ConnectedComposer key={`${token}:${edit?.id ?? ""}:${edit?.version ?? ""}`}
-    scope={scope} token={token} onSaved={onSaved} edit={edit} onCancel={onCancel} />;
+  const localAdmin = useLocalAdminPreview();
+  return (token || (scope === "PLATFORM" && localAdmin)) && <ConnectedComposer key={`${token}:${edit?.id ?? ""}:${edit?.version ?? ""}`}
+    scope={scope} token={token} localAdmin={localAdmin} onSaved={onSaved} edit={edit} onCancel={onCancel} />;
 }
 
-function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
-  scope: Scope; token: string; onSaved?: () => void; edit?: PolicyRule; onCancel?: () => void;
+function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, onSaved, edit, onCancel }: {
+  scope: Scope; token: string; localAdmin?: boolean; adminMerchantId?: string; onSaved?: () => void; edit?: PolicyRule; onCancel?: () => void;
 }) {
+  const exactEmailEdit = edit?.proposal.conditions.rules.some(condition => condition.field === mailboxField);
+  const canUseBuilder = scope === "MERCHANT" && !exactEmailEdit;
+  const [method, setMethod] = useState<"structured" | "ai">(canUseBuilder ? "structured" : "ai");
   const [instruction, setInstruction] = useState("");
   const [draft, setDraft] = useState<Interpretation | null>(null);
   const [pending, setPending] = useState<"interpret" | "save" | null>(null);
@@ -233,18 +260,20 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
   const [profileError, setProfileError] = useState("");
   const request = useRef<AbortController>(null);
   const id = useId();
-  const mailboxBlock = scope === "MERCHANT" ? parseMailboxBlock(instruction) : null;
+  const mailboxBlock = scope === "MERCHANT" && method === "ai" ? parseMailboxBlock(instruction) : null;
 
   useEffect(() => {
     const controller = new AbortController();
     const init = { signal: controller.signal };
     if (scope === "MERCHANT") {
-      void authenticatedRequest<BusinessProfile>(`${policies}/profile`, token, init)
-        .then(setProfile).catch(cause => {
+      void merchantPolicyRequest<BusinessProfile>("profile", token, init, adminMerchantId)
+        .then(result => { if (!controller.signal.aborted) setProfile(result); }).catch(cause => {
           if (!controller.signal.aborted) setProfileError(errorText(cause));
         });
     } else {
-      void authenticatedRequest<RuleCatalogue>(rulesEndpoint, token, init).then(result => setRuns(result.runs ?? [])).catch(cause => {
+      void authenticatedRequest<RuleCatalogue>(adminRulePath(rulesEndpoint, localAdmin, token), token, init).then(result => {
+        if (!controller.signal.aborted) setRuns(result.runs ?? []);
+      }).catch(cause => {
         if (!controller.signal.aborted) setRunError(errorText(cause));
       });
     }
@@ -252,7 +281,7 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
       controller.abort();
       request.current?.abort();
     };
-  }, [scope, token]);
+  }, [scope, token, localAdmin, adminMerchantId]);
 
   async function interpret(event: FormEvent) {
     event.preventDefault();
@@ -276,9 +305,10 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
         payload = { scope, instruction: instruction.trim() };
       }
       if (controller.signal.aborted) return;
-      const result = await authenticatedRequest<Interpretation>(`${composer}/interpret`, token, {
-        method: "POST", body: JSON.stringify(payload), signal: controller.signal,
-      });
+      const init = { method: "POST", body: JSON.stringify(payload), signal: controller.signal };
+      const result = scope === "MERCHANT"
+        ? await merchantPolicyRequest<Interpretation>("interpret", token, init, adminMerchantId)
+        : await authenticatedRequest<Interpretation>(adminRulePath(`${composer}/interpret`, localAdmin, token), token, init);
       if (controller.signal.aborted) return;
       if (result.proposal && result.proposal.scope !== scope) throw new Error("The proposal belongs to another rule system.");
       setDraft(result);
@@ -298,14 +328,12 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
     setPending("save");
     setError("");
     try {
-      const path = proposal.scope === "MERCHANT"
-        ? `${policies}/rules${edit ? `/${encodeURIComponent(edit.id)}` : ""}`
-        : `${composer}/platform/save`;
       const payload = edit ? { proposal, expectedVersion: edit.version }
         : proposal.scope === "PLATFORM" && runId ? { proposal, runId } : { proposal };
-      const result = await authenticatedRequest<PolicySave | PlatformSave>(path, token, {
-        method: edit ? "PUT" : "POST", body: JSON.stringify(payload), signal: controller.signal,
-      });
+      const init = { method: edit ? "PUT" : "POST", body: JSON.stringify(payload), signal: controller.signal };
+      const result = proposal.scope === "MERCHANT"
+        ? await merchantPolicyRequest<PolicySave>(`rules${edit ? `/${encodeURIComponent(edit.id)}` : ""}`, token, init, adminMerchantId)
+        : await authenticatedRequest<PlatformSave>(adminRulePath(`${composer}/platform/save`, localAdmin, token), token, init);
       if (controller.signal.aborted) return;
       setSaved(result);
       onSaved?.();
@@ -324,10 +352,22 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
   const preview = saved && "preview" in saved.rule ? saved.rule.preview : saved && "preview" in saved ? saved.preview : undefined;
   const messages = [...(draft?.validation.errors ?? []), ...(draft?.validation.warnings ?? [])];
 
+  function resetDraft() {
+    setDraft(null);
+    setSaved(null);
+    setError("");
+  }
+
+  function chooseMethod(next: "structured" | "ai") {
+    if (method === next) return;
+    setMethod(next);
+    resetDraft();
+  }
+
   return <section className={panel} aria-labelledby={`${id}-title`}>
     <div>
-      <h2 id={`${id}-title`} className="text-lg font-semibold">AI rule composer</h2>
-      <p className="mt-1 text-sm text-muted">Describe the rule in Thai or English, then review the proposal before saving.</p>
+      <h2 id={`${id}-title`} className="text-lg font-semibold">{scope === "MERCHANT" ? "Merchant rule editor" : "AI rule composer"}</h2>
+      {method === "ai" && <p className="mt-1 text-sm text-muted">Describe the rule in Thai or English, then review the proposal before saving.</p>}
     </div>
     {profileError && <p role="alert" className="text-sm text-red-800">{profileError}</p>}
     {profile && <details className="text-sm text-muted">
@@ -338,14 +378,26 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
       <p>New version of <strong>{edit.proposal.name}</strong></p>
       <button type="button" className={outlineButton} disabled={pending !== null} onClick={onCancel}>{saved ? "Done" : "Cancel edit"}</button>
     </div>}
-    <form className="space-y-2.5" onSubmit={interpret}>
+    {canUseBuilder && <div role="group" aria-label="Rule authoring mode" className="flex flex-wrap gap-2">
+      <button type="button" className={method === "structured" ? primaryButton : outlineButton} aria-pressed={method === "structured"}
+        disabled={pending !== null} onClick={() => chooseMethod("structured")}>Build rule</button>
+      <button type="button" className={method === "ai" ? primaryButton : outlineButton} aria-pressed={method === "ai"}
+        disabled={pending !== null} onClick={() => chooseMethod("ai")}>AI rule composer</button>
+    </div>}
+    {method === "structured" && (profile
+      ? <StructuredRuleBuilder profile={profile} initial={edit?.proposal} disabled={pending !== null} onChange={resetDraft}
+          onPreview={proposal => {
+            setSaved(null);
+            setError("");
+            setDraft({ status: "READY", proposal, validation: { valid: true } });
+          }} />
+      : !profileError && <p role="status" className="text-sm text-muted">Loading available rule fields…</p>)}
+    {method === "ai" && <form className="space-y-2.5" onSubmit={interpret}>
       <label htmlFor={`${id}-instruction`} className="block text-sm font-semibold">Describe your rule</label>
       <textarea id={`${id}-instruction`} rows={3} maxLength={1000} className="control min-h-24 resize-y"
         aria-describedby={`${id}-instruction-help`} placeholder={prompts[scope]} value={instruction} disabled={pending !== null} onChange={event => {
           setInstruction(event.currentTarget.value);
-          setDraft(null);
-          setSaved(null);
-          setError("");
+          resetDraft();
         }} />
       <p id={`${id}-instruction-help`} className="text-xs text-muted">
         {scope === "MERCHANT" ? <>For a temporary block on one address, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out card details and credentials.</>
@@ -354,14 +406,14 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
       <button type="submit" className={ready ? outlineButton : primaryButton} disabled={!instruction.trim() || pending !== null}>
         {pending === "interpret" ? "Generating preview…" : "Generate preview"}
       </button>
-    </form>
+    </form>}
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {draft && <div className="space-y-3">
       {draft.message && <p role="status" className="text-sm text-muted">{draft.message}</p>}
       {messages.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
         {messages.map((message, index) => <li key={index}>{message}</li>)}
       </ul>}
-      {draft.proposal && <RulePreview proposal={draft.proposal} mailbox={mailboxBlock?.mailbox} />}
+      {draft.proposal && <RulePreview proposal={draft.proposal} mailbox={mailboxBlock?.mailbox} profile={profile} />}
       {ready && !saved && <>
         {scope === "PLATFORM" && runs.length > 0 && <label className="block text-sm font-semibold">Simulation run for replay (optional)
           <select className="control mt-1 max-w-md" value={runId} onChange={event => setRunId(event.currentTarget.value)} disabled={pending !== null}>
@@ -387,8 +439,9 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
 
 type RuleHistory = { rule: PolicyRule; versions: PolicyRule[] };
 
-function ConnectedPolicyRules({ token, refreshKey, onEdit }: {
-  token: string; refreshKey: number; onEdit: (rule: PolicyRule) => void;
+function ConnectedPolicyRules({ token, adminMerchantId, refreshKey, onEdit, onDelete }: {
+  token: string; adminMerchantId?: string; refreshKey: number;
+  onEdit: (rule: PolicyRule) => void; onDelete: (ruleId: string) => void;
 }) {
   const [rules, setRules] = useState<PolicyRule[]>([]);
   const [error, setError] = useState("");
@@ -398,6 +451,7 @@ function ConnectedPolicyRules({ token, refreshKey, onEdit }: {
   const [notice, setNotice] = useState("");
   const [history, setHistory] = useState<RuleHistory | null>(null);
   const [simulation, setSimulation] = useState<{ id: string; preview: PolicyPreview } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState("");
   const lifecycle = useRef<AbortController>(null);
 
   useEffect(() => () => lifecycle.current?.abort(), []);
@@ -405,33 +459,44 @@ function ConnectedPolicyRules({ token, refreshKey, onEdit }: {
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    void authenticatedRequest<{ rules: PolicyRule[] }>(`${policies}/rules`, token, { signal: controller.signal })
+    void merchantPolicyRequest<{ rules: PolicyRule[] }>("rules", token, { signal: controller.signal }, adminMerchantId)
       .then(result => { if (!controller.signal.aborted) setRules(result.rules ?? []); })
       .catch(cause => { if (!controller.signal.aborted) setError(errorText(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [token, refreshKey, revision]);
+  }, [token, adminMerchantId, refreshKey, revision]);
 
-  async function change(rule: PolicyRule, operation: "disable" | "activate" | "rollback" | "simulate" | "history", version?: number) {
+  async function change(rule: PolicyRule, operation: "disable" | "activate" | "rollback" | "simulate" | "history" | "delete", version?: number) {
     if (lifecycle.current) return;
     const controller = new AbortController();
     lifecycle.current = controller;
     setBusy(rule.id);
     setError("");
     setNotice("");
-    const path = `${policies}/rules/${encodeURIComponent(rule.id)}`;
+    const path = `rules/${encodeURIComponent(rule.id)}`;
     const { signal } = controller;
     try {
       if (operation === "history") {
-        const result = await authenticatedRequest<RuleHistory>(path, token, { signal });
+        const result = await merchantPolicyRequest<RuleHistory>(path, token, { signal }, adminMerchantId);
         if (!signal.aborted) setHistory(result);
       } else if (operation === "simulate") {
-        const result = await authenticatedRequest<{ preview: PolicyPreview }>(`${path}/simulate`, token, { method: "POST", signal });
+        const result = await merchantPolicyRequest<{ preview: PolicyPreview }>(`${path}/simulate`, token, { method: "POST", signal }, adminMerchantId);
         if (!signal.aborted) setSimulation({ id: rule.id, preview: result.preview });
+      } else if (operation === "delete") {
+        await merchantPolicyRequest<unknown>(path, token, {
+          method: "DELETE", body: JSON.stringify({ expectedVersion: rule.version }), signal,
+        }, adminMerchantId);
+        if (signal.aborted) return;
+        setConfirmDelete("");
+        setHistory(null);
+        setSimulation(null);
+        setNotice(`Deleted ${rule.proposal.name}.`);
+        setRevision(value => value + 1);
+        onDelete(rule.id);
       } else {
-        const result = await authenticatedRequest<PolicySave>(`${path}/${operation}`, token, {
+        const result = await merchantPolicyRequest<PolicySave>(`${path}/${operation}`, token, {
           method: "POST", body: JSON.stringify({ version, expectedVersion: rule.version }), signal,
-        });
+        }, adminMerchantId);
         if (signal.aborted) return;
         setHistory(null);
         setSimulation(null);
@@ -477,8 +542,18 @@ function ConnectedPolicyRules({ token, refreshKey, onEdit }: {
               onClick={() => void change(rule, "disable")}>Disable</button>}
             {rule.status === "PENDING_APPROVAL" && <button type="button" className={outlineButton} disabled={Boolean(busy)}
               onClick={() => void change(rule, "activate")}>Activate</button>}
+            <button type="button" className={outlineButton} disabled={Boolean(busy) || confirmDelete === rule.id}
+              onClick={() => setConfirmDelete(rule.id)}>Delete</button>
           </div>
         </div>
+        {confirmDelete === rule.id && <div className="space-y-2 rounded-md border border-red-200 bg-red-50 p-3" aria-label="Confirm rule deletion">
+          <p className="text-sm text-red-900">Delete <strong>{rule.proposal.name}</strong> from future decisions? Saved transactions retain their rule versions.</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="rounded-md bg-red-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-55"
+              disabled={Boolean(busy)} onClick={() => void change(rule, "delete")}>Confirm deletion</button>
+            <button type="button" className={outlineButton} disabled={Boolean(busy)} onClick={() => setConfirmDelete("")}>Cancel</button>
+          </div>
+        </div>}
         {busy === rule.id && <p role="status" className="text-xs text-muted">Working…</p>}
         {simulation?.id === rule.id && <div role="status" className="rounded-md bg-paper p-3">
           <p className="text-sm font-semibold">Test result</p>
@@ -514,15 +589,21 @@ function PolicySample({ preview }: { preview: PolicyPreview }) {
   </div>;
 }
 
-function MerchantPolicyWorkspace({ token }: { token: string }) {
+function MerchantPolicyWorkspace({ token, adminMerchantId }: { token: string; adminMerchantId?: string }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [edit, setEdit] = useState<PolicyRule>();
   return <>
     <div id="merchant-policy-editor" tabIndex={-1}>
-      <RuleComposer scope="MERCHANT" edit={edit} onCancel={() => setEdit(undefined)} onSaved={() => setRefreshKey(value => value + 1)} />
+      <ConnectedComposer key={`${edit?.id ?? ""}:${edit?.version ?? ""}`} scope="MERCHANT" token={token} adminMerchantId={adminMerchantId}
+        edit={edit} onCancel={() => setEdit(undefined)} onSaved={() => setRefreshKey(value => value + 1)} />
     </div>
-    <ConnectedPolicyRules token={token} refreshKey={refreshKey} onEdit={setEdit} />
+    <ConnectedPolicyRules token={token} adminMerchantId={adminMerchantId} refreshKey={refreshKey} onEdit={setEdit}
+      onDelete={id => setEdit(current => current?.id === id ? undefined : current)} />
   </>;
+}
+
+export function AdminMerchantPolicyWorkspace({ merchantId, token }: { merchantId: string; token: string }) {
+  return <MerchantPolicyWorkspace key={`${merchantId}:${token}`} token={token} adminMerchantId={merchantId} />;
 }
 
 export function MerchantRulesWorkspace() {

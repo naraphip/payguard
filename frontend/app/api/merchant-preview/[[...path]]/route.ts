@@ -4,27 +4,43 @@ type RouteContext = { params: Promise<{ path?: string[] }> };
 
 const loopback = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const draftId = /^[a-f0-9]{32}$/;
 const noStore = { "Cache-Control": "no-store" };
 
 function allowed(method: string, path: string[]) {
   const [merchant, collection, record, action] = path;
   if (path.length === 0) return method === "GET" || method === "POST";
+  if (merchant === "admin") {
+    const route = path.slice(1).join("/");
+    if (route === "system/rules") return method === "GET" || method === "POST";
+    if (route === "system/rules/preview") return method === "POST";
+    if (collection === "system" && record === "rules" && path.length === 4 && draftId.test(action)) return method === "PUT" || method === "DELETE";
+    if (route === "booking/ai-configuration/jev") return method === "GET" || method === "PUT";
+    if (["booking/ai-configuration/jev/test", "booking/rule-composer/interpret", "booking/rule-composer/platform/save"].includes(route)) return method === "POST";
+    return collection === "booking" && record === "rule-composer" && action === "platform" && path.length === 6 &&
+      draftId.test(path[4]) && ((method === "GET" && path[5] === "versions") || (method === "POST" && path[5] === "submit"));
+  }
   if (!uuid.test(merchant)) return false;
-  if (path.length === 1) return method === "GET" || method === "PUT" || method === "DELETE";
+  if (path.length === 1) return ["GET", "PUT", "DELETE"].includes(method);
   if (path.length === 2) {
-    return (method === "POST" && (collection === "scenarios" || collection === "access-token"))
-      || (method === "GET" && (collection === "policies" || collection === "audit"))
-      || (collection === "transactions" && (method === "GET" || method === "POST"));
+    if (collection === "policies" || collection === "transactions") return method === "GET" || method === "POST";
+    if (collection === "access-token" || collection === "policy-interpret") return method === "POST";
+    return ["audit", "test-context", "policy-profile"].includes(collection) && method === "GET";
   }
   if ((collection === "jev" || collection === "platform") && record === "rules") {
-    return path.length === 3 && method === "GET";
+    if (path.length === 3) return method === "GET" || method === "POST";
+    if (path.length !== 4) return false;
+    if (action === "preview") return method === "POST";
+    const validRule = collection === "jev" ? /^jev-rule-[0-9a-f]{64}$/.test(action) : draftId.test(action);
+    return validRule && (method === "PUT" || method === "DELETE");
   }
   if (!uuid.test(record)) return false;
-  if (path.length === 3) {
-    return (method === "PUT" && collection === "scenarios")
-      || (method === "GET" && (collection === "transactions" || collection === "policies"));
+  if (collection === "policies") {
+    if (path.length === 3) return ["GET", "PUT", "DELETE"].includes(method);
+    return path.length === 4 && method === "POST" && ["activate", "disable", "rollback", "simulate"].includes(action);
   }
-  return path.length === 4 && method === "POST" && collection === "transactions" && action === "decision";
+  return collection === "transactions" && ((path.length === 3 && method === "GET") ||
+    (path.length === 4 && method === "POST" && action === "decision"));
 }
 
 async function proxy(request: NextRequest, { params }: RouteContext) {
@@ -35,8 +51,8 @@ async function proxy(request: NextRequest, { params }: RouteContext) {
   }
 
   const path = (await params).path ?? [];
-  if (request.method !== "GET" && uuid.test(path[0]) && (path[1] === "jev" || path[1] === "platform") && path[2] === "rules") {
-    return Response.json({ error: "Connect with a platform administrator token to write or preview rules." }, { status: 403, headers: noStore });
+  if (request.headers.has("authorization")) {
+    return Response.json({ error: "Use the authenticated API for bearer credentials." }, { status: 403, headers: noStore });
   }
   if (!allowed(request.method, path)) {
     return Response.json({ error: "Merchant preview route not found." }, { status: 404, headers: noStore });
@@ -48,7 +64,8 @@ async function proxy(request: NextRequest, { params }: RouteContext) {
   }
 
   const backend = process.env.PAYGUARD_BOOKING_API_URL ?? process.env.PAYGUARD_API_URL ?? "http://127.0.0.1:8081";
-  const endpoint = `${backend.replace(/\/$/, "")}/api/v1/booking/demo/merchants${path.length ? `/${path.join("/")}` : ""}${write ? "" : request.nextUrl.search}`;
+  const resource = path[0] === "admin" ? path.slice(1) : ["booking", "demo", "merchants", ...path];
+  const endpoint = `${backend.replace(/\/$/, "")}/api/v1/${resource.join("/")}${write ? "" : request.nextUrl.search}`;
   try {
     const headers = new Headers({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
     const creationKey = path.length === 0 && request.method === "POST" ? request.headers.get("Idempotency-Key") : null;

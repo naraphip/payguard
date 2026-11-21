@@ -115,7 +115,7 @@ function Evidence({ decision, run, contact }: { decision: Decision; run: Run; co
       <dl className="mb-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
         {[
           ["Platform action", d.platformDecision],
-          ["Merchant policy", d.merchantPolicyDecision],
+          ["Batch test policy", d.merchantPolicyDecision],
           ["Event email domain", d.event.domain],
           ["Final action source", d.actionSource],
           ["Jev status", d.jevStatus],
@@ -275,12 +275,20 @@ export default function Home() {
       <main className="mx-auto max-w-[1328px] space-y-8 px-4 pt-7 pb-12 sm:px-8 sm:pt-10">
         <header>
           <h1 className="text-[34px] leading-tight font-bold tracking-[-0.035em] text-[#2d1e38] sm:text-[44px]">Simulation Lab</h1>
-          <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#5f516d] sm:text-[15px]">Simulate a travel booking, store checkout, or gateway authorization and review the risk decision.</p>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#5f516d] sm:text-[15px]">Test the selected merchant’s active rules or generate a batch of synthetic transactions.</p>
+          <nav aria-label="Simulation Lab sections" className="mt-4 flex flex-wrap gap-2">
+            <a className={outline} href="#merchant-rules">Test merchant rules</a>
+            <a className={outline} href="#batch-simulation">Run a batch simulation</a>
+          </nav>
         </header>
 
-        <DemoScenarioSimulation />
+        <div id="merchant-rules" className="scroll-mt-24"><DemoScenarioSimulation /></div>
+        <div id="batch-simulation" className="scroll-mt-24 border-t border-line pt-6">
+          <h2 className="text-2xl font-semibold tracking-tight" id="batch-simulation-title">Batch simulation</h2>
+          <p className="mt-1 text-sm text-[#5f516d]">Generate traffic to test platform rules and batch settings.</p>
+        </div>
 
-        <form className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_368px] xl:gap-6"
+        <form aria-labelledby="batch-simulation-title" className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_368px] xl:gap-6"
           onSubmit={start} onInvalidCapture={event => {
             const details = (event.target as HTMLElement).closest("details");
             if (details) details.open = true;
@@ -338,7 +346,7 @@ export default function Home() {
                     }} />
                   <span className="text-xs font-normal text-muted">Enter a token to scope linked entities and saved runs to your demo merchant.</span>
                 </Field>
-                <Field label="Scenario"><select className="control" value={config.scenario} onChange={e => update("scenario", e.target.value as Scenario)}>
+                <Field label="Traffic pattern"><select className="control" value={config.scenario} onChange={e => update("scenario", e.target.value as Scenario)}>
                   <option value="mixed">Mixed traffic</option><option value="normal">Normal traffic</option><option value="fraud">Fraud ring</option>
                 </select></Field>
                 <div className="grid grid-cols-3 gap-2 sm:gap-3">
@@ -385,7 +393,7 @@ export default function Home() {
             <div className="space-y-2.5">
               <button type="submit" disabled={controlsLocked || reportBusy} className="shop-primary">
                 {busy ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-                {busy ? "Running simulation…" : "Run simulation"}
+                {busy ? "Running batch simulation…" : "Run batch simulation"}
               </button>
               {cartProduct && !scoped ? <TestPayment config={checkout} runId={runMatchesCart && run ? run.id : null} amount={subtotal}
                 disabledReason={paymentDisabled} onBusyChange={setPaymentBusy} /> : <p className="text-xs text-[#5f516d]">
@@ -397,12 +405,12 @@ export default function Home() {
 
         <section className="space-y-4" aria-labelledby="results-title">
           <div>
-            <h2 id="results-title" className="text-2xl font-semibold tracking-tight">Simulation results</h2>
+            <h2 id="results-title" className="text-2xl font-semibold tracking-tight">Batch simulation results</h2>
             <p className="mt-1 text-sm text-[#5f516d]">Inspect checkout decisions and score the run against synthetic labels.</p>
           </div>
           <Summary run={run} />
           <div className="min-w-0 space-y-5" aria-busy={busy}>
-            <section id="fraud-network" className={panel} aria-labelledby="events">
+            <section id="fraud-network" className={`${panel} scroll-mt-24`} aria-labelledby="events">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-4 sm:p-5">
                 <h2 id="events" className="font-semibold">Event decisions</h2>
                 {run && <span className="rounded-md bg-paper px-2 py-1 text-xs tabular-nums text-muted">Seed {run.config.seed}</span>}

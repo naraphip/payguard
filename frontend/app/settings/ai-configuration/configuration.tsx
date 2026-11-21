@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { adminRulePath, useLocalAdminPreview } from "../../local-admin-preview";
 import { RuleAccess, useRuleCredential } from "../rule-composer";
 import { outlineButton, primaryButton, ruleRequest } from "../system-rules/contracts";
 
@@ -28,10 +29,11 @@ type Diagnostic = {
   message?: string;
 };
 
-function request<T>(token: string, path = endpoint, init?: RequestInit) {
-  const headers = new Headers({ Authorization: `Bearer ${token}` });
+function configRequest<T>(token: string, local: boolean, path = endpoint, init?: RequestInit) {
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init?.body) headers.set("Content-Type", "application/json");
-  return ruleRequest<T>(path, { ...init, headers, cache: "no-store" });
+  return ruleRequest<T>(adminRulePath(path, local, token), { ...init, headers, cache: "no-store" });
 }
 
 function errorMessage(error: unknown) {
@@ -40,17 +42,18 @@ function errorMessage(error: unknown) {
 
 export function AIConfiguration() {
   const token = useRuleCredential("PLATFORM");
+  const local = useLocalAdminPreview();
   return <main className="mx-auto max-w-[1050px] space-y-5 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <header>
       <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">AI Configuration</h1>
       <p className="mt-2 text-sm text-muted">Configure and test the platform Jev advisory.</p>
     </header>
     <RuleAccess scope="PLATFORM" />
-    {token && <ConfigurationForm key={token} token={token} />}
+    {(token || local) && <ConfigurationForm key={token} token={token} local={local} />}
   </main>;
 }
 
-function ConfigurationForm({ token }: { token: string }) {
+function ConfigurationForm({ token, local }: { token: string; local: boolean }) {
   const [saved, setSaved] = useState<SavedConfig | null>(null);
   const [form, setForm] = useState<Config | null>(null);
   const [result, setResult] = useState<Diagnostic | null>(null);
@@ -67,7 +70,7 @@ function ConfigurationForm({ token }: { token: string }) {
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    void request<SavedConfig>(token, endpoint, { signal: controller.signal }).then(response => {
+    void configRequest<SavedConfig>(token, local, endpoint, { signal: controller.signal }).then(response => {
       if (!controller.signal.aborted) {
         setSaved(response);
         setForm(response.config);
@@ -79,7 +82,7 @@ function ConfigurationForm({ token }: { token: string }) {
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [token, revision]);
+  }, [token, local, revision]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,7 +98,7 @@ function ConfigurationForm({ token }: { token: string }) {
     setNotice("");
     setResult(null);
     try {
-      const response = await request<SavedConfig>(token, endpoint, {
+      const response = await configRequest<SavedConfig>(token, local, endpoint, {
         method: "PUT", body: JSON.stringify({ config: form, expectedVersion: saved.version }), signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -119,7 +122,7 @@ function ConfigurationForm({ token }: { token: string }) {
     setNotice("");
     setResult(null);
     try {
-      const response = await request<Diagnostic>(token, `${endpoint}/test`, {
+      const response = await configRequest<Diagnostic>(token, local, `${endpoint}/test`, {
         method: "POST", body: "{}", signal: controller.signal,
       });
       if (!controller.signal.aborted) setResult(response);
@@ -134,7 +137,7 @@ function ConfigurationForm({ token }: { token: string }) {
   return <section className={card} aria-labelledby="jev-configuration">
     <div>
       <h2 id="jev-configuration" className="text-lg font-semibold">Jev advisory</h2>
-      <p className="mt-1 text-sm text-muted">Saved settings apply to future merchant scenarios in Mock Checkout and Simulation Lab. The diagnostic runs separately with synthetic data. Standalone Booking Assessment uses its existing evaluator.</p>
+      <p className="mt-1 text-sm text-muted">Saved settings apply to new merchant tests in Mock Checkout and Simulation Lab. The diagnostic uses synthetic data.</p>
     </div>
     {loading && <p role="status" className="text-sm text-muted">Loading Jev configuration…</p>}
     {error && <p role="alert" className="text-sm text-red-800">{error}</p>}

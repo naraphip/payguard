@@ -4,8 +4,11 @@ import { Hotel, Package, Plane, ShoppingBag, TabletSmartphone } from "lucide-rea
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  DemoScenarioPicker, DemoScenarioResult, invalidDemoAmount, readDemoAmount, useDemoScenario,
+  DemoScenarioAccountAgeField, DemoScenarioCustomSignals, DemoScenarioEmailField, DemoScenarioPicker,
+  DemoScenarioPolicyContext, DemoScenarioResult,
+  invalidDemoAmount, readDemoAmount, useDemoScenario,
 } from "../../demo-scenario-runner";
+import type { DemoCustomSignalValues } from "../../demo-scenario-runner";
 import type { Product } from "../../types";
 import { AssessmentResult } from "../booking-assessment/assessment-result";
 import { bookingRequest, submitBookingAssessment } from "../booking-assessment/booking-api";
@@ -19,6 +22,7 @@ const products = {
   digital: { label: "Digital goods", name: "Digital gift card", detail: "One gift card with instant delivery", icon: TabletSmartphone, model: "ecommerce", price: 5000 },
 } satisfies Record<Product, { label: string; name: string; detail: string; icon: typeof Plane; model: BusinessModel; price: number }>;
 
+const standaloneProducts = Object.keys(products) as Product[];
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const panel = "min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:p-6";
 const primaryButton = "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50";
@@ -38,9 +42,38 @@ function displayAmount(amountMinor: number | undefined) {
 }
 
 export function MockCheckout() {
-  const scenarioFlow = useDemoScenario();
-  const [product, setProduct] = useState<Product>("flight_ticket");
-  const [amount, setAmount] = useState(String(products.flight_ticket.price));
+  const merchantFlow = useDemoScenario("checkout");
+  const [checkoutMode, setCheckoutMode] = useState<"merchant" | "standalone">("merchant");
+  const merchantCheckout = merchantFlow.merchantRestricted || checkoutMode === "merchant";
+
+  return <div className="space-y-5">
+    {!merchantFlow.merchantRestricted && <div role="group" aria-label="Checkout mode" className="flex flex-wrap gap-2">
+      <button type="button" aria-pressed={merchantCheckout} className={merchantCheckout ? primaryButton : secondaryButton}
+        onClick={() => setCheckoutMode("merchant")}>Merchant rules</button>
+      <button type="button" aria-pressed={!merchantCheckout} className={!merchantCheckout ? primaryButton : secondaryButton}
+        disabled={merchantFlow.submitting} onClick={() => {
+          if (merchantCheckout) merchantFlow.clearAttempt();
+          setCheckoutMode("standalone");
+        }}>Standalone checkout</button>
+    </div>}
+    {merchantCheckout ? <>
+      <section className={`${panel} space-y-3`} aria-labelledby="checkout-merchant-heading">
+        <h2 id="checkout-merchant-heading" className="text-lg font-semibold">Choose a merchant</h2>
+        <DemoScenarioPicker flow={merchantFlow} />
+      </section>
+      {merchantFlow.admin && merchantFlow.merchantId && <CheckoutForm key={merchantFlow.merchantId} flow={merchantFlow} />}
+    </> : <>
+      <p className="text-sm text-slate-600">Run a standalone assessment with a demo booking profile.</p>
+      <CheckoutForm />
+    </>}
+  </div>;
+}
+
+function CheckoutForm({ flow }: { flow?: ReturnType<typeof useDemoScenario> }) {
+  const [standaloneProduct, setStandaloneProduct] = useState<Product>("flight_ticket");
+  const [enteredAmount, setEnteredAmount] = useState<string | null>(null);
+  const [accountAgeDays, setAccountAgeDays] = useState("");
+  const [customSignals, setCustomSignals] = useState<DemoCustomSignalValues>({});
   const [email, setEmail] = useState("");
   const [sdkStatus, setSDKStatus] = useState<SDKStatus>("observed");
   const [mode, setMode] = useState<JevMode>("mock");
@@ -53,20 +86,26 @@ export function MockCheckout() {
   const [result, setResult] = useState<CheckoutResult | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
 
-  const item = products[product];
+  const product = flow ? flow.product : standaloneProduct;
+  const item = product && product !== "payment_gateway" ? products[product] : undefined;
+  const availableProducts = flow ? flow.products.filter(value => value !== "payment_gateway") : standaloneProducts;
+  const amount = enteredAmount ?? (item ? String(item.price) : "");
   const amountMinor = readDemoAmount(amount);
   const bearer = token.trim();
-  const merchantCheckout = Boolean(scenarioFlow.directory || scenarioFlow.connecting || scenarioFlow.requestedSelection);
-  const checkoutLocked = merchantCheckout ? scenarioFlow.submitting || scenarioFlow.pending !== null : busy !== null || pending !== null;
+  const checkoutLocked = flow ? !flow.ready || flow.submitting || flow.pending !== null : busy !== null || pending !== null;
+  const merchantResult = flow?.result;
+  const pendingAttempt = flow ? flow.pending : pending;
 
   useEffect(() => {
-    if (result || scenarioFlow.result) resultRef.current?.focus();
-  }, [result, scenarioFlow.result]);
+    if (result || merchantResult) resultRef.current?.focus();
+  }, [result, merchantResult]);
 
   function selectProduct(key: Product) {
-    setProduct(key);
-    setAmount(String(products[key].price));
-    setAmountError("");
+    if (flow) flow.selectProduct(key);
+    else {
+      setStandaloneProduct(key);
+      setResult(null);
+    }
   }
 
   function changeToken(value: string) {
@@ -79,7 +118,7 @@ export function MockCheckout() {
   }
 
   async function approveProfile() {
-    if (!bearer || busy) return;
+    if (!bearer || busy || !item) return;
     setBusy("approval");
     setError("");
     const setup: MerchantSetup = {
@@ -101,12 +140,16 @@ export function MockCheckout() {
 
   async function checkout(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!product || product === "payment_gateway") return;
     if (Number.isNaN(amountMinor)) {
       setAmountError(invalidDemoAmount);
       return;
     }
-    if (merchantCheckout) {
-      await scenarioFlow.submit({ source: "checkout", amountMinor, product, customerEmail: email, simulateTimeout: mode === "timeout" });
+    if (flow) {
+      await flow.submit({
+        source: "checkout", amountMinor, product, customerEmail: email, accountAgeDays, customSignals,
+        simulateTimeout: mode === "timeout",
+      });
       return;
     }
     if (!bearer || busy) return;
@@ -137,14 +180,16 @@ export function MockCheckout() {
     }
   }
 
-  return <div className="space-y-5">
+  if (!item) return flow ? <DemoScenarioPolicyContext flow={flow} /> : null;
+
+  return <>
     <form className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]" onSubmit={checkout} noValidate>
       <div className="space-y-5">
         <div className={panel}>
           <fieldset disabled={checkoutLocked}>
             <legend className="text-lg font-semibold">Choose a product</legend>
             <div className="mt-4 grid grid-cols-2 gap-2.5">
-              {(Object.keys(products) as Product[]).map(key => {
+              {availableProducts.map(key => {
                 const { label, icon: Icon, model } = products[key];
                 return <label key={key} className="flex min-w-0 cursor-pointer flex-col items-start gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50 has-checked:border-indigo-500 has-checked:bg-indigo-50 has-focus-visible:ring-2 has-focus-visible:ring-indigo-500 has-disabled:cursor-default sm:p-4">
                   <input className="sr-only" type="radio" name="checkout-product" value={key} checked={product === key} onChange={() => selectProduct(key)} />
@@ -156,36 +201,52 @@ export function MockCheckout() {
           </fieldset>
         </div>
 
+        {flow && <DemoScenarioPolicyContext flow={flow} />}
+
         <div className={panel}>
           <fieldset disabled={checkoutLocked}>
-            <legend className="text-lg font-semibold">Booking signals</legend>
-            <label htmlFor="checkout-amount" className="mt-4 block text-sm font-semibold">Booking amount</label>
+            <legend className="text-lg font-semibold">Transaction signals</legend>
+            <label htmlFor="checkout-amount" className="mt-4 block text-sm font-semibold">Booking amount in minor units</label>
             <input id="checkout-amount" className="control mt-2" inputMode="numeric" value={amount} placeholder="Optional"
               aria-invalid={!!amountError} aria-describedby="checkout-amount-help" onChange={event => {
-                setAmount(event.currentTarget.value);
+                setEnteredAmount(event.currentTarget.value);
                 setAmountError("");
+                if (flow) flow.clearAttempt();
+                else setResult(null);
               }} />
             <p id="checkout-amount-help" role={amountError ? "alert" : undefined} className={`mt-2 text-xs ${amountError ? "text-red-800" : "text-slate-600"}`}>
               {amountError || "Enter minor units. Leave blank to omit the amount."}
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              {merchantCheckout && <label className="block text-sm font-semibold">Synthetic email or domain
-                <input className="control mt-2" value={email} maxLength={320} placeholder="buyer@example.test (optional)"
-                  autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={event => setEmail(event.currentTarget.value)} />
-              </label>}
-              {!merchantCheckout && <label className="block text-sm font-semibold">SDK signal
+              {flow && <DemoScenarioEmailField value={email} onChange={value => {
+                setEmail(value);
+                flow.clearAttempt();
+              }} />}
+              {flow && <DemoScenarioAccountAgeField value={accountAgeDays} onChange={value => {
+                setAccountAgeDays(value);
+                flow.clearAttempt();
+              }} />}
+              {!flow && <label className="block text-sm font-semibold">SDK signal
                 <select className="control mt-2" value={sdkStatus} onChange={event => setSDKStatus(event.currentTarget.value === "unavailable" ? "unavailable" : "observed")}>
                   <option value="observed">Observed</option>
                   <option value="unavailable">Unavailable</option>
                 </select>
               </label>}
               <label className="block text-sm font-semibold">Jev response
-                <select className="control mt-2" value={mode} onChange={event => setMode(event.currentTarget.value === "timeout" ? "timeout" : "mock")}>
-                  <option value="mock">{merchantCheckout ? "Use configured Jev" : "Mock response"}</option>
+                <select className="control mt-2" value={mode} onChange={event => {
+                  setMode(event.currentTarget.value === "timeout" ? "timeout" : "mock");
+                  if (flow) flow.clearAttempt();
+                  else setResult(null);
+                }}>
+                  <option value="mock">{flow ? "Use configured Jev" : "Mock response"}</option>
                   <option value="timeout">Simulate timeout</option>
                 </select>
               </label>
             </div>
+            {flow && <DemoScenarioCustomSignals flow={flow} values={customSignals} onChange={values => {
+              setCustomSignals(values);
+              flow.clearAttempt();
+            }} />}
           </fieldset>
         </div>
       </div>
@@ -203,11 +264,7 @@ export function MockCheckout() {
           <dt className="text-slate-600">Booking amount</dt>
           <dd className="break-all font-semibold">{displayAmount(amountMinor)}</dd>
         </dl>
-        <fieldset className="mt-4 border-b border-slate-200 pb-4" disabled={busy !== null}>
-          <legend className="mb-2 text-sm font-semibold">Merchant scenario</legend>
-          <DemoScenarioPicker flow={scenarioFlow} allowLegacy />
-        </fieldset>
-        {!merchantCheckout && <>
+        {!flow && <>
         <label htmlFor="checkout-demo-token" className="mt-4 block text-sm font-semibold">Demo merchant token</label>
         <input id="checkout-demo-token" className="control mt-2" autoComplete="off" type="password" value={token}
           disabled={busy !== null} aria-describedby="checkout-token-help" onChange={event => changeToken(event.currentTarget.value)} />
@@ -218,15 +275,15 @@ export function MockCheckout() {
         {profileVersion && <p role="status" className="mt-2 text-xs font-medium text-emerald-800">Demo profile approved.</p>}
         </>}
         <div className="mt-4 space-y-2 border-t border-slate-200 pt-4">
-          {(merchantCheckout ? scenarioFlow.submissionError : error) && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs leading-relaxed text-red-800">{merchantCheckout ? scenarioFlow.submissionError : error}</p>}
-          <button type="submit" className={`${primaryButton} w-full`} disabled={merchantCheckout
-            ? !scenarioFlow.scenario || scenarioFlow.submitting
+          {(flow ? flow.submissionError : error) && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs leading-relaxed text-red-800">{flow ? flow.submissionError : error}</p>}
+          <button type="submit" className={`${primaryButton} w-full`} disabled={flow
+            ? !flow.ready || flow.submitting
             : !bearer || busy !== null}>
             <ShoppingBag className="size-4" aria-hidden="true" />
-            {busy === "checkout" || scenarioFlow.submitting ? "Assessing…" : (merchantCheckout ? scenarioFlow.pending : pending) ? "Retry checkout" : "Submit mock checkout"}
+            {busy === "checkout" || flow?.submitting ? "Assessing…" : pendingAttempt ? "Retry checkout" : "Submit mock checkout"}
           </button>
-          {merchantCheckout && scenarioFlow.pending && !scenarioFlow.submitting && <button type="button" className={`${secondaryButton} w-full`} onClick={scenarioFlow.clearAttempt}>Start a new checkout</button>}
-          {!merchantCheckout && pending && busy === null && <button type="button" className={`${secondaryButton} w-full`} onClick={() => {
+          {flow && pendingAttempt && !flow.submitting && <button type="button" className={`${secondaryButton} w-full`} onClick={flow.clearAttempt}>Start a new checkout</button>}
+          {!flow && pendingAttempt && busy === null && <button type="button" className={`${secondaryButton} w-full`} onClick={() => {
             setPending(null);
             setError("");
           }}>Start a new checkout</button>}
@@ -234,11 +291,11 @@ export function MockCheckout() {
         <p className="mt-3 text-xs text-slate-600">Synthetic order. No payment will be collected.</p>
       </section>
     </form>
-    {scenarioFlow.result && scenarioFlow.merchant && <div ref={resultRef} tabIndex={-1} className="scroll-mt-4 focus:outline-none" aria-label="Checkout assessment">
-      <DemoScenarioResult transaction={scenarioFlow.result} merchantName={scenarioFlow.merchant.name} />
+    {merchantResult && flow?.merchant && <div ref={resultRef} tabIndex={-1} className="scroll-mt-4 focus:outline-none" aria-label="Checkout assessment">
+      <DemoScenarioResult transaction={merchantResult} merchantName={flow.merchant.name} />
     </div>}
-    {!merchantCheckout && result && <div ref={resultRef} tabIndex={-1} className="scroll-mt-4 focus:outline-none" aria-label="Checkout assessment">
+    {!flow && result && <div ref={resultRef} tabIndex={-1} className="scroll-mt-4 focus:outline-none" aria-label="Checkout assessment">
       <AssessmentResult assessment={result.assessment} booking={result.booking} context={`${products[result.product].label} · ${products[result.product].name}`} />
     </div>}
-  </div>;
+  </>;
 }

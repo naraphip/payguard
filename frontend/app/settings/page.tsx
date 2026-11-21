@@ -6,7 +6,7 @@ import { SettingsWorkspace } from "./rule-composer";
 export const metadata: Metadata = { title: "Settings | PayGuard" };
 
 const settings = [
-  { href: "/settings/merchants", title: "Merchants", description: "Manage merchant details, booking signals, scenarios, and rules.", Icon: Building2 },
+  { href: "/settings/merchants", title: "Merchants", description: "Manage merchant details, products, signals, and rules.", Icon: Building2 },
   { href: "/settings/ai-configuration", title: "AI Configuration", description: "Manage the platform Jev advisory settings.", Icon: Sparkles },
 ];
 

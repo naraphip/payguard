@@ -8,6 +8,7 @@ import { examplePrompts, parseProposal, type Proposal } from "./proposal";
 type Snapshot = { version: string; rules: (Proposal & { id: string })[] };
 type Preview = { evaluated: number; matched: number; missing: number };
 type Message = { role: "You" | "Jev Rules"; text: string };
+type RuleRevision = { id: string; version: string };
 
 const endpoint = "/api/v1/booking/jev/rules";
 const aiInstructions = [
@@ -40,6 +41,8 @@ export function JevRulesPanel({ merchant }: {
   const [messages, setMessages] = useState<Message[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [editing, setEditing] = useState<RuleRevision | null>(null);
+  const [removing, setRemoving] = useState<RuleRevision | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -57,7 +60,7 @@ export function JevRulesPanel({ merchant }: {
     try {
       const candidate = parseProposal(input);
       if (merchant && candidate.conditions.some(condition => condition.signal !== "amountMinor")) {
-        throw new Error("Merchant scenarios support booking amount conditions in this demo.");
+        throw new Error("Merchant Jev review rules support booking amount conditions.");
       }
       setProposal(candidate);
       reply = "Draft ready for review.";
@@ -69,21 +72,54 @@ export function JevRulesPanel({ merchant }: {
     setInput("");
   }
 
-  async function request(operation: "load" | "preview" | "push") {
-    if (!canRequest || (operation !== "load" && (!proposal || !canEdit))) return;
+  function changeInput(value: string) {
+    setInput(value);
+    if (!editing) return;
+    setProposal(null);
+    setPreview(null);
+  }
+
+  function editRule(rule: Snapshot["rules"][number], version: string) {
+    setEditing({ id: rule.id, version });
+    setRemoving(null);
+    setInput(JSON.stringify({ name: rule.name, action: rule.action, conditions: rule.conditions }, null, 2));
+    setProposal(null);
+    setPreview(null);
+    setError("");
+    setStatus("");
+    document.getElementById("jev-rule-prompt")?.focus();
+  }
+
+  function cancelEdit() {
+    setEditing(null);
+    setInput("");
+    setProposal(null);
+    setPreview(null);
+  }
+
+  async function request(operation: "load" | "preview" | "push" | "remove") {
+    if (!canRequest || (operation !== "load" && !canEdit)) return;
+    if ((operation === "preview" || operation === "push") && !proposal) return;
+    if (operation === "remove" && (!merchant || !removing)) return;
+    const target = operation === "remove" ? removing : operation === "push" ? editing : null;
     setBusy(true);
     setError("");
     setStatus("");
     try {
-      const suffix = operation === "preview" ? "/preview" : "";
+      const suffix = target ? `/${encodeURIComponent(target.id)}` : operation === "preview" ? "/preview" : "";
+      let body: string | undefined;
+      if (operation === "remove") body = JSON.stringify({ expectedVersion: target?.version });
+      else if (operation !== "load") {
+        body = JSON.stringify(target ? { definition: proposal, expectedVersion: target.version } : proposal);
+      }
       const init = {
-        method: operation === "load" ? "GET" : "POST",
+        method: operation === "load" ? "GET" : operation === "remove" ? "DELETE" : target ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: operation === "load" ? undefined : JSON.stringify(proposal),
+        body,
       };
       let result: Snapshot | Preview;
       if (merchant) {
-        result = await merchantDemoRequest<Snapshot | Preview>(`/${merchant.id}/jev/rules${suffix}`, merchant.token, init);
+        result = await merchantDemoRequest<Snapshot | Preview>(`/${encodeURIComponent(merchant.id)}/jev/rules${suffix}`, merchant.token, init);
       } else {
         const response = await fetch(endpoint + suffix, {
           ...init, headers: { ...init.headers, Authorization: `Bearer ${token.trim()}` }, cache: "no-store",
@@ -96,10 +132,13 @@ export function JevRulesPanel({ merchant }: {
         setPreview(result as Preview);
       } else {
         setSnapshot(result as Snapshot);
+        setRemoving(null);
         if (operation === "push") {
-          setProposal(null);
-          setPreview(null);
-          setStatus("Rule is active for new booking assessments.");
+          cancelEdit();
+          setStatus(target ? "Jev review rule updated." : merchant ? "Rule is active for new merchant tests." : "Rule is active for new booking assessments.");
+        } else if (operation === "remove") {
+          if (editing?.id === target?.id) cancelEdit();
+          setStatus("Jev review rule removed.");
         }
       }
     } catch (err) {
@@ -140,10 +179,10 @@ export function JevRulesPanel({ merchant }: {
       </section>
 
       {canEdit && <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-lg font-semibold">Rule chat</h2>
+        <h2 className="text-lg font-semibold">{editing ? "Edit Jev review rule" : "Rule chat"}</h2>
         <p className="text-sm text-slate-600">Use one of the supported prompt formats, or paste rule JSON generated by your AI chat.</p>
         <div className="flex flex-wrap gap-2">
-          {examplePrompts.filter(prompt => !merchant || !/60 seconds|bookings in/i.test(prompt)).map((prompt) => <button key={prompt} className={button} disabled={busy} onClick={() => setInput(prompt)}>{prompt}</button>)}
+          {examplePrompts.filter(prompt => !merchant || !/60 seconds|bookings in/i.test(prompt)).map((prompt) => <button key={prompt} className={button} disabled={busy} onClick={() => changeInput(prompt)}>{prompt}</button>)}
         </div>
         <details className="text-sm text-slate-600">
           <summary className="cursor-pointer font-medium">Prompt for an external AI chat</summary>
@@ -159,9 +198,12 @@ export function JevRulesPanel({ merchant }: {
         </ol>}
         <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); submitPrompt(); }}>
           <label className="block text-sm font-medium" htmlFor="jev-rule-prompt">Rule prompt or JSON</label>
-          <textarea id="jev-rule-prompt" value={input} onChange={(event) => setInput(event.target.value)}
+          <textarea id="jev-rule-prompt" value={input} onChange={(event) => changeInput(event.target.value)}
             rows={3} maxLength={4000} disabled={busy} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
-          <button className={primary} disabled={busy || !input.trim()}>Draft rule</button>
+          <div className="flex flex-wrap gap-2">
+            <button className={primary} disabled={busy || !input.trim()}>{editing ? "Review changes" : "Draft rule"}</button>
+            {editing && <button className={button} type="button" disabled={busy} onClick={cancelEdit}>Cancel edit</button>}
+          </div>
         </form>
       </section>}
 
@@ -172,13 +214,15 @@ export function JevRulesPanel({ merchant }: {
         {preview && <p role="status" className="text-sm">{preview.matched} matched across {preview.evaluated} saved assessments. {preview.missing} lacked required evidence.</p>}
         <div className="flex flex-wrap gap-2">
           <button className={button} disabled={busy || !canRequest} onClick={() => void request("preview")}>Preview on saved assessments</button>
-          <button className={primary} disabled={busy || !canRequest} onClick={() => void request("push")}>Push to Jev</button>
+          <button className={primary} disabled={busy || !canRequest} onClick={() => void request("push")}>
+            {editing ? "Save Jev review rule" : merchant ? "Publish Jev review rule" : "Push to Jev"}
+          </button>
         </div>
       </section>}
 
       <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-lg font-semibold">Active rules</h2>
-        <p className="text-sm text-slate-600">{merchant ? "Published rules apply alongside the selected scenario rule." : "Default built-in · Bookings in 60 seconds ≥ 5 → Manual review"}</p>
+        <p className="text-sm text-slate-600">{merchant ? "Published review rules apply to new tests for this merchant." : "Default built-in · Bookings in 60 seconds ≥ 5 → Manual review"}</p>
         {snapshot && <>
           <p className="break-all text-sm text-slate-600">Version {snapshot.version}</p>
           {snapshot.rules.length === 0 && <p className="text-sm text-slate-600">No custom rules published.</p>}
@@ -187,6 +231,18 @@ export function JevRulesPanel({ merchant }: {
               <p className="font-medium">{rule.name}</p>
               <p className="text-sm text-slate-600">{describe(rule)} → Manual review</p>
               <p className="break-all font-mono text-xs text-slate-600">{rule.id}</p>
+              {merchant && canEdit && <div className="mt-2 flex flex-wrap items-center gap-2">
+                {removing?.id === rule.id ? <>
+                  <p className="text-sm text-slate-700">Remove this rule from the active ruleset?</p>
+                  <button className={button} type="button" disabled={busy} onClick={() => void request("remove")}>Confirm removal</button>
+                  <button className={button} type="button" disabled={busy} onClick={() => setRemoving(null)}>Cancel</button>
+                </> : <>
+                  <button className={button} type="button" disabled={busy} aria-label={`Edit ${rule.name}`}
+                    onClick={() => editRule(rule, snapshot.version)}>Edit</button>
+                  <button className={button} type="button" disabled={busy} aria-label={`Remove ${rule.name}`}
+                    onClick={() => setRemoving({ id: rule.id, version: snapshot.version })}>Remove</button>
+                </>}
+              </div>}
             </li>)}
           </ul>
         </>}

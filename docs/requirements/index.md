@@ -6,7 +6,7 @@ Add a note for each feature with its status, user need, scope, constraints, and 
 - [System Rules dashboard](system-rules.md)
 - [GitHub progress monitoring in Notion](notion-progress.md)
 - [Merchant setup](merchant-setup.md)
-- [Merchant scenarios and rules](merchant-scenarios.md)
+- [Merchant rule testing and legacy scenarios](merchant-scenarios.md)
 - [Merchant event intake contract](merchant-event-contract.md)
 - [Merchant Management](merchant-management.md)
 - [AI Rule Management](ai-rule-management.md)

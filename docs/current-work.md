@@ -7,9 +7,19 @@ Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4
 - Independent fixture and workflow YAML checks passed. A live local sync changed 18 activity records in Notion. The GitHub Actions repository secret and variable are configured.
 - The [manual GitHub Actions run](https://github.com/pwatakul/payguard/actions/runs/44868685163) succeeded. The Notion health row showed Last Success at 11:59 Bangkok time on 21 November 2026. Verification of two scheduled runs is ongoing.
 
+## Merchant rule testing and local Platform Admin
+
+Mock Checkout and Simulation Lab run the selected merchant's Platform Rules, Merchant Policies, published Jev review rules and configured Jev advisory. Choose a merchant and a product to run a test. Open its **Transactions** to compare each decision and saved version. Previous scenario transactions retain their original results and can still replay through the API. [Requirements](requirements/merchant-scenarios.md) · [Local evaluation](simulation-runbook.md#merchant-scenarios-and-jev)
+
+The opt-in loopback workspace signs requests on the Next server. Platform Admin can manage merchants, Merchant Policies, amount-based Jev review rules, Platform drafts and Jev configuration without entering an administrator key in the browser. A merchant's own credential scopes the read-only ledger and rule editor. The independent checker approves or rolls back governed global Platform revisions. Register custom fields on the merchant's **Overview** and use them in either role's structured rule editor for that merchant. The same field catalogue drives both test forms. [Decision Engine](requirements/decision-engine.md) · [Custom field and policy contract](requirements/ai-rule-management.md#merchant-business-context-and-fields)
+
+- Independent HTTP checks against isolated Go, Next.js and PostgreSQL verified tokenless administrator CRUD for merchants, merchant policies, Jev review rules, and local and global Platform drafts. They covered Jev configuration, rejected invalid origins and unauthorized credentials or tenants, and compared custom title and country evidence, missing fields, temporary exact-email matching and immutable replays from both test sources.
+- In the isolated browser preview, Platform Admin created and activated a policy for a registered ticket-title field without a browser token prompt. Physical-goods tests at 7,900 minor units in Mock Checkout and Simulation Lab each returned **High risk** and **Block** for a title containing `Disney`. Both records appeared in the same merchant's ledger and showed Mock Jev's **Low risk** answer separately.
+- The standard and race Go suites each passed 285 tests and subtests with zero failures or skips against isolated PostgreSQL. TypeScript checking and the isolated Next.js production build passed.
+
 ## Decision Engine consolidation
 
-The [Decision Engine](requirements/decision-engine.md) groups global Platform Rules, Merchant Rules, and administrator AI Configuration. The selected merchant's details retain booking review rule management and move scoped profile information to Advanced Risk Configuration. The combined backend uses upstream Jev for new merchant scenario transactions. Deployment environment settings provide the default until an administrator saves a configuration version. A saved version controls new merchant scenario evaluations. The diagnostic still uses its fixed synthetic fixture. Legacy Booking API and batch simulation keep their own mock assessment paths, and saved transactions retain their original results.
+This earlier slice grouped global Platform Rules, Merchant Rules, and administrator AI Configuration and introduced versioned Jev settings. It used a standalone synthetic diagnostic and scenario-based transactions. [Current Decision Engine contract](requirements/decision-engine.md)
 
 ### Integrated verification
 
@@ -26,7 +36,7 @@ Before the upstream live Jev integration was combined with the Decision Engine c
 
 ## Merchant Management
 
-The [Merchant Management slice](requirements/merchant-management.md) adds searchable and paginated directory reads, a persistent detail workspace, stored transaction metrics and filters, read-only policy inspection for Platform Admin, and a merchant-scoped audit view. It reuses the existing Sandbox merchant IDs, credentials, scenario selection, and transaction ledger. The production event contract from the team Sheets remains design input. The current Booking API retains its v1 validation. [Local workflow](simulation-runbook.md#merchant-management)
+The original Merchant Management slice added searchable and paginated directory reads, a persistent detail workspace, stored transaction metrics and filters, policy history and a merchant-scoped audit view. The current workspace uses the original Sandbox merchant IDs, credentials and ledger. The production event contract from the team Sheets remains design input. The current Booking API retains its v1 validation. [Local workflow](simulation-runbook.md#merchant-management)
 
 - Before Decision Engine consolidation, the Merchant Management standard and race suites on Go 1.26 each passed 248 tests and subtests with no failures or skips. Go vet, Compose configuration validation, whitespace checks, and the Node.js 24 TypeScript check and production build passed.
 - The dedicated PostgreSQL management test covered legacy response compatibility, pagination, search and sort, real aggregates and ledger filters, scoped rule history, audit and revocation, and one-time issuance. Retrying merchant creation with the same idempotency key returned 409 without reissuing the credential.
@@ -44,13 +54,15 @@ The [AI Rule Management slice](requirements/ai-rule-management.md) uses direct O
 - An isolated live direct OpenAI smoke test with `gpt-4.1-mini` returned Go-validated exact-domain flight proposals for Thai and English prompts using `example.test` in 5.10 s and 1.87 s respectively. The smoke test stopped at interpretation.
 - The team Sheet status for PG-16 in `01 ACTION PLAN LATEST!H18` was set to **Done** and read back. This status covers the typed product modules and separation of merchant policy resolution tracked in that row. [Action plan](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=260117)
 
-## Merchant scenarios and Jev
+## Historical merchant scenarios and Jev
 
-The local preview implements a runnable slice of the [merchant scenarios requirements](requirements/merchant-scenarios.md). Under **Merchants**, a demo administrator can create and rename merchants and save multiple named scenarios. Each scenario previews and versions one booking amount threshold rule. Created merchants receive a scoped access token.
+The following workflow and results document the original merchant scenario preview. Current tools select the merchant and product directly. [Current requirements](requirements/merchant-scenarios.md)
 
-Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab select a merchant and scenario and save a decision with its source, reasons, and versions. Platform administrators can review transactions across active merchants and record a disposition alongside the saved assessment. A merchant credential opens a read-only list of its own transactions and results. [Evaluation steps](simulation-runbook.md#merchant-scenarios-and-jev)
+The original local preview implemented the scenario-based requirements. The original **Merchants** directory let demo administrators create and rename merchants and save multiple named scenarios, each with one booking amount threshold. Creation issued a scoped access token.
 
-The [original merchant scenario preview](http://127.0.0.1:3001/settings/merchants) uses a structured threshold form and direct demo review. [AI Rule Management](#ai-rule-management) adds the composer and separate Merchant Policy engine. The full HOLD lifecycle in this merchant workspace remains open.
+Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab saved rules, sources, and reasons for the selected merchant and scenario. Platform Admin could record a disposition alongside the saved assessment. Merchants could view their own ledger. [Current evaluation steps](simulation-runbook.md#merchant-scenarios-and-jev)
+
+The original preview used a structured threshold form and direct demo review. The later AI Rule Management release added the composer and separate Merchant Policy engine. [AI Rule Management](#ai-rule-management) The full HOLD lifecycle in this merchant workspace remains open.
 
 The upstream live Jev slice uses the OpenRouter Decisions API from Go in the two merchant-selected tools. Absent a saved AI Configuration version, the sandbox can enable it with `PAYGUARD_AI_MODE=live` and a server-side `OPENROUTER_API_KEY`. The pinned default model is `typesafe/jev-1.14`. With an observed amount, the stored result includes the typed Jev choice, provider decision ID, and served model when available. Local review rules can escalate the assessment, and a provider failure sends the case to manual review. The integration sends only the booking amount, scenario threshold, and whether a configured review rule matched. Credentials stay server-side. The deployment default is Mock. [Team Blueprint](https://docs.google.com/spreadsheets/d/1bW-Vv10o795JTBwESZnbeY9URWNRkXN3gFVWjCTXX6c/edit#gid=1604066438) · [OpenRouter Decisions API for Jev](https://openrouter.ai/typesafe/jev-1.14)
 
@@ -58,7 +70,7 @@ Before consolidation, independent Chrome verification on port 3001 recorded live
 
 The upstream backend passed `go test ./...` and `go vet ./...`. Tests covered the outbound evidence fields, typed response validation, provider failures, timeout, and replay flags. The Next.js production build and both local Compose configuration checks passed. Docker reported both app services healthy.
 
-The next merchant assessment plan exposes `LOW_RISK`, `HIGH_RISK`, and `REVIEW`. **Review** covers both flagged cases and **Unresolved** assessments. Jev evidence, manual disposition, transaction stage, and payment action remain separate. The high-risk trigger and precedence are pending policy decisions. This is a planned contract update. [Planned PayGuard risk results](requirements/merchant-scenarios.md#planned-payguard-risk-results)
+The earlier merchant assessment plan proposed `LOW_RISK`, `HIGH_RISK`, and `REVIEW`. **Review** covers both flagged cases and **Unresolved** assessments. Jev evidence, manual disposition, transaction stage, and payment action remain separate. The high-risk trigger and precedence are pending policy decisions. See the current rules section for implemented behavior. [Planned PayGuard risk results](requirements/merchant-scenarios.md#planned-payguard-risk-results)
 
 The opt-in loopback preview opens the Merchants workspace and scenario pickers as a demo administrator. Set the Next server’s `PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN` to the API’s demo administrator token to enable it. The server uses that token for the loopback proxy. After creating a merchant, the administrator can copy that merchant’s scoped access token from the one-time confirmation. The old Risk Operations route redirects to **Merchants → Transactions** in this preview. Standalone routes and the ordinary authenticated flow remain available when the opt-in is disabled.
 

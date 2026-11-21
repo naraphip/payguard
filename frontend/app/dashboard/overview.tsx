@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Building2, ClipboardList } from "lucide-react";
-import { loadLocalMerchantDirectory, merchantDemoRequest, policyActionLabels } from "../merchant-demo";
+import { loadLocalMerchantDirectory, merchantDemoRequest, merchantOutcomeLabels, policyActionLabels } from "../merchant-demo";
 import type { DemoDirectory, DemoTransaction } from "../merchant-demo";
 import { useWorkspaceView } from "../workspace-view";
 import { useRuleCredential } from "../settings/rule-composer";
 import { merchantDetailsHref } from "../settings/merchants/management-contracts";
 
 type DashboardData = { merchantCount: number; transactions: (DemoTransaction & { merchantName: string })[] };
-const outcomeLabels = { LOW_RISK: "Low risk", REVIEW: "Review", UNRESOLVED: "Unresolved" };
 
 export function DashboardOverview() {
   const merchantView = useWorkspaceView() === "merchant";
@@ -90,8 +89,8 @@ function ConnectedOverview({ token, merchantView }: { token: string; merchantVie
           {data.transactions.slice(0, 10).map(item => <li key={`${item.merchantId}:${item.id}`}>
             <Link href={merchantDetailsHref(item.merchantId, "transactions", item.id)}
               className="flex flex-wrap items-center justify-between gap-2 py-3 hover:text-accent">
-              <span className="text-sm"><strong>{item.merchantName}</strong> · {item.scenarioName}</span>
-              <span className="text-sm text-muted">{item.policyDecision ? policyActionLabels[item.policyDecision.finalDecision.action] ?? item.policyDecision.finalDecision.action : outcomeLabels[item.outcome]}</span>
+              <span className="text-sm"><strong>{item.merchantName}</strong> · {item.source === "checkout" ? "Mock Checkout" : "Simulation Lab"}</span>
+              <span className="text-sm text-muted">{item.policyDecision ? policyActionLabels[item.policyDecision.finalDecision.action] ?? item.policyDecision.finalDecision.action : merchantOutcomeLabels[item.outcome]}</span>
             </Link>
           </li>)}
           </ul>}

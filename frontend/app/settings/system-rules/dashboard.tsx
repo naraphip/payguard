@@ -212,6 +212,7 @@ export function SystemRulesDashboard({ request = globalRuleTransport, merchantNa
       runs={catalogue.runs}
       onClose={() => setEditor(null)}
       onSaved={saved}
+      onDeleted={() => { setEditor(null); setNotice("Draft deleted."); refresh(); }}
     />}
   </>;
 }
