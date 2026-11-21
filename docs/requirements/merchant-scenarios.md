@@ -43,6 +43,22 @@ The two merchant-selected tools use a typed choice question through the OpenRout
 
 The scenario threshold and published merchant review rules are evaluated locally and can escalate the final assessment to **Review**. Preserve the original Jev choice separately, so the transaction shows the model response and which local rules matched. A missing amount, simulated timeout, or provider failure routes the case to manual review as **Unresolved**. The batch simulator and standalone Scoring Profile workflow have their own mock paths.
 
+## Planned PayGuard risk results
+
+Merchant-selected Mock Checkout and the single-booking **Merchant scenario simulation** will expose exactly three top-level PayGuard risk results.
+
+| Risk result | Meaning |
+| --- | --- |
+| `LOW_RISK` | The assessment completed with sufficient evidence and no condition requiring review or high-risk classification. |
+| `HIGH_RISK` | The assessment meets an approved high-risk policy. The trigger and precedence are open decisions. |
+| `REVIEW` | Local rules flagged the case, Jev recommended review, or the assessment is unresolved. Keep the reason visible. |
+
+Within `REVIEW`, a flagged or recommended review records the matching threshold or rule, or the Jev recommendation. The existing threshold still flags review at or above the configured amount. Use the `UNRESOLVED` reason for missing required evidence, a provider failure, or a timeout. Route unresolved cases to manual review and retain the specific reason.
+
+Store the original Jev choice and provider status separately from the PayGuard risk result. Display manual review state and disposition separately as well. A disposition preserves the automated record and its evidence. The transaction stage and any payment action are independent fields.
+
+For historical transactions, keep the stored outcomes and audit evidence. When displaying a historical `UNRESOLVED` result in the three-result view, present it as `REVIEW` with the `UNRESOLVED` reason and the original details. Historical `LOW_RISK` and `REVIEW` map directly to their corresponding results. Replays continue to use the saved assessment.
+
 ## Proposed first release defaults
 
 - Allow one rule-set version per scenario to be designated for testing at a time. Keep prior versions available in completed test results.
@@ -50,9 +66,9 @@ The scenario threshold and published merchant review rules are evaluated locally
 - When a scenario changes, keep the previously selected version traceable and identify it as based on the earlier scenario. Allow users to regenerate and review a replacement.
 - Start with the business models, stages, and signals supported by the local demo where both tools can evaluate the selected scenario. Keep existing demo merchants and synthetic test workflows usable. An operator can pick an authorized demo merchant without entering that merchant’s token again in each tool.
 - The merchant workspace records the administrator’s direct disposition with the acting user and timestamp. The standalone operations workflow retains its separate HOLD lifecycle.
-- In the sandbox, if Jev times out or fails before returning a decision, PayGuard records the failure, marks the assessment **Unresolved**, and routes the transaction to manual review. The workflow records outcomes and review activity without taking a payment action.
+- In the planned result model, missing required evidence, a Jev timeout, or a Jev failure yields `REVIEW` with the `UNRESOLVED` reason and a manual review handoff. Retain the specific cause and the observed evidence.
 
-## Mock Jev result examples
+## Current mock Jev result examples
 
 These examples use the same illustrative booking amount of **50,000 minor units** for Demo Merchant A. Decision labels and rule details are examples for validating the flow. In both tools, the result identifies the merchant, scenario revision, rule-set version, and that Jev is mocked. The queue column describes the expected merchant transaction state for a checkout.
 
@@ -80,10 +96,13 @@ These examples use the same illustrative booking amount of **50,000 minor units*
 14. Cancel deletion of a test merchant and verify it remains available. Then confirm deletion and verify it disappears from the directory and both test pickers after reload, its issued token no longer works, and another merchant is unaffected. Verify historical records remain stored.
 15. Open Platform Admin Dashboard before submitting transactions and verify its empty state. Submit a test and confirm that the dashboard and ledger show the saved record and that the dashboard links to its detail.
 
+For the planned result model, check both merchant-selected tools with a complete low-risk assessment, an amount exactly at the review threshold, a Jev recommendation, and unresolved cases for missing evidence, timeout, and provider failure. Verify the same three-result vocabulary in both tools and the saved transaction view. Add a high-risk fixture once its trigger is approved. Verify the historical `UNRESOLVED` mapping and that a replay or manual disposition preserves the original result, provider evidence, transaction stage, and payment action.
+
 ## Open decisions
 
 - Which inputs the AI generator accepts, which may use free text, and which provider or model will be used.
-- The production decision vocabulary and the resolution policy for timeout or failure beyond the sandbox.
+- Which signals or approved rules trigger `HIGH_RISK` and how it takes precedence when review or unresolved conditions also apply.
+- The production payment and review workflow policies after a risk result is recorded.
 - How incoming transactions select a scenario outside the demo, and whether presets or shared templates are needed.
 - Which production administrator permissions govern approving and activating rule versions or deciding transaction cases.
 - How the existing browser-local setup and any existing demo merchant profiles should be imported or linked to the new directory.

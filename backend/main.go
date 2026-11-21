@@ -93,7 +93,11 @@ func main() {
 	mux.HandleFunc("GET /api/v1/booking/events/{id}/lineage", bookingRisk.readLineage)
 	mux.HandleFunc("POST /api/v1/booking/shadow", bookingRisk.shadowBookings)
 	registerBookingOps(mux, a.repo, bookingAuth, a.secret)
-	registerMerchantDemo(mux, a.repo, os.Getenv("PAYGUARD_DEMO_ADMIN_TOKEN"), merchantJev)
+	adminToken := os.Getenv("PAYGUARD_DEMO_ADMIN_TOKEN")
+	registerMerchantDemo(mux, a.repo, adminToken, merchantJev)
+	registerRuleComposer(mux, a, adminToken)
+	registerJevAIConfiguration(mux, a.repo, adminToken, merchantJev)
+	registerPlatformRuleGovernance(mux, a.repo, adminToken, os.Getenv("PAYGUARD_PLATFORM_RULE_CHECKER_TOKEN"))
 	registerBookingDossiers(mux, a.repo, bookingAuth)
 	registerBookingGovernance(mux, a.repo, bookingAuth)
 	go a.repo.runBookingDossiers(ctx)
@@ -105,9 +109,9 @@ func main() {
 	mux.HandleFunc("GET /api/v1/simulation/checkout/config", checkout.config)
 	mux.HandleFunc("POST /api/v1/simulation/checkout/charges", checkout.create)
 	mux.HandleFunc("GET /api/v1/system/rules", a.readRules)
-	mux.HandleFunc("POST /api/v1/system/rules", a.createRule)
-	mux.HandleFunc("PUT /api/v1/system/rules/{id}", a.updateRule)
-	mux.HandleFunc("POST /api/v1/system/rules/preview", a.previewRules)
+	mux.HandleFunc("POST /api/v1/system/rules", platformRuleWrite(a.repo, adminToken, a.createRule))
+	mux.HandleFunc("PUT /api/v1/system/rules/{id}", platformRuleWrite(a.repo, adminToken, a.updateRule))
+	mux.HandleFunc("POST /api/v1/system/rules/preview", platformRuleWrite(a.repo, adminToken, a.previewRules))
 	srv := &http.Server{
 		Addr: env("PAYGUARD_ADDR", "127.0.0.1:8081"), Handler: mux,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
@@ -191,6 +195,11 @@ func (a app) createSimulation(w http.ResponseWriter, r *http.Request, tenant str
 		unavailable(w, err)
 		return
 	}
+	platformRules, err := a.repo.activePlatformRules(ctx)
+	if err != nil {
+		unavailable(w, err)
+		return
+	}
 	events, truth := generate(request.Config, tenant, a.secret)
 	counter := redisVelocity{a.redis, "payguard:" + tenant + ":" + request.ID + ":" + id}
 	decisions, err := evaluate(ctx, counter, events, request.Config.MerchantPolicy, request.Config.JevTimeout)
@@ -198,7 +207,10 @@ func (a app) createSimulation(w http.ResponseWriter, r *http.Request, tenant str
 		unavailable(w, err)
 		return
 	}
-	result := run{request.ID, request.Config, generatorVersion, ruleVersion, jevVersion, len(events) - len(decisions), decisions}
+	for i := range decisions {
+		applyGovernedPlatformRules(&decisions[i], platformRules)
+	}
+	result := run{request.ID, request.Config, generatorVersion, platformRulesetVersion(platformRules), jevVersion, len(events) - len(decisions), decisions}
 	saved, err = a.repo.save(ctx, tenant, result, truth)
 	if err != nil {
 		unavailable(w, err)

@@ -284,7 +284,7 @@ func initialize(ctx context.Context, db *pgxpool.Pool) error {
 	}
 	statements := schema + rulesSchema + bookingOpsSchema + bookingHoldSchema +
 		bookingDossierSchema + bookingGovernanceSchema + bookingJevRulesSchema +
-		merchantDemoSchema + omiseSchema
+		merchantDemoSchema + merchantPolicySchema + merchantManagementSchema + jevAIConfigurationSchema + platformRuleGovernanceSchema + omiseSchema
 	if _, err := tx.Exec(ctx, statements); err != nil {
 		return err
 	}

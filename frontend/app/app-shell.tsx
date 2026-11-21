@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import {
-  Bell, Building2, ChevronDown, ChevronRight, ClipboardCheck,
+  Bell, Building2, ChevronDown, ChevronRight,
   ClipboardList, FlaskConical, LayoutDashboard, Menu, Network, PanelLeftClose, PanelLeftOpen, Settings,
   ShieldCheck, ShoppingBag, SlidersHorizontal, Sparkles, Store, X,
 } from "lucide-react";
@@ -41,18 +41,27 @@ const groups: { label: string; items: Destination[] }[] = [
   {
     label: "Decision Engine",
     items: [
-      { href: "/settings/system-rules", label: "Platform Rules", Icon: SlidersHorizontal, platformOnly: true, standalone: true },
-      { href: "/settings/jev-rules", label: "Jev Rules", Icon: Sparkles, standalone: true },
-      { href: "/settings/merchant-rules", label: "Merchant Rules", Icon: Store, standalone: true },
-      { href: "/settings/booking-assessment", label: "Scoring Profiles", Icon: ClipboardCheck },
+      { href: "/settings/system-rules", label: "Platform Rules", Icon: SlidersHorizontal, platformOnly: true },
+      { href: "/settings/merchants?view=rules", label: "Merchant Rules", Icon: Store, platformOnly: true },
+      { href: "/settings/ai-configuration", label: "AI Configuration", Icon: Sparkles, platformOnly: true },
     ],
   },
   {
-    label: "Testing & Setup",
+    label: "Management",
+    items: [
+      { href: "/settings/merchants", label: "Merchants", Icon: Building2 },
+    ],
+  },
+  {
+    label: "Testing",
     items: [
       { href: "/simulation-lab", label: "Simulation Lab", Icon: FlaskConical },
       { href: "/settings/mock-checkout", label: "Mock Checkout", Icon: ShoppingBag },
-      { href: "/settings/merchants", label: "Merchants", Icon: Building2 },
+    ],
+  },
+  {
+    label: "System",
+    items: [
       { href: "/settings", label: "Settings", Icon: Settings },
     ],
   },
@@ -63,7 +72,11 @@ const merchantPath = "/settings/merchants";
 const merchantTransactions: Destination = {
   href: `${merchantPath}?view=transactions`, label: "Transactions", Icon: ClipboardList,
 };
-const merchantGroups = [{ label: "Merchant", items: [merchantTransactions] }];
+const merchantRules: Destination = { href: "/settings/merchant-rules", label: "Merchant AI Rules", Icon: Store };
+const merchantDashboard: Destination = { href: "/dashboard", label: "Dashboard", Icon: LayoutDashboard };
+const merchantSettings: Destination = { href: "/settings", label: "Settings", Icon: Settings };
+const merchantDestinations = [merchantDashboard, merchantTransactions, merchantRules, merchantSettings];
+const merchantGroups = [{ label: "Merchant", items: merchantDestinations }];
 
 function subscribeToHash(listener: () => void) {
   const navigation = (window as Window & { navigation?: EventTarget }).navigation;
@@ -80,7 +93,8 @@ function subscribeToHash(listener: () => void) {
 
 function getHash() {
   const params = new URLSearchParams(window.location.search);
-  return params.get("view") === "transactions" ? "?view=transactions" : window.location.hash;
+  const view = params.get("view");
+  return view === "transactions" || view === "rules" ? `?view=${view}` : window.location.hash;
 }
 
 function getServerHash() {
@@ -99,10 +113,10 @@ function Sidebar({ view, activeHref, collapsed, drawer, onToggle, onNavigate, lo
   const Action = drawer ? X : collapsed ? PanelLeftOpen : PanelLeftClose;
   const actionLabel = drawer ? "Close navigation" : collapsed ? "Expand sidebar" : "Collapse sidebar";
   const visibleGroups = view === "merchant" ? merchantGroups : view === "platform" ? groups : [];
-  const home = view === "merchant" ? merchantTransactions.href : "/dashboard";
+  const home = "/dashboard";
   return <div className="shell-sidebar-inner">
     <div className="shell-sidebar-brand">
-      <Link href={home} className="shell-logo" aria-label={view === "merchant" ? "PayGuard transactions" : "PayGuard dashboard"} onClick={onNavigate}>
+      <Link href={home} className="shell-logo" aria-label="PayGuard dashboard" onClick={onNavigate}>
         {collapsed ? <ShieldCheck size={24} aria-hidden="true" /> : <PayGuardLogo />}
       </Link>
       {drawer && <button className="shell-icon-button" type="button" aria-label={actionLabel} onClick={onToggle}>
@@ -143,21 +157,27 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawer = useRef<HTMLDialogElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
-  const allowed = view === "platform" || (view === "merchant" && pathname === merchantPath);
+  const merchantDetails = pathname.startsWith(`${merchantPath}/`);
+  const merchantDestination = pathname === merchantPath || merchantDetails ? merchantTransactions
+    : merchantDestinations.find(destination => destination.href === pathname);
+  const merchantPathAllowed = Boolean(merchantDestination);
+  const allowed = view === "platform" || (view === "merchant" && merchantPathAllowed);
   const activeDestinations = localMerchantPreview
     ? destinations.filter(destination => !destination.standalone).map(destination =>
         destination.href === "/settings/operations#transactions"
           ? { ...destination, href: merchantTransactions.href }
           : destination)
     : destinations;
-  const current = view === "merchant" ? { ...merchantTransactions, group: "Merchant" } : view === "platform"
-    ? activeDestinations.find(destination => destination.href === pathname + hash)
+  const current = view === "merchant" && merchantDestination ? { ...merchantDestination, group: "Merchant" } : view === "platform"
+    ? (pathname === merchantRules.href ? { ...merchantRules, group: "Decision Engine" } : undefined)
+      ?? (merchantDetails ? destinations.find(destination => destination.href === merchantPath) : undefined)
+      ?? activeDestinations.find(destination => destination.href === pathname + hash)
       ?? activeDestinations.find(destination => destination.href === pathname)
     : undefined;
 
   useEffect(() => {
-    if (view === "merchant" && pathname !== merchantPath) router.replace(merchantTransactions.href);
-  }, [view, pathname, router]);
+    if (view === "merchant" && !merchantPathAllowed) router.replace(merchantTransactions.href);
+  }, [view, merchantPathAllowed, router]);
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 1024px)");

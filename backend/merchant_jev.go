@@ -28,16 +28,20 @@ var (
 )
 
 type merchantJev struct {
-	live   bool
-	key    string
-	model  string
-	client *http.Client
+	live          bool
+	key           string
+	model         string
+	client        *http.Client
+	fallbackModel string
+	rubric        string
+	timeout       time.Duration
+	endpoint      string
 }
 
 func newMerchantJev(mode, key, model string) (merchantJev, error) {
 	switch strings.TrimSpace(mode) {
 	case "", "mock":
-		return merchantJev{}, nil
+		return merchantJev{key: strings.TrimSpace(key)}, nil
 	case "live":
 		model = strings.TrimSpace(model)
 		if model == "" {
@@ -57,6 +61,17 @@ func newMerchantJev(mode, key, model string) (merchantJev, error) {
 	}
 }
 
+func (j merchantJev) withConfiguration(config jevAIConfiguration) merchantJev {
+	j.live, j.model, j.fallbackModel, j.rubric = config.Provider == "openrouter", config.Model, config.FallbackModel, config.Rubric
+	j.timeout = time.Duration(config.TimeoutMS) * time.Millisecond
+	client := http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if j.client != nil {
+		client.Transport = j.client.Transport
+	}
+	j.client = &client
+	return j
+}
+
 type merchantJevState struct {
 	AmountMinor          int64 `json:"booking_amount_minor"`
 	ReviewThresholdMinor int64 `json:"review_threshold_minor"`
@@ -70,9 +85,10 @@ type merchantJevChoice struct {
 }
 
 type merchantJevResponse struct {
-	ID      string                       `json:"id"`
-	Model   string                       `json:"model"`
-	Answers map[string]merchantJevChoice `json:"answers"`
+	FallbackUsed bool                         `json:"-"`
+	ID           string                       `json:"id"`
+	Model        string                       `json:"model"`
+	Answers      map[string]merchantJevChoice `json:"answers"`
 }
 
 func evaluateMerchantJev(ctx context.Context, input mockTransactionInput, scenario mockScenario, rules jevRulesSnapshot, jev merchantJev) mockTransaction {
@@ -109,6 +125,28 @@ func evaluateMerchantJev(ctx context.Context, input mockTransactionInput, scenar
 }
 
 func (j merchantJev) requestDecision(ctx context.Context, state merchantJevState) (merchantJevResponse, string, string) {
+	if j.timeout == 0 || j.key == "" {
+		return j.requestDecisionOnce(ctx, state)
+	}
+	ctx, cancel := context.WithTimeout(ctx, j.timeout)
+	defer cancel()
+	primaryBudget := j.timeout
+	if j.fallbackModel != "" {
+		primaryBudget /= 2
+	}
+	primary, stop := context.WithTimeout(ctx, primaryBudget)
+	answer, status, reason := j.requestDecisionOnce(primary, state)
+	stop()
+	if status == "LIVE" || j.fallbackModel == "" || ctx.Err() != nil {
+		return answer, status, reason
+	}
+	j.model = j.fallbackModel
+	answer, status, reason = j.requestDecisionOnce(ctx, state)
+	answer.FallbackUsed = true
+	return answer, status, reason
+}
+
+func (j merchantJev) requestDecisionOnce(ctx context.Context, state merchantJevState) (merchantJevResponse, string, string) {
 	var result merchantJevResponse
 	if j.key == "" {
 		return result, "UNAVAILABLE", "Live Jev is missing its OpenRouter API key. Review is required."
@@ -137,11 +175,20 @@ func (j merchantJev) requestDecision(ctx context.Context, state merchantJevState
 			},
 		},
 	}
+	if instructions := jevAdvisoryRubrics[j.rubric]; instructions != "" {
+		riskQuestion := payload.Questions[merchantJevQuestion]
+		riskQuestion.Instructions = instructions
+		payload.Questions[merchantJevQuestion] = riskQuestion
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return result, "UNAVAILABLE", "Live Jev request could not be prepared. Review is required."
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openRouterDecisionsURL, bytes.NewReader(body))
+	endpoint := j.endpoint
+	if endpoint == "" {
+		endpoint = openRouterDecisionsURL
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return result, "UNAVAILABLE", "Live Jev request could not be prepared. Review is required."
 	}

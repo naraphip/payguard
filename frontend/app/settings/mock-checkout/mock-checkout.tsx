@@ -41,6 +41,7 @@ export function MockCheckout() {
   const scenarioFlow = useDemoScenario();
   const [product, setProduct] = useState<Product>("flight_ticket");
   const [amount, setAmount] = useState(String(products.flight_ticket.price));
+  const [domain, setDomain] = useState("");
   const [sdkStatus, setSDKStatus] = useState<SDKStatus>("observed");
   const [mode, setMode] = useState<JevMode>("mock");
   const [token, setToken] = useState("");
@@ -105,7 +106,7 @@ export function MockCheckout() {
       return;
     }
     if (merchantCheckout) {
-      await scenarioFlow.submit({ source: "checkout", amountMinor, product, simulateTimeout: mode === "timeout" });
+      await scenarioFlow.submit({ source: "checkout", amountMinor, product, customerEmailDomain: domain, simulateTimeout: mode === "timeout" });
       return;
     }
     if (!bearer || busy) return;
@@ -168,6 +169,10 @@ export function MockCheckout() {
               {amountError || "Enter minor units. Leave blank to omit the amount."}
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              {merchantCheckout && <label className="block text-sm font-semibold">Synthetic email or domain
+                <input className="control mt-2" value={domain} maxLength={320} placeholder="example.test (optional)"
+                  autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={event => setDomain(event.currentTarget.value)} />
+              </label>}
               {!merchantCheckout && <label className="block text-sm font-semibold">SDK signal
                 <select className="control mt-2" value={sdkStatus} onChange={event => setSDKStatus(event.currentTarget.value === "unavailable" ? "unavailable" : "observed")}>
                   <option value="observed">Observed</option>

@@ -24,13 +24,15 @@ export function ActionBadge({ action }: { action: Rule["action"] }) {
   return <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${color}`}>{actions[action]}</span>;
 }
 
-export function SystemRulesDashboard({ request = globalRuleTransport, merchantName, canEdit = true }: {
+export function SystemRulesDashboard({ request = globalRuleTransport, merchantName, canEdit = true, embedded = false }: {
   request?: RuleTransport;
   merchantName?: string;
   canEdit?: boolean;
+  embedded?: boolean;
 } = {}) {
-  const Container = merchantName ? "section" : "main";
-  const Heading = merchantName ? "h2" : "h1";
+  const compact = embedded || Boolean(merchantName);
+  const Container = compact ? "section" : "main";
+  const Heading = compact ? "h2" : "h1";
   const [catalogue, setCatalogue] = useState<RuleCatalogue | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -87,10 +89,10 @@ export function SystemRulesDashboard({ request = globalRuleTransport, merchantNa
 
   return <>
     <Container className="min-w-0">
-      <div className={merchantName ? "space-y-6" : "mx-auto max-w-[1360px] space-y-6 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:space-y-7 lg:px-10"}>
+      <div className={compact ? "space-y-6" : "mx-auto max-w-[1360px] space-y-6 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:space-y-7 lg:px-10"}>
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <Heading className={merchantName ? "text-lg font-semibold" : "text-[30px] font-semibold leading-tight tracking-[-0.035em] sm:text-[36px]"}>{merchantName ? "Platform Rules" : "Platform Rule Settings"}</Heading>
+            <Heading className={compact ? "text-lg font-semibold" : "text-[30px] font-semibold leading-tight tracking-[-0.035em] sm:text-[36px]"}>{merchantName ? "Platform Rules" : embedded ? "Built-in rules and drafts" : "Platform Rule Settings"}</Heading>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-600">{merchantName ? `Review platform rules and drafts for ${merchantName}.` : "Review system fraud rules and test drafts against saved Simulation Lab runs."}</p>
           </div>
           {canEdit && <button type="button" className={`${primaryButton} self-start sm:shrink-0 sm:self-auto`} disabled={!catalogue} onClick={() => {

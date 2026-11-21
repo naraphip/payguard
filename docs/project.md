@@ -11,6 +11,8 @@ PayGuard evaluates booking and payment risk for travel and e-commerce merchants.
 
 Start with the [Simulation Lab requirements](requirements/simulation-lab.md), [UI design](ui/simulation-lab.md), and [runbook](simulation-runbook.md).
 
+The Sandbox [Decision Engine](requirements/decision-engine.md) keeps global Platform Rules, tenant Merchant Policies, and administrator AI configuration independent. The OpenAI composer returns proposed rules for Go validation. In Sandbox, OpenRouter Jev can assess new merchant scenario transactions and run a fixed synthetic diagnostic. Legacy Booking API and batch simulation keep their mock Jev paths.
+
 ## Deployment
 
 Run `docker compose up --build -d --wait` from the repository root to start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis. Open the [Dashboard](http://127.0.0.1:3000/dashboard) after the services are healthy, or go directly to [Simulation Lab](http://127.0.0.1:3000/simulation-lab). PostgreSQL stores data in a named volume that persists when the stack stops.

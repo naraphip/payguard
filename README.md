@@ -6,7 +6,7 @@ A local sandbox for synthetic OTA bookings and e-commerce checkout risk. It runs
 
 The repository-root [`.env.example`](.env.example) lists the demo merchant and optional provider variables. For Omise Sandbox checkout, put `OMISE_PUBLIC_KEY` and `OMISE_SECRET_KEY` from Omise Test mode in the ignored `backend/.env`. Compose loads that file for the Go backend. See the [local keys setup](docs/simulation-runbook.md#local-keys-and-omise-sandbox-preparation).
 
-For live Jev in merchant checkout and scenario simulation, set `PAYGUARD_AI_MODE=live` and `OPENROUTER_API_KEY` in the ignored root `.env`. The [Jev walkthrough](docs/simulation-runbook.md#enable-live-jev-for-synthetic-tests) shows how to verify the saved provider response.
+For live Jev in merchant checkout and scenario simulation, set `OPENROUTER_API_KEY` in the ignored root `.env` and select OpenRouter in **Decision Engine → AI Configuration**. Until an administrator saves a configuration version, `PAYGUARD_AI_MODE` sets the deployment default. The [Jev walkthrough](docs/simulation-runbook.md#enable-live-jev-for-synthetic-tests) shows how to verify the saved provider response.
 
 Requires Docker with Docker Compose. From the repository root, build and start the Go API, TypeScript/Next.js frontend, PostgreSQL, and Redis:
 
@@ -44,6 +44,12 @@ For Go 1.26+ and Node.js 24+ development on the host, start only PostgreSQL and 
 4. Open [Simulation Lab](http://127.0.0.1:3000/simulation-lab) and run the same storefront flow.
 
 Go listens on port 8081, PostgreSQL on 55432, and Redis on 56379. The default bindings use loopback. `docker compose down` stops the data stores and preserves the PostgreSQL volume.
+
+## AI Rule Management
+
+Use **Merchant AI Rules** with the scoped token issued to a merchant, or **Platform Rules** with the demo administrator token. Enable server-side composition in the root `.env` with `PAYGUARD_RULE_COMPOSER_ENABLED=true`, `PAYGUARD_RULE_COMPOSER_PROVIDER=openai`, and a structured-output text model such as `PAYGUARD_RULE_COMPOSER_MODEL=gpt-4.1-mini`. Set `OPENAI_API_KEY` in `backend/.env`. [Configuration, API, and rollback](docs/simulation-runbook.md#ai-rule-composer) · [Rule contract](docs/requirements/ai-rule-management.md)
+
+Platform administrators can test Jev with a fixed synthetic input in **AI Configuration**. Saved settings apply to new merchant scenario transactions. The legacy Booking API and batch simulation retain their mock Jev evaluators. [Jev configuration](docs/simulation-runbook.md#jev-ai-configuration)
 
 See the [runbook](docs/simulation-runbook.md) for the API, configuration and verification commands, or open [docs/home.md](docs/home.md) as the starting point for the Obsidian vault.
 

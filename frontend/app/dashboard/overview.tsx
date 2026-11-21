@@ -3,43 +3,53 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Building2, ClipboardList } from "lucide-react";
-import { getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest } from "../merchant-demo";
+import { loadLocalMerchantDirectory, merchantDemoRequest, policyActionLabels } from "../merchant-demo";
 import type { DemoDirectory, DemoTransaction } from "../merchant-demo";
+import { useWorkspaceView } from "../workspace-view";
+import { useRuleCredential } from "../settings/rule-composer";
+import { merchantDetailsHref } from "../settings/merchants/management-contracts";
 
 type DashboardData = { merchantCount: number; transactions: (DemoTransaction & { merchantName: string })[] };
 const outcomeLabels = { LOW_RISK: "Low risk", REVIEW: "Review", UNRESOLVED: "Unresolved" };
 
 export function DashboardOverview() {
+  const merchantView = useWorkspaceView() === "merchant";
+  const token = useRuleCredential(merchantView ? "MERCHANT" : "PLATFORM");
+  return <ConnectedOverview key={token} token={token} merchantView={merchantView} />;
+}
+
+function ConnectedOverview({ token, merchantView }: { token: string; merchantView: boolean }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
+    const { signal } = controller;
     async function load() {
       try {
-        const token = getMerchantDemoToken();
-        const localDirectory = await loadLocalMerchantDirectory();
-        const directory = localDirectory ?? (token ? await merchantDemoRequest<DemoDirectory>("", token) : null);
-        if (directory?.role !== "admin") return;
+        const localDirectory = merchantView || token ? null : await loadLocalMerchantDirectory();
+        if (signal.aborted) return;
+        const directory = localDirectory ?? (token ? await merchantDemoRequest<DemoDirectory>("", token, { signal }) : null);
+        if (directory?.role !== (merchantView ? "merchant" : "admin")) return;
         const grouped = await Promise.all(directory.merchants.map(async merchant => {
           const response = await merchantDemoRequest<{ transactions: DemoTransaction[] }>(
-            `/${merchant.id}/transactions`, localDirectory ? "" : token,
+            `/${merchant.id}/transactions`, localDirectory ? "" : token, { signal },
           );
           return response.transactions.map(item => ({ ...item, merchantName: merchant.name }));
         }));
         const transactions = grouped.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        if (active) setData({ merchantCount: directory.merchants.length, transactions });
+        if (!signal.aborted) setData({ merchantCount: directory.merchants.length, transactions });
       } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : "Dashboard could not be loaded.");
+        if (!signal.aborted) setError(cause instanceof Error ? cause.message : "Dashboard could not be loaded.");
       } finally {
-        if (active) setLoading(false);
+        if (!signal.aborted) setLoading(false);
       }
     }
     void load();
-    return () => { active = false; };
-  }, [attempt]);
+    return () => controller.abort();
+  }, [attempt, merchantView, token]);
 
   const pending = data?.transactions.filter(transaction => transaction.reviewState === "NEEDS_DECISION").length;
   return <main className="mx-auto max-w-[1440px] space-y-6 px-4 py-7 sm:px-7 lg:px-9">
@@ -48,8 +58,8 @@ export function DashboardOverview() {
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Fraud Overview</h1>
         <p className="mt-1.5 text-sm text-muted">Merchant transactions and review activity</p>
       </div>
-      <Link href="/settings/merchants" className="inline-flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-white">
-        <Building2 size={16} aria-hidden="true" /> Merchants
+      <Link href={merchantView ? "/settings/merchants?view=transactions" : "/settings/merchants"} className="inline-flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-white">
+        <Building2 size={16} aria-hidden="true" /> {merchantView ? "Transactions" : "Merchants"}
       </Link>
     </header>
     {loading && <p role="status" className="text-sm text-muted">Loading merchant activity…</p>}
@@ -61,11 +71,11 @@ export function DashboardOverview() {
         setAttempt(value => value + 1);
       }}>Retry</button>
     </div>}
-    {!loading && !error && !data && <p className="text-sm text-muted">Open Merchants to connect as an administrator.</p>}
+    {!loading && !error && !data && <p className="text-sm text-muted">{merchantView ? "Open Transactions to connect with your merchant access token." : "Open Merchants to connect as an administrator."}</p>}
     {data && <>
       <dl id="risk-trends" className="grid gap-3 sm:grid-cols-3">
         {[
-          ["Merchants", data.merchantCount],
+          ...(!merchantView ? [["Merchants", data.merchantCount]] : []),
           ["Recent transactions", data.transactions.length],
           ["Needs decision", pending ?? 0],
         ].map(([label, value]) => <div key={label} className="rounded-xl border border-line bg-white p-4">
@@ -78,10 +88,10 @@ export function DashboardOverview() {
         {data.transactions.length === 0 ? <p className="mt-3 text-sm text-muted">No transactions yet.</p> :
           <ul className="mt-3 divide-y divide-line">
           {data.transactions.slice(0, 10).map(item => <li key={`${item.merchantId}:${item.id}`}>
-            <Link href={`/settings/merchants?${new URLSearchParams({ merchant: item.merchantId, transaction: item.id, view: "transactions" })}`}
+            <Link href={merchantDetailsHref(item.merchantId, "transactions", item.id)}
               className="flex flex-wrap items-center justify-between gap-2 py-3 hover:text-accent">
               <span className="text-sm"><strong>{item.merchantName}</strong> · {item.scenarioName}</span>
-              <span className="text-sm text-muted">{outcomeLabels[item.outcome]}</span>
+              <span className="text-sm text-muted">{item.policyDecision ? policyActionLabels[item.policyDecision.finalDecision.action] ?? item.policyDecision.finalDecision.action : outcomeLabels[item.outcome]}</span>
             </Link>
           </li>)}
           </ul>}

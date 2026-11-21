@@ -11,7 +11,10 @@ export type DemoScenario = {
 export type DemoMerchant = {
   id: string;
   name: string;
+  description?: string;
+  createdAt?: string;
   setup?: MerchantSetup;
+  policyIntegration?: { products: string[]; emailDomain: boolean; amountMinor?: boolean };
   scenarios: DemoScenario[];
 };
 
@@ -36,6 +39,7 @@ export type DemoTransaction = {
   jevAnswer?: "LOW_RISK" | "REVIEW";
   jevDecisionId?: string;
   jevConfidence?: number;
+  jevConfigurationVersion?: number;
   jevRuleVersion?: string;
   outcome: "LOW_RISK" | "REVIEW" | "UNRESOLVED";
   reason: string;
@@ -45,6 +49,26 @@ export type DemoTransaction = {
   disposition?: "cleared" | "rejected";
   decidedBy?: string;
   decidedAt?: string;
+  policyDecision?: MerchantPolicyDecision;
+};
+
+export type MerchantPolicyDecision = {
+  platformDecision: { action: string; reasonCodes?: string[] };
+  merchantPolicyDecision: { action: string; matchedRuleIds?: string[]; reasonCodes?: string[]; ruleVersions?: Record<string, number>; missingSignals?: string[]; missingRuleIds?: string[] };
+  finalDecision: { action: string; source: string };
+};
+
+export const merchantPolicyProducts = {
+  flight_ticket: "Flight ticket",
+  hotel_room: "Hotel room",
+  physical: "Physical goods",
+  digital: "Digital goods",
+  payment_gateway: "Gateway payment",
+} as const;
+
+export const policyActionLabels: Record<string, string> = {
+  BLOCK: "Block", ALLOW: "Allow", REVIEW: "Review", CHALLENGE: "Challenge", NOT_APPLICABLE: "No match",
+  UNSUCCESSFUL: "Unresolved", UNRESOLVED: "Unresolved", PASS: "Pass", UNAVAILABLE: "Signal unavailable",
 };
 
 export const merchantOutcomeLabels = { LOW_RISK: "Low risk", REVIEW: "Review", UNRESOLVED: "Unresolved" } as const;
@@ -99,12 +123,18 @@ export async function merchantDemoRequest<T>(path: string, token: string, init?:
     throw new LocalMerchantPreviewDisabled();
   }
   if (!response.ok || result === null) {
-    throw new Error(result?.error ?? `Merchant demo request failed (${response.status}).`);
+    throw new MerchantDemoError(response.status, result?.error ?? `Merchant demo request failed (${response.status}).`);
   }
   return result as T;
 }
 
-class LocalMerchantPreviewDisabled extends Error {}
+export class MerchantDemoError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+export class LocalMerchantPreviewDisabled extends Error {}
 
 export async function loadLocalMerchantDirectory(): Promise<DemoDirectory | null> {
   try {
