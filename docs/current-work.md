@@ -1,5 +1,15 @@
 # Current work
 
+## PG-07 through PG-10 mock checkout, baseline and booking lineage
+
+Implemented and verified the local synthetic checkout, outcome import, baseline activation, and tenant-scoped lineage. The demo runs at `/settings/mock-checkout`. [Requirements](requirements/checkout-and-lineage.md) · [Checkout UI](ui/mock-checkout.md) · [Runbook](simulation-runbook.md#mock-checkout-and-booking-lineage)
+
+- PG-07 Chrome checks covered navigation and all four products, OTA checkout with amount zero, and e-commerce checkout with omitted amount, unavailable SDK data, and a Jev timeout. The visible assessment matched the saved response and lineage. A simulated lost response retried the same booking and got 200 from both APIs. The token stayed in memory and the page fit a 390 px viewport.
+- PG-08 live checks verified that exactly three distinct eligible bookings moved the baseline from `COLD_START` to `ACTIVE`. Chrome displayed the active sample count. Earlier bookings retained their pinned baseline and rule version.
+- PG-09 `python3 scripts/booking-smoke.py --base http://127.0.0.1:8082 --merchant b --threshold 3` passed. Both fixture passes produced `LOW_RISK` at velocity 1, `REVIEW` at velocity 5, and `UNRESOLVED` at velocity 1. A rerun on the same database preserved those signatures and advanced the active baseline by three samples. Duplicate replay and tenant scope passed, and assessment payloads contained no QA labels. The previous PG-01 and PG-03 through PG-06 API checks passed on merchant A.
+- PG-10 live checks covered separately recorded analyst and chargeback provenance, out-of-order event and receipt timestamps, observed, unavailable and unknown SDK states, tenant isolation, and replay of the original assessment after outcomes were imported.
+- Go race tests and vet, frontend type checking and production build, and `git diff --check` passed. DEC-04 and DEC-05 remain open. The team action plan is unchanged.
+
 ## PG-03 through PG-06 booking assessment
 
 Implemented and verified all four tasks for the [local preview](http://127.0.0.1:3001/settings/booking-assessment). The demo covers deterministic Scoring Profile proposals and approval, booking evidence with pinned versions, trusted booking velocity and cold-start evidence, and typed mock Jev results with a timeout handoff. [Requirements and contract](requirements/booking-assessment.md) · [UI](ui/booking-assessment.md) · [Runbook](simulation-runbook.md#booking-assessment)
