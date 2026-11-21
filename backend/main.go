@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -106,6 +107,12 @@ func (a app) create(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "Expected a run UUID and simulation configuration.")
 		return
 	}
+	request.Config.ContactEmailDomain = strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, strings.TrimSpace(request.Config.ContactEmailDomain))
 	if err := request.Config.validate(); err != nil {
 		problem(w, 422, err.Error())
 		return
