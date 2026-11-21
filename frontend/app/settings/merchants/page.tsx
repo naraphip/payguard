@@ -13,6 +13,7 @@ export default async function MerchantsPage({ searchParams }: {
   if (typeof merchant === "string" && merchant) {
     redirect(merchantDetailsHref(merchant, preferredTab, transaction));
   }
+  if (preferredTab === "rules") redirect("/settings/merchants");
   return <main className="mx-auto max-w-[1400px] px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <MerchantDirectory preferredTab={preferredTab} transaction={typeof transaction === "string" ? transaction : undefined} />
   </main>;

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { PayGuardLogo } from "./payguard-logo";
+import { merchantDetailsHref } from "./settings/merchants/management-contracts";
 import { setWorkspaceView, useMerchantDemoRole, useWorkspaceView } from "./workspace-view";
 import type { WorkspaceView } from "./workspace-view";
 import "./app-shell.css";
@@ -42,7 +43,6 @@ const groups: { label: string; items: Destination[] }[] = [
     label: "Decision Engine",
     items: [
       { href: "/settings/system-rules", label: "Platform Rules", Icon: SlidersHorizontal, platformOnly: true },
-      { href: "/settings/merchants?view=rules", label: "Merchant AI Rules", Icon: Store, platformOnly: true },
       { href: "/settings/ai-configuration", label: "AI Configuration", Icon: Sparkles, platformOnly: true },
     ],
   },
@@ -94,7 +94,7 @@ function subscribeToHash(listener: () => void) {
 function getHash() {
   const params = new URLSearchParams(window.location.search);
   const view = params.get("view");
-  return view === "transactions" || view === "rules" ? `?view=${view}` : window.location.hash;
+  return view === "transactions" ? "?view=transactions" : window.location.hash;
 }
 
 function getServerHash() {
@@ -161,7 +161,8 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
   const merchantDestination = pathname === merchantPath || merchantDetails ? merchantTransactions
     : merchantDestinations.find(destination => destination.href === pathname);
   const merchantPathAllowed = Boolean(merchantDestination);
-  const allowed = view === "platform" || (view === "merchant" && merchantPathAllowed);
+  const openMerchantDirectory = view === "platform" && pathname === merchantRules.href;
+  const allowed = (view === "platform" && !openMerchantDirectory) || (view === "merchant" && merchantPathAllowed);
   const activeDestinations = localMerchantPreview
     ? destinations.filter(destination => !destination.standalone).map(destination =>
         destination.href === "/settings/operations#transactions"
@@ -169,15 +170,18 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
           : destination)
     : destinations;
   const current = view === "merchant" && merchantDestination ? { ...merchantDestination, group: "Merchant" } : view === "platform"
-    ? (pathname === merchantRules.href ? { ...merchantRules, group: "Decision Engine" } : undefined)
-      ?? (merchantDetails ? destinations.find(destination => destination.href === merchantPath) : undefined)
+    ? (merchantDetails || openMerchantDirectory ? destinations.find(destination => destination.href === merchantPath) : undefined)
       ?? activeDestinations.find(destination => destination.href === pathname + hash)
       ?? activeDestinations.find(destination => destination.href === pathname)
     : undefined;
 
   useEffect(() => {
     if (view === "merchant" && !merchantPathAllowed) router.replace(merchantTransactions.href);
-  }, [view, merchantPathAllowed, router]);
+    if (openMerchantDirectory) {
+      const merchant = new URLSearchParams(window.location.search).get("merchant");
+      router.replace(merchant ? merchantDetailsHref(merchant, "rules") : merchantPath);
+    }
+  }, [view, merchantPathAllowed, openMerchantDirectory, router]);
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 1024px)");
@@ -258,7 +262,7 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
       <div id="page-content" tabIndex={-1} className="min-w-0">
         {allowed ? <Fragment key={view}>{children}</Fragment> :
           <p role="status" className="px-4 py-8 text-sm text-muted sm:px-8">
-            {view === "merchant" ? "Opening your transactions…" : "Loading workspace…"}
+            {view === "merchant" ? "Opening your transactions…" : openMerchantDirectory ? "Opening merchants…" : "Loading workspace…"}
           </p>}
       </div>
     </div>
