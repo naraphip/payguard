@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -54,5 +55,27 @@ func TestDescriptionPrivacyAndLiteralMatch(t *testing.T) {
 	e := merchantPolicyEvidence{custom: map[string]json.RawMessage{policyDescription: json.RawMessage(`"Park ENTRY pass"`)}}
 	if yes, missing := c.evaluate(e); !yes || missing {
 		t.Fatal("literal contains did not run locally")
+	}
+}
+
+func TestSemanticCriterionHasItsOwnLengthLimit(t *testing.T) {
+	profile := merchantPolicyProfile{Products: []string{"physical"}, Stages: []string{"CHECKOUT"}, Signals: []string{policyDescription}}
+	rule := semanticTestRule("long criterion", "AND", policyDescription)
+	for _, tc := range []struct {
+		length int
+		valid  bool
+	}{{maxSemanticCriterionLength, true}, {maxSemanticCriterionLength + 1, false}} {
+		criterion := strings.Repeat("ก", tc.length)
+		rule.Proposal.Conditions.Rules[0].Value, _ = json.Marshal(criterion)
+		if err := rule.Proposal.validate(profile); (err == nil) != tc.valid {
+			t.Fatalf("criterion length %d: %v", tc.length, err)
+		}
+		plan, _, _ := prepareMerchantSemanticRule(rule, merchantPolicyEvidence{custom: map[string]json.RawMessage{policyDescription: json.RawMessage(`"Entry ticket"`)}})
+		if (plan.conditions[0].Status != "NOT_RUN") != tc.valid {
+			t.Fatalf("runtime and authoring disagree at length %d", tc.length)
+		}
+		if validCustomValue("text", rule.Proposal.Conditions.Rules[0].Value) {
+			t.Fatal("long observed transaction text accepted")
+		}
 	}
 }

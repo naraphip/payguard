@@ -21,6 +21,13 @@ The Merchant AI Rule editor accepts `block buyer@example.test 2min` and `บล�
 
 - Focused Go and disposable PostgreSQL tests verified a 120-second expiry, block decisions from Mock Checkout and Simulation Lab while active, a fresh Allow result after expiry with no other restrictive rule, and preservation of the original Block on replay. Repeating the create request preserved the expiry. The frontend mailbox tests, TypeScript check, and isolated production build passed.
 
+## Custom merchant rules evaluated by Jev
+
+**Generate preview** proposes a **Custom rule · Jev** for safe merchant instructions with a clear action when the catalogue cannot express the requested condition directly. The preview shows the evidence that Jev will compare and retains the full condition. Supported conditions can run locally alongside Jev checks. Select **Save Rule** after reviewing the draft. Applicable conditions that lack sufficient evidence can send the transaction to **Review (unresolved)**. [Rule contract](requirements/ai-rule-management.md#conditions-checked-by-jev) · [Test steps](simulation-runbook.md#test-a-condition-with-live-jev)
+
+- On a disposable merchant, a Thai/English instruction about a Hong Kong Disneyland ticket and an Indian IP produced an AND group with a local country check and a Jev ticket check. Live Jev returned MATCH for admission and NO_MATCH for an airport train ticket. The ledger recorded Block and Allow. A Japanese IP short-circuited the ticket check. Missing ticket evidence with an Indian IP produced Review (unresolved). Exact transaction retries returned their saved decisions. The browser displayed all four records.
+- An independent two-minute wall-clock test verified that the matching email was blocked during the window and accepted on a fresh transaction after expiry. The original blocked transaction kept its result on replay. The full Go and race suites ran against disposable PostgreSQL. Go vet, frontend tests and typechecking passed.
+
 ## Merchant rule testing and local Platform Admin
 
 Mock Checkout and Simulation Lab run the selected merchant's Platform Rules, Merchant Policies, published Jev review rules and configured Jev advisory. Choose a merchant and a product to run a test. Open its **Transactions** to compare each decision and saved version. Previous scenario transactions retain their original results and can still replay through the API. [Requirements](requirements/merchant-scenarios.md) · [Local evaluation](simulation-runbook.md#merchant-scenarios-and-jev)

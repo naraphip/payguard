@@ -78,6 +78,7 @@ const scopeLabels = { MERCHANT: "Merchant AI Rule", PLATFORM: "Platform fraud ru
 const products: Record<string, string> = merchantPolicyProducts;
 const mailboxField = "customer.mailbox_ref";
 const mailboxExample = "Block email buyer@example.test for 2 minutes";
+const jevConditionLabel = "Custom rule · Jev";
 const fields: Record<string, string> = {
   ...merchantFieldLabels,
   account_age_days: "Account age in days",
@@ -220,13 +221,13 @@ export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal
           return <li key={index} className="wrap-anywhere">
             {label} {merchantOperatorLabels[operator] ?? operator} {display}
             {merchant && <span className="ml-2 rounded-md bg-white px-1.5 py-0.5 text-xs font-medium text-muted">
-              {operator === "semantic_match" ? "Checked by Jev" : "Checked by PayGuard"}
+              {operator === "semantic_match" ? jevConditionLabel : "Checked by PayGuard"}
             </span>}
           </li>;
         })}
       </ul>
       {merchant && conditions.some(condition => condition.operator === "semantic_match") && <p className="mt-2 text-xs text-muted">
-        Jev evaluates the meaning from transaction evidence. If a required condition remains unresolved, the transaction goes to manual review.
+        Jev checks the listed transaction text fields for meaning. If a required condition remains unresolved, the transaction goes to manual review.
       </p>}
     </div>
     {!hasMailbox && <details>
@@ -426,7 +427,8 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
           resetDraft();
         }} />
       <p id={`${id}-instruction-help`} className="text-xs text-muted">
-        {scope === "MERCHANT" ? <>For a temporary exact-address block, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out IP addresses, card details, and credentials.</>
+        {scope === "MERCHANT" ? <>For a temporary exact-address block, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out IP addresses, card details, and credentials.
+          <span className="mt-1 block">For a custom Jev condition, check the transaction field and meaning in the preview before saving.</span></>
           : "Use policy conditions and domains. Leave out customer identities and card details."}
       </p>
       <button type="submit" className={ready ? outlineButton : primaryButton}
@@ -619,7 +621,7 @@ function ConnectedPolicyRules({ token, adminMerchantId, profile, refreshKey, onE
           <div className="min-w-0">
             <p className="text-sm font-semibold wrap-anywhere">{rule.proposal.name}</p>
             <p className="mt-1 text-xs text-muted">{statusLabels[rule.status]} · Version {rule.version} · {policyActionLabels[rule.proposal.action]}
-              {rule.proposal.conditions.rules.some(condition => condition.operator === "semantic_match") && " · Jev condition"}
+              {rule.proposal.conditions.rules.some(condition => condition.operator === "semantic_match") && ` · ${jevConditionLabel}`}
               {rule.activeVersion && rule.activeVersion !== rule.version ? ` · Version ${rule.activeVersion} remains active` : ""}
             </p>
             <PolicyExpiry expiresAt={rule.expiresAt} status={rule.status} />

@@ -23,12 +23,14 @@ export const merchantOperatorLabels: Record<string, string> = {
 type DraftCondition = { id: number; field: string; operator: string; value: string };
 
 const stageForProduct = (product: string) => product === "flight_ticket" || product === "hotel_room" ? "BOOKING" : "CHECKOUT";
+const textValueLimit = 120;
+const semanticCriterionLimit = 2000;
 
 export function policyFieldLabel(field: PolicyField) {
   return field.label ?? merchantFieldLabels[field.fieldName] ?? field.fieldName;
 }
 
-function conditionValue(field: PolicyField, value: string) {
+function conditionValue(field: PolicyField, value: string, semantic: boolean) {
   const input = value.trim();
   const label = policyFieldLabel(field);
   if (!input) throw new Error(`Enter a value for ${label}.`);
@@ -46,6 +48,11 @@ function conditionValue(field: PolicyField, value: string) {
     case "country":
       if (!/^[A-Za-z]{2}$/.test(input)) throw new Error(`Enter a two-letter country code for ${label}.`);
       return input.toUpperCase();
+    case "text": {
+      const limit = semantic ? semanticCriterionLimit : textValueLimit;
+      if (input.length > limit) throw new Error(`Enter up to ${limit} characters for ${label}.`);
+      return input;
+    }
     default:
       return input;
   }
@@ -66,7 +73,7 @@ function ConditionValue({ field, value, products, semantic, onChange }: {
         ? <><option value="true">Yes</option><option value="false">No</option></>
         : products.map(product => <option key={product} value={product}>{productLabels[product] ?? product}</option>)}
     </select> : <input className="control mt-1.5" disabled={!field} value={value} autoComplete="off"
-      maxLength={field?.dataType === "country" ? 2 : field?.dataType === "text" ? 120 : 253}
+      maxLength={semantic ? semanticCriterionLimit : field?.dataType === "country" ? 2 : field?.dataType === "text" ? textValueLimit : 253}
       inputMode={field?.dataType === "number" ? "numeric" : "text"}
       placeholder={semantic ? "e.g. a Hong Kong Disneyland admission ticket" : field?.dataType === "country" ? "e.g. IN" : field?.fieldName === "customer.email_domain" ? "example.test" : undefined}
       onChange={event => onChange(event.currentTarget.value)} />}
@@ -125,7 +132,8 @@ export function StructuredRuleBuilder({ profile, initial, semanticField, disable
         if (field.fieldName === "product.type" && !products.includes(condition.value)) {
           throw new Error("Choose a product included in the rule’s scope.");
         }
-        return { field: condition.field, operator: condition.operator, value: conditionValue(field, condition.value) };
+        const value = conditionValue(field, condition.value, condition.operator === "semantic_match");
+        return { field: condition.field, operator: condition.operator, value };
       });
       setError("");
       onPreview({

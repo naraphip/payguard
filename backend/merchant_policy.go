@@ -22,6 +22,7 @@ const (
 	policyProduct                  = "product.type"
 	policyDescription              = "transaction.description"
 	semanticOperator               = "semantic_match"
+	maxSemanticCriterionLength     = 2000
 	merchantScenarioProfileVersion = "merchant-scenario-amount-v1"
 )
 
@@ -199,6 +200,13 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 			}
 		}
 		if condition.Field == policyDescription || customSignalKey.MatchString(condition.Field) {
+			if condition.Operator == semanticOperator {
+				var criterion string
+				if json.Unmarshal(condition.Value, &criterion) != nil || !safeCustomText(criterion, maxSemanticCriterionLength) {
+					return fmt.Errorf("Enter a meaning of 1 to %d characters without sensitive data for %s.", maxSemanticCriterionLength, condition.Field)
+				}
+				continue
+			}
 			if !validCustomValue(field.DataType, condition.Value) {
 				return fmt.Errorf("Enter a valid %s value without sensitive data for %s.", field.DataType, condition.Field)
 			}

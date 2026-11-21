@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -116,7 +118,7 @@ func TestManagedAuthoringWithoutComposerPostgres(t *testing.T) {
 	repo := repository{db}
 	merchant, _, err := repo.createMockMerchant(t.Context(), mockMerchantInput{
 		Name:              "Standalone local authoring",
-		PolicyIntegration: &merchantPolicyIntegration{Products: []string{"physical"}, EmailDomain: true},
+		PolicyIntegration: &merchantPolicyIntegration{Products: []string{"physical"}, EmailDomain: true, AmountMinor: true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +128,9 @@ func TestManagedAuthoringWithoutComposerPostgres(t *testing.T) {
 	const admin = "standalone-authoring-test-admin"
 	composer := ruleComposer{access: composerAuthorization(repo, admin)}
 	endpoint := merchantDemoPath + "/" + merchant.ID + "/policy-interpret"
-	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/policy-interpret", composer.interpret)
+	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/policy-interpret", func(w http.ResponseWriter, r *http.Request) {
+		composer.interpret(w, r)
+	})
 	call := func(instruction string) composerInterpretation {
 		t.Helper()
 		body, _ := json.Marshal(map[string]string{"scope": "MERCHANT", "instruction": instruction})
@@ -146,8 +150,50 @@ func TestManagedAuthoringWithoutComposerPostgres(t *testing.T) {
 	if result := call("Block physical goods when email domain equals example.test"); result.Status != "READY" || !result.Validation.Valid {
 		t.Fatalf("local policy draft: %+v", result)
 	}
-	if result := call("Block tickets like Disney admission and check the customer's country"); result.Status != "CLARIFICATION" ||
-		result.SemanticDraft == nil || result.SemanticDraft.Field != policyDescription || result.Proposal != nil {
-		t.Fatalf("unrecognized instruction should keep both clauses for operator review: %+v", result)
+	const customInstruction = "Block ticket ที่เป็น *disney* land hongkong และ ip มาจาก india"
+	originalDraft := call(customInstruction)
+	if originalDraft.Status != "READY" || !originalDraft.Validation.Valid || originalDraft.SemanticDraft != nil {
+		t.Fatalf("eligible unsupported instruction should produce a directly savable draft: %+v", originalDraft)
 	}
+	if result := call("Block theme park tickets for 2 min"); result.Status != "CLARIFICATION" || result.Proposal != nil {
+		t.Fatalf("unsupported expiry should require clarification: %+v", result)
+	}
+	if result := call(`{"scope":"MERCHANT","unknownField":"Block theme park tickets"}`); result.Status != "CLARIFICATION" || result.Proposal != nil {
+		t.Fatalf("invalid JSON must remain a validation error: %+v", result)
+	}
+	providerCases := []struct {
+		name, payload string
+		err           error
+	}{
+		{name: "provider unavailable", err: errors.New("test provider timeout")},
+		{name: "provider invalid response", payload: `{"status":"READY"}`},
+		{name: "provider clarification", payload: `{"status":"CLARIFICATION","message":"Country field is unavailable","proposal":null}`},
+	}
+	for _, test := range providerCases {
+		t.Run(test.name, func(t *testing.T) {
+			composer.provider = testComposerProvider(func(_ context.Context, scope, _, instruction string) ([]byte, error) {
+				if scope != composerMerchant || instruction != customInstruction {
+					t.Errorf("unexpected provider input %s %q", scope, instruction)
+				}
+				return []byte(test.payload), test.err
+			})
+			result := call(customInstruction)
+			if after, _ := json.Marshal(result.Proposal); result.Status != "READY" || string(after) != proposalJSON(t, originalDraft) {
+				t.Errorf("draft should use the original instruction: %+v", result)
+			}
+			if native := call("Block physical goods when amount is at least 100 minor units and email domain equals example.test"); native.Status != "READY" ||
+				strings.Contains(proposalJSON(t, native), semanticOperator) {
+				t.Errorf("supported conditions should remain local: %+v", native)
+			}
+		})
+	}
+}
+
+func proposalJSON(t *testing.T, result composerInterpretation) string {
+	t.Helper()
+	data, err := json.Marshal(result.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

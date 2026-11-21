@@ -6,7 +6,7 @@ Platform Admin and Merchant use **AI Rule** to create and review typed proposals
 
 | Component | Responsibility |
 | --- | --- |
-| Shared composer | Go handles supported explicit merchant prompts and JSON locally. When the general-purpose composer is enabled, Go can send the instruction and the scope's typed field catalogue to OpenAI for a `READY` proposal or `CLARIFICATION`. Go revalidates each proposal at save. Jev evaluates saved semantic conditions during transaction assessment independently of this setting. |
+| Shared composer | Go handles supported explicit merchant prompts and JSON locally. The optional general-purpose composer can map other safe instructions to the scope's typed field catalogue. If PayGuard cannot express a merchant condition with its available fields, an instruction with a clear action and scope can generate a **Custom rule · Jev** preview. Go revalidates the proposal when the operator saves it. Jev evaluates saved semantic conditions during transaction assessment. |
 | Platform Rules | The demo administrator composes and saves a global `DRAFT` in the existing Platform Rules store. A saved shared Simulation Lab run supplies evidence for submission. A separate checker can approve a revision for new Simulation Lab runs. The built-in rules retain their existing version and behavior. |
 | Merchant Policy | The merchant's own bearer credential supplies its tenant. Platform Admin selects a merchant and can manage its rules with the same editor. PostgreSQL stores immutable policy versions. Go evaluates active policies in both merchant test tools and records matches and versions. |
 | Jev | Mock or OpenRouter Jev evaluates eligible semantic conditions and supplies the separate amount-based risk advisory for merchant transactions. The administrator can test the effective settings with a fixed synthetic fixture in [AI Configuration](decision-engine.md#jev-configuration). |
@@ -53,7 +53,9 @@ Platform proposals use the existing stage-specific System Rules signal catalogue
 
 ## Conditions checked by Jev
 
-Use `semantic_match` on `transaction.description` or a registered custom text field when the meaning matters. Use the local `contains` operator for a literal substring and `eq` for exact values. For a country test, register `custom_ip_country` and supply the country code in the transaction. The preview labels each condition **Checked by PayGuard** or **Checked by Jev**. Checkout and Simulation Lab offer the same available inputs.
+Select **Generate preview** to see which conditions PayGuard can check locally and which need Jev. PayGuard uses `contains` for a literal substring and `eq` for an exact comparison when those operators fit the instruction. **Custom rule · Jev** uses `semantic_match` on `transaction.description` or the registered custom text field named in the preview. A compound instruction can combine local and semantic conditions in an `AND` or `OR` group. When clauses cannot be reliably split, the preview preserves the condition as a whole for Jev to evaluate from the observed text. Review the product, action, evidence field and complete condition before selecting **Save Rule**. Prompts with an unclear action or scope still need clarification. Checkout and Simulation Lab offer the same available inputs.
+
+For a country condition that PayGuard can check locally, register `custom_ip_country` as a country field and supply an ISO alpha-2 value such as `IN` in the transaction. A semantic condition can compare a country stated in the supplied text. A country absent from the transaction is missing evidence.
 
 This rule blocks physical goods checkout when the supplied country is India and the transaction description means admission to Hong Kong Disneyland.
 
@@ -74,7 +76,7 @@ This rule blocks physical goods checkout when the supplied country is India and 
 }
 ```
 
-Go evaluates eligible local conditions first. A local false in an AND group or a local true in an OR group settles that group without a semantic request. A conclusive Platform or Merchant block also skips the semantic request. If a semantic comparison is needed and its text is available, Go sends only the bounded observed text and saved criterion for each needed condition, with an opaque question key. Each value is limited to 120 characters. Detected email addresses, raw IP addresses, mailbox references, card data and credentials stay out of the request. In Mock mode, Jev returns `MATCH` for case-insensitive equality after trimming. Other comparisons return `UNKNOWN`. In Live mode, Go validates the typed Jev answers. The separate amount-based advisory still uses its own evidence and settings. [Jev configuration](decision-engine.md#jev-configuration)
+Go evaluates eligible local conditions first. A local false in an AND group or a local true in an OR group settles that group without a semantic request. A conclusive Platform or Merchant block also skips the semantic request. If a semantic comparison is needed and its text is available, Go sends the observed text and saved criterion for each needed condition with an opaque question key. The observed text can contain up to 120 characters and the criterion up to 2,000 characters. Detected email addresses, raw IP addresses, mailbox references, card data and credentials stay out of the request. In Mock mode, Jev returns `MATCH` for case-insensitive equality after trimming. Other comparisons return `UNKNOWN`. In Live mode, Go validates the typed Jev answers. The amount-based advisory uses its own evidence and settings. [Jev configuration](decision-engine.md#jev-configuration)
 
 | Answer | Effect |
 | --- | --- |
@@ -96,7 +98,7 @@ Go evaluates native policy conditions locally and calls the configured Jev provi
 
 ## Acceptance checks
 
-- Compose a supported English or Thai policy, review the readable proposal, and save it under the right scope. Check that an ambiguous, unavailable, or malformed proposal cannot be saved through the composer.
+- Compose a supported English or Thai policy and a meaning-based instruction that cannot map to the merchant catalogue. Review both proposals and confirm their scopes before saving. Check that the custom preview preserves every clause, identifies the evidence Jev will receive, and works with the general-purpose composer disabled. Check that incomplete or malformed proposals require correction before saving.
 - Verify exact normalized domain matching and missing amount handling. Check that a rule written by one merchant has no effect on the other merchant or on stored transaction snapshots.
 - Preview and save a 12-hour exact-email block. In both merchant test tools, check the target mailbox, another mailbox on the same domain, and the bare domain. Verify the block is limited to the selected merchant, expires 12 hours after activation, and preserves earlier decision snapshots on replay.
 - Verify `MATCH`, `NO_MATCH`, and unresolved results in the merchant's ledger from both tools. Test local short-circuiting, missing evidence, provider timeout, and exact replay after a rule version changes.

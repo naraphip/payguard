@@ -34,7 +34,7 @@ var localComposerComparisons = map[string]string{
 func localComposerClarification(profile merchantPolicyProfile) composerInterpretation {
 	result := composerInterpretation{
 		Status:  "CLARIFICATION",
-		Message: "Natural-language drafting is disabled. Use the rule fields to confirm the products, conditions and action.",
+		Message: "Specify one action (Block, Review or Challenge) and a condition. Include the unit for any payment amount.",
 	}
 	for _, capability := range profile.FieldRegistry {
 		if capability.Name == policyDescription && slices.Contains(capability.Operators, semanticOperator) {
@@ -46,8 +46,7 @@ func localComposerClarification(profile merchantPolicyProfile) composerInterpret
 	return result
 }
 
-// Recognize only complete, explicit sentences. Broader prose stays available for
-// AI drafting or operator confirmation without losing any clause.
+// Recognize complete, explicit sentences that fit the merchant's field catalogue.
 func interpretLocalMerchantRule(instruction string, profile merchantPolicyProfile) (composerInterpretation, bool) {
 	if strings.HasPrefix(instruction, "{") {
 		var proposal merchantPolicyProposal
@@ -84,23 +83,27 @@ func interpretLocalMerchantRule(instruction string, profile merchantPolicyProfil
 	}
 
 	field, operator, value, label, ok := localComposerCondition(match[3])
-	if !ok {
+	if !ok || !composerConditionAvailable(profile, products, field, operator) {
 		return composerInterpretation{}, false
 	}
 	condition := merchantPolicyCondition{Field: field, Operator: operator, Value: value}
 	action := localComposerActions[strings.ToLower(match[1])]
+	digest := sha256.Sum256([]byte(strings.Join(products, ",") + "|" + field + "|" + operator + "|" + string(value)))
+	return validateLocalRule(merchantPolicyProposal{
+		Name:  fmt.Sprintf("%s by %s (%x)", localActionTitle(action), label, digest[:4]),
+		Scope: composerMerchant, ProductTypes: products, Stages: merchantComposerStages(products), Action: action,
+		Conditions: merchantPolicyConditions{Logic: "AND", Rules: []merchantPolicyCondition{condition}},
+	}, profile), true
+}
+
+func merchantComposerStages(products []string) []string {
 	stages := make([]string, 0, len(products))
 	for _, product := range products {
 		if stage := merchantPolicyStage(product); !slices.Contains(stages, stage) {
 			stages = append(stages, stage)
 		}
 	}
-	digest := sha256.Sum256([]byte(strings.Join(products, ",") + "|" + field + "|" + operator + "|" + string(value)))
-	return validateLocalRule(merchantPolicyProposal{
-		Name:  fmt.Sprintf("%s by %s (%x)", localActionTitle(action), label, digest[:4]),
-		Scope: composerMerchant, ProductTypes: products, Stages: stages, Action: action,
-		Conditions: merchantPolicyConditions{Logic: "AND", Rules: []merchantPolicyCondition{condition}},
-	}, profile), true
+	return stages
 }
 
 func localComposerProducts(raw string, profile merchantPolicyProfile) []string {

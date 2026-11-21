@@ -240,7 +240,7 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.Scope == composerMerchant && composerHasMailbox(instruction) {
 		s.audit("interpret", input.Scope, actor, "SENSITIVE_INSTRUCTION", "", started)
-		problem(w, http.StatusUnprocessableEntity, "To block one email address temporarily, use the format Block email <address> for 12 hours in Merchant AI Rules.")
+		problem(w, http.StatusUnprocessableEntity, "To block one email address temporarily, use the format Block email <address> for 2 minutes in Merchant AI Rules.")
 		return
 	}
 	if sensitiveComposerText(instruction) {
@@ -252,6 +252,8 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	prompt := composerPlatformPrompt()
 	var profile merchantPolicyProfile
+	var fallback composerInterpretation
+	var hasFallback bool
 	if input.Scope == composerMerchant {
 		var err error
 		profile, err = s.access.merchantPolicyProfile(ctx, actor.MerchantID)
@@ -272,12 +274,38 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 			respond(w, http.StatusOK, output)
 			return
 		}
+		sentence := strings.TrimSpace(strings.TrimSuffix(unquoteRuleText(instruction), "."))
+		if hasCustomRuleLifetime(sentence) {
+			s.audit("interpret_local", input.Scope, actor, "UNSUPPORTED_DURATION", "", started)
+			respond(w, http.StatusOK, composerInterpretation{
+				Status: "CLARIFICATION", Message: "Specify a condition without a time limit, or use the temporary exact-email block format for a rule that expires.",
+			})
+			return
+		}
+		if hasAmbiguousCustomAction(sentence) {
+			output := localComposerClarification(profile)
+			s.audit("interpret_local", input.Scope, actor, output.Status, "", started)
+			respond(w, http.StatusOK, output)
+			return
+		}
+		fallback, hasFallback = interpretCustomMerchantRule(instruction, profile)
+		if proposal, ready := fallback.Proposal.(merchantPolicyProposal); ready &&
+			!slices.ContainsFunc(proposal.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+				return condition.Operator == semanticOperator
+			}) {
+			s.audit("interpret_local", input.Scope, actor, fallback.Status, "", started)
+			respond(w, http.StatusOK, fallback)
+			return
+		}
 		prompt = composerMerchantPrompt(profile)
 	}
 	if s.provider == nil {
 		s.audit("interpret", input.Scope, actor, "DISABLED", "", started)
 		if input.Scope == composerMerchant {
-			respond(w, http.StatusOK, localComposerClarification(profile))
+			if !hasFallback {
+				fallback = localComposerClarification(profile)
+			}
+			s.respondCustomInterpretation(w, input.Scope, actor, fallback, started)
 			return
 		}
 		problem(w, http.StatusServiceUnavailable, "Natural-language drafting is disabled. Use a structured rule draft.")
@@ -296,16 +324,33 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 			result, message = failure.outcome, failure.message
 		}
 		s.audit("interpret", input.Scope, actor, result, "", started)
+		if hasFallback {
+			s.respondCustomInterpretation(w, input.Scope, actor, fallback, started)
+			return
+		}
 		problem(w, http.StatusBadGateway, message)
 		return
 	}
 	output, err := parseComposerInterpretation(data, input.Scope, profile)
 	if err != nil {
 		s.audit("interpret", input.Scope, actor, "INVALID_PROVIDER_OUTPUT", "", started)
+		if hasFallback {
+			s.respondCustomInterpretation(w, input.Scope, actor, fallback, started)
+			return
+		}
 		problem(w, http.StatusBadGateway, "OpenAI returned an invalid AI Rule draft. Try again or use the rule fields.")
 		return
 	}
 	s.audit("interpret", input.Scope, actor, output.Status, "", started)
+	if output.Status == "CLARIFICATION" && hasFallback && fallback.Validation.Valid {
+		s.respondCustomInterpretation(w, input.Scope, actor, fallback, started)
+		return
+	}
+	respond(w, http.StatusOK, output)
+}
+
+func (s ruleComposer) respondCustomInterpretation(w http.ResponseWriter, scope string, actor mockMerchantActor, output composerInterpretation, started time.Time) {
+	s.audit("interpret_custom", scope, actor, output.Status, "", started)
 	respond(w, http.StatusOK, output)
 }
 
