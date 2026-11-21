@@ -5,12 +5,12 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { merchantMailboxDigest, parseScenarioEmail } from "./merchant-mailbox";
 import {
-  getMerchantDemoRole, getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantOutcomeLabels, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken,
+  getMerchantDemoRole, getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken,
 } from "./merchant-demo";
-import { MerchantJevEvidence } from "./merchant-jev-evidence";
 import { BookingComparisonDetails } from "./merchant-booking-comparison";
-import { PolicyDecisionDetails } from "./merchant-policy-decision";
+import { MerchantDecisionEvidence } from "./merchant-decision-evidence";
 import { RiskScoreDetails } from "./merchant-risk-score";
+import { TransactionDisposition, TransactionStatusBadge, transactionReviewCause, transactionStatus } from "./merchant-transaction-status";
 import { merchantDate, merchantDetailsHref } from "./settings/merchants/management-contracts";
 import { merchantFieldLabels, merchantOperatorLabels, policyFieldLabel } from "./settings/structured-rule-builder";
 import { useWorkspaceView } from "./workspace-view";
@@ -521,46 +521,29 @@ export function DemoScenarioPolicyContext({ flow }: { flow: DemoScenarioState })
   </section>;
 }
 
-const reviewLabels = { NONE: "No manual review", NEEDS_DECISION: "Needs decision", RESOLVED: "Resolved" } as const;
-
 export function DemoScenarioResult({ transaction, merchantName }: { transaction: DemoTransaction; merchantName: string }) {
-  const final = transaction.policyDecision?.finalDecision;
   const comparison = transaction.policyDecision?.bookingComparison;
-  const result = final ? policyActionLabels[final.action] ?? final.action : merchantOutcomeLabels[transaction.outcome];
-  const allowed = final ? final.action === "ALLOW" : transaction.outcome === "LOW_RISK";
-  const title = final ? "Transaction decision" : "Jev result";
-  const merchantReview = final?.source === "MERCHANT_POLICY" && final.action === "REVIEW" &&
-    transaction.policyDecision?.platformDecision.action === "ALLOW";
-  return <section className="rounded-xl border border-line bg-white p-4 sm:p-5" aria-label={title}>
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h3 className="font-semibold">{title}</h3>
-      <p role="status" className={`rounded-full px-3 py-1 text-xs font-semibold ${allowed
-        ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{result}</p>
-    </div>
-    {transaction.policyDecision && <div className="mt-3"><PolicyDecisionDetails decision={transaction.policyDecision} /></div>}
-    <div className="mt-3"><RiskScoreDetails score={transaction.policyDecision?.riskScore} /></div>
-    {comparison && <div className="mt-3"><BookingComparisonDetails comparison={comparison} /></div>}
-    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-      {final && <div><dt className="text-xs text-muted">Risk result</dt><dd className="font-semibold">{merchantOutcomeLabels[transaction.outcome]}</dd></div>}
-      <div className="min-w-0"><dt className="text-xs text-muted">Merchant</dt><dd className="break-words font-semibold">{merchantName}</dd></div>
-      {transaction.scenarioName && <div className="min-w-0"><dt className="text-xs text-muted">Scenario</dt><dd className="break-words font-semibold">{transaction.scenarioName} · v{transaction.scenarioVersion}</dd></div>}
-      {transaction.product && <div><dt className="text-xs text-muted">Product</dt><dd className="font-semibold">{merchantPolicyProducts[transaction.product as SimulationProduct] ?? transaction.product}</dd></div>}
-      {transaction.ruleVersion && <div><dt className="text-xs text-muted">Rule set</dt><dd className="font-semibold">{transaction.ruleVersion}</dd></div>}
-      {transaction.jevRuleVersion && <div><dt className="text-xs text-muted">Merchant Jev rules</dt><dd className="font-semibold">{transaction.jevRuleVersion}</dd></div>}
-      <MerchantJevEvidence transaction={transaction} />
-      <div><dt className="text-xs text-muted">Booking amount</dt><dd className="font-semibold">{transaction.amountMinor === null ? "Unavailable" : `${transaction.amountMinor.toLocaleString()} minor units`}</dd></div>
-      <div className="min-w-0"><dt className="text-xs text-muted">{transaction.scenarioName ? "Scenario and Jev rule hits" : "Jev rule hits"}</dt><dd className="break-words font-semibold">{transaction.ruleHits.join(", ") || "None"}</dd></div>
-      <div><dt className="text-xs text-muted">Transaction state</dt><dd className="font-semibold">{reviewLabels[transaction.reviewState]}</dd></div>
-      <div className="col-span-full">
-        <dt className="text-xs text-muted">{merchantReview ? "Merchant review reason" : "Assessment reason"}</dt>
-        <dd>{transaction.reason}</dd>
+  const status = transactionStatus(transaction);
+  return <section className="space-y-3 rounded-xl border border-line bg-white p-4 sm:p-5" aria-label="Transaction result">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <h3 className="font-semibold">Transaction result</h3>
+      <div role="status" aria-atomic="true" className="space-y-1 sm:text-right">
+        <TransactionStatusBadge status={status} />
+        <TransactionDisposition transaction={transaction} />
       </div>
-      {transaction.jevReason && transaction.jevReason !== transaction.reason && <div className="col-span-full">
-        <dt className="text-xs text-muted">Jev reason</dt>
-        <dd>{transaction.jevReason}</dd>
-      </div>}
+    </div>
+    {status === "REVIEW" && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+      {transactionReviewCause(transaction)} A manual decision is required.
+    </p>}
+    <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+      <div className="min-w-0"><dt className="text-xs text-muted">Merchant</dt><dd className="break-words font-semibold">{merchantName}</dd></div>
+      {transaction.product && <div><dt className="text-xs text-muted">Product</dt><dd className="font-semibold">{merchantPolicyProducts[transaction.product as SimulationProduct] ?? transaction.product}</dd></div>}
+      <div><dt className="text-xs text-muted">Booking amount</dt><dd className="font-semibold">{transaction.amountMinor === null ? "Unavailable" : `${transaction.amountMinor.toLocaleString()} minor units`}</dd></div>
     </dl>
-    <Link href={merchantDetailsHref(transaction.merchantId, "transactions", transaction.id)} className="mt-4 inline-block text-sm font-semibold text-accent underline underline-offset-2">View merchant transaction</Link>
+    <RiskScoreDetails score={transaction.policyDecision?.riskScore} />
+    {comparison && <BookingComparisonDetails comparison={comparison} />}
+    <MerchantDecisionEvidence transaction={transaction} />
+    <Link href={merchantDetailsHref(transaction.merchantId, "transactions", transaction.id)} className="inline-block text-sm font-semibold text-accent underline underline-offset-2">View merchant transaction</Link>
   </section>;
 }
 

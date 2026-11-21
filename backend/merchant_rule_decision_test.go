@@ -158,7 +158,7 @@ func TestMerchantRuleDecisionPostgres(t *testing.T) {
 		input := makeInput(source)
 		first := call(http.MethodPost, path, admin, input, http.StatusCreated)
 		result := decode(first)
-		if result.Outcome != "LOW_RISK" || result.JevAnswer != "LOW_RISK" || result.ThresholdMinor != nil ||
+		if result.Outcome != "LOW_RISK" || result.Status != "APPROVED" || result.JevAnswer != "LOW_RISK" || result.ThresholdMinor != nil ||
 			bytes.Contains(first, []byte(`"scenarioId"`)) || !strings.Contains(result.RuleVersion, "+governed-") {
 			t.Fatalf("unexpected threshold or venue for merchant-only %s result: %s", source, first)
 		}
@@ -178,21 +178,57 @@ func TestMerchantRuleDecisionPostgres(t *testing.T) {
 	input := makeInput("checkout")
 	input.AccountAgeDays = &age
 	challenged := decode(call(http.MethodPost, path, admin, input, http.StatusCreated))
-	if challenged.Outcome != "REVIEW" || challenged.ReviewState != "NONE" ||
+	if challenged.Outcome != "REVIEW" || challenged.Status != "REVIEW" || challenged.ReviewState != "NEEDS_DECISION" ||
 		challenged.PolicyDecision.Final != (policyFinal{Action: "CHALLENGE", Source: "PLATFORM"}) ||
 		challenged.PolicyDecision.Platform.RuleVersions[ruleID] != 1 {
 		t.Fatalf("approved platform challenge was not applied: %+v", challenged)
 	}
-	call(http.MethodPost, path+"/"+input.ID+"/decision", admin, map[string]any{"decision": "cleared"}, http.StatusConflict)
-	if read := decode(call(http.MethodGet, path+"/"+input.ID, token, nil, http.StatusOK)); read.ReviewState != challenged.ReviewState {
-		t.Fatalf("persisted challenge changed review state: %+v", read)
+	filterTotal := func(status string) int64 {
+		t.Helper()
+		var response merchantPage
+		body := call(http.MethodGet, path+"?limit=1&status="+status, token, nil, http.StatusOK)
+		if err := json.Unmarshal(body, &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Total
+	}
+	currentMetrics := func() merchantMetrics {
+		t.Helper()
+		var response struct{ Metrics merchantMetrics }
+		body := call(http.MethodGet, merchantDemoPath+"/"+merchant.ID, token, nil, http.StatusOK)
+		if err := json.Unmarshal(body, &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Metrics
+	}
+	metrics := currentMetrics()
+	if filterTotal("REVIEW") != 1 || filterTotal("REJECTED") != 0 || metrics.Approved != 2 || metrics.Rejected != 0 || metrics.Review != 1 {
+		t.Fatalf("the pending challenge must appear only in the Review filter and count: %+v", metrics)
+	}
+	decisionPath := path + "/" + input.ID + "/decision"
+	rejected := map[string]any{"decision": "rejected"}
+	call(http.MethodPost, decisionPath, token, rejected, http.StatusForbidden)
+	call(http.MethodPost, merchantDemoPath+"/"+other.ID+"/transactions/"+input.ID+"/decision", admin, rejected, http.StatusNotFound)
+	firstDecision := call(http.MethodPost, decisionPath, admin, rejected, http.StatusOK)
+	if reviewed := decode(firstDecision); reviewed.Status != "REJECTED" || reviewed.ReviewState != "RESOLVED" ||
+		reviewed.Outcome != challenged.Outcome || reviewed.PolicyDecision.Final != challenged.PolicyDecision.Final {
+		t.Fatalf("rejecting a challenge did not preserve original evidence: %+v", reviewed)
+	}
+	if !bytes.Equal(firstDecision, call(http.MethodPost, decisionPath, admin, rejected, http.StatusOK)) ||
+		!bytes.Equal(firstDecision, call(http.MethodPost, path, admin, input, http.StatusOK)) {
+		t.Fatal("manual decision or original submission replay changed the resolved transaction")
+	}
+	call(http.MethodPost, decisionPath, admin, map[string]any{"decision": "cleared"}, http.StatusConflict)
+	metrics = currentMetrics()
+	if filterTotal("REVIEW") != 0 || filterTotal("REJECTED") != 1 || metrics.Approved != 2 || metrics.Rejected != 1 || metrics.Review != 0 {
+		t.Fatalf("rejecting a challenge did not move it to the Rejected filter and count: %+v", metrics)
 	}
 	input = makeInput("simulation")
 	input.SimulateTimeout = true
 	input.CustomerEmailDomain = "mailinator.com"
 	timeout := decode(call(http.MethodPost, path, admin, input, http.StatusCreated))
 	resolved := decode(call(http.MethodPost, path+"/"+input.ID+"/decision", admin, map[string]any{"decision": "cleared"}, http.StatusOK))
-	if timeout.Outcome != "UNRESOLVED" || resolved.ReviewState != "RESOLVED" ||
+	if timeout.Outcome != "UNRESOLVED" || timeout.Status != "REVIEW" || resolved.ReviewState != "RESOLVED" || resolved.Status != "APPROVED" ||
 		!reflect.DeepEqual(timeout.PolicyDecision.RiskScore, resolved.PolicyDecision.RiskScore) {
 		t.Fatalf("manual resolution changed the recorded score: before=%+v after=%+v", timeout, resolved)
 	}
@@ -215,5 +251,20 @@ func TestMerchantRuleDecisionPostgres(t *testing.T) {
 	observed := decode(call(http.MethodPost, path, admin, undeclared, http.StatusCreated))
 	if observed.Product != "digital" || observed.PolicyDecision.ScoringProfileVersion != merchantRuleProfileVersion {
 		t.Fatalf("observed product did not enter merchant's effective catalogue: %+v", observed)
+	}
+	// An older action unknown to this engine still needs a decision, even
+	// when its historical risk label was LOW_RISK.
+	if _, err := db.Exec(ctx, `UPDATE merchant_demo_transactions
+		SET policy_decision=jsonb_set(policy_decision, '{finalDecision,action}', '"UNRECOGNIZED"')
+		WHERE merchant_id=$1::text::uuid AND id=$2::text::uuid`, merchant.ID, observed.ID); err != nil {
+		t.Fatal(err)
+	}
+	read := decode(call(http.MethodGet, path+"/"+observed.ID, token, nil, http.StatusOK))
+	if read.Status != "REVIEW" || read.ReviewState != "NEEDS_DECISION" {
+		t.Fatalf("unknown historical action was not held for review: %+v", read)
+	}
+	read = decode(call(http.MethodPost, path+"/"+observed.ID+"/decision", admin, rejected, http.StatusOK))
+	if read.Status != "REJECTED" || read.PolicyDecision.Final.Action != "UNRECOGNIZED" || read.Outcome != "LOW_RISK" {
+		t.Fatalf("unknown historical action was not safely resolved: %+v", read)
 	}
 }

@@ -58,7 +58,7 @@ export function BookingComparisonDetails({ comparison }: { comparison: MerchantB
       </div>}
       {prior.disposition && <div>
         <dt className="text-xs text-muted">Previous manual review</dt>
-        <dd>{prior.disposition === "cleared" ? "Cleared" : "Rejected"}</dd>
+        <dd>{prior.disposition === "cleared" ? "Approved" : "Rejected"}</dd>
       </div>}
     </dl>
   </section>;

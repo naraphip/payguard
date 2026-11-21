@@ -134,7 +134,7 @@ func (result *mockTransaction) applyMerchantRuleOutcome() {
 	case "BLOCK":
 		result.Outcome, result.ReviewState = "HIGH_RISK", "NONE"
 	case "CHALLENGE":
-		result.Outcome, result.ReviewState = "REVIEW", "NONE"
+		result.Outcome, result.ReviewState = "REVIEW", "NEEDS_DECISION"
 	case "REVIEW", "UNRESOLVED":
 		result.Outcome, result.ReviewState = final.Action, "NEEDS_DECISION"
 	default:

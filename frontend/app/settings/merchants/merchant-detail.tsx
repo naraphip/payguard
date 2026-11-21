@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { MerchantDemoError, merchantDemoRequest, merchantJevStatus, merchantOutcomeLabels, merchantPolicyProducts, policyActionLabels } from "../../merchant-demo";
-import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MerchantDemoError, merchantDemoRequest, merchantPolicyProducts } from "../../merchant-demo";
+import type { DemoMerchant } from "../../merchant-demo";
+import { TransactionStatusBadge, transactionStatus, transactionStatuses } from "../../merchant-transaction-status";
 import { useWorkspaceView } from "../../workspace-view";
 import { AdminMerchantPolicyWorkspace } from "../rule-composer";
 import { outlineButton } from "../system-rules/contracts";
@@ -25,11 +26,6 @@ function label(value: string) {
   return value.replaceAll("_", " ").toLowerCase();
 }
 
-function transactionAction(transaction: DemoTransaction) {
-  const action = transaction.policyDecision?.finalDecision.action;
-  return action ? policyActionLabels[action] ?? action : merchantOutcomeLabels[transaction.outcome];
-}
-
 function useMerchantResource<T>(path: string, token: string, revision = 0) {
   const [response, setResponse] = useState<T | null>(null);
   const [failure, setFailure] = useState<{ error: string; status?: number }>();
@@ -47,7 +43,8 @@ function useMerchantResource<T>(path: string, token: string, revision = 0) {
     return () => controller.abort();
   }, [path, token, retry, revision]);
 
-  return { response, failure, reload: () => setRetry(value => value + 1) };
+  const reload = useCallback(() => setRetry(value => value + 1), []);
+  return { response, failure, reload };
 }
 
 export function MerchantDetail({ merchantId, tab, transaction }: { merchantId: string; tab: MerchantTab; transaction?: string }) {
@@ -64,6 +61,13 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
   const path = `/${encodeURIComponent(merchantId)}`;
   const { response, failure, reload } = useMerchantResource<MerchantDetails>(path, token);
   const [updated, setUpdated] = useState<DemoMerchant>();
+  const overviewStale = useRef(false);
+  useEffect(() => {
+    if (tab === "overview" && overviewStale.current) {
+      overviewStale.current = false;
+      reload();
+    }
+  }, [reload, tab]);
   const router = useRouter();
   if (failure) return <section className={panel}>
     <h1 className="text-2xl font-semibold">
@@ -103,7 +107,8 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
     </nav>}
     {tab === "overview" && <MerchantOverview detail={response} merchant={merchant} token={token} onSave={setUpdated}
       onDelete={() => router.push("/settings/merchants")} />}
-    {tab === "transactions" && <MerchantTransactions token={token} merchant={merchant} canDecide={!merchantView} initialTransaction={transaction} />}
+    {tab === "transactions" && <MerchantTransactions token={token} merchant={merchant} canDecide={!merchantView}
+      initialTransaction={transaction} onDecision={() => { overviewStale.current = true; }} />}
     {tab === "rules" && <AdminMerchantPolicyWorkspace merchantId={merchant.id} token={token} />}
     {tab === "profiles" && <Profiles detail={response} />}
     {tab === "integrations" && <Integrations detail={response} />}
@@ -117,14 +122,11 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
   onSave: (merchant: DemoMerchant) => void; onDelete: () => void;
 }) {
   const { metrics, profile, recentTransactions } = detail;
-  const counts = [
-    ["Transactions", metrics.totalTransactions],
-    ["Allowed", metrics.allowed],
-    ["Challenged", metrics.challenged],
-    ["Under review", metrics.underReview],
-    ["Blocked", metrics.blocked],
-    ["Active merchant policies", metrics.activePolicies],
-  ] as const;
+  const statusCounts = {
+    APPROVED: metrics.approved ?? metrics.allowed,
+    REJECTED: metrics.rejected ?? metrics.blocked,
+    REVIEW: metrics.review ?? metrics.underReview + metrics.challenged,
+  };
   return <div className="space-y-5">
     <MerchantAccessToken merchantId={merchant.id} adminToken={token} />
     <section aria-label="Merchant activity" className="space-y-2">
@@ -132,10 +134,19 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
         <h2 className="text-lg font-semibold">Merchant activity</h2>
         <p className="text-xs text-muted">Transaction activity over the last {metrics.windowDays} days</p>
       </div>
-      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-        {counts.map(([name, value]) => <div className="min-w-0 rounded-xl border border-line bg-white p-3" key={name}>
-          <dt className="text-xs font-medium text-muted">{name}</dt><dd className="mt-1 text-xl font-semibold tabular-nums">{value}</dd>
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+        <div className="rounded-xl border border-line bg-white p-3">
+          <dt className="text-xs font-medium text-muted">Transactions</dt>
+          <dd className="mt-1 text-xl font-semibold tabular-nums">{metrics.totalTransactions}</dd>
+        </div>
+        {transactionStatuses.map(status => <div className="min-w-0 rounded-xl border border-line bg-white p-3" key={status}>
+          <dt><TransactionStatusBadge status={status} /></dt>
+          <dd className="mt-1 text-xl font-semibold tabular-nums">{statusCounts[status]}</dd>
         </div>)}
+        <div className="rounded-xl border border-line bg-white p-3">
+          <dt className="text-xs font-medium text-muted">Active merchant policies</dt>
+          <dd className="mt-1 text-xl font-semibold tabular-nums">{metrics.activePolicies}</dd>
+        </div>
       </dl>
     </section>
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -158,7 +169,7 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
               </p>
               <p className="text-xs text-muted">{merchantDate(item.createdAt)}</p>
             </div>
-            <div><p className="text-sm font-semibold">{transactionAction(item)}</p><p className="text-xs text-muted">{merchantJevStatus(item)}</p></div>
+            <TransactionStatusBadge status={transactionStatus(item)} />
           </li>)}
         </ul>
       </section>

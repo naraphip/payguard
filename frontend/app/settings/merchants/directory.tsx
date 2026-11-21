@@ -163,7 +163,7 @@ function DirectoryList({ token, preferredTab }: { token: string; preferredTab: M
               <th scope="col" className="w-[32%] px-3 py-2.5">Merchant</th>
               <th scope="col" className="hidden w-[18%] px-3 py-2.5 xl:table-cell">Business</th>
               <th scope="col" className="px-2 py-2.5">Transactions</th>
-              <th scope="col" className="px-2 py-2.5">Under review</th>
+              <th scope="col" className="px-2 py-2.5">Review</th>
               <th scope="col" className="px-2 py-2.5">Rules</th>
               <th scope="col" className="hidden px-2 py-2.5 2xl:table-cell">Last activity</th>
               <th scope="col" className="px-2 py-2.5"><span className="sr-only">Actions</span></th>
@@ -196,7 +196,7 @@ function DirectoryList({ token, preferredTab }: { token: string; preferredTab: M
           <p className="text-sm text-muted wrap-anywhere">{businessSummary(merchant)}</p>
           <dl className="grid grid-cols-3 gap-2 text-xs">
             <div><dt className="text-muted">Transactions</dt><dd className="font-semibold">{merchant.transactionCount}</dd></div>
-            <div><dt className="text-muted">Under review</dt><dd className="font-semibold">{merchant.underReview}</dd></div>
+            <div><dt className="text-muted">Review</dt><dd className="font-semibold">{merchant.underReview}</dd></div>
             <div><dt className="text-muted">Rules</dt><dd className="font-semibold">{merchant.ruleCount}</dd></div>
           </dl>
           {merchant.lastActivity && <p className="text-xs text-muted">Last activity {merchantDate(merchant.lastActivity)}</p>}

@@ -110,8 +110,8 @@ func (s mockMerchantService) managedMerchantList(w http.ResponseWriter, r *http.
 		SELECT m.id::text,m.name,m.description,m.setup,m.policy_integration,m.created_at,m.at,
 			stats.total,stats.review,policies.total
 		FROM selected m LEFT JOIN LATERAL (
-			SELECT count(*) AS total,count(*) FILTER (WHERE outcome<>'LOW_RISK' AND disposition IS NULL) AS review
-			FROM merchant_demo_transactions WHERE merchant_id=m.id
+			SELECT count(*) AS total,count(*) FILTER (WHERE `+merchantTransactionStatus+`='REVIEW') AS review
+			FROM merchant_demo_transactions t WHERE merchant_id=m.id
 		) stats ON true
 		LEFT JOIN LATERAL (
 			SELECT count(*) AS total FROM (
@@ -154,13 +154,25 @@ type merchantMetrics struct {
 	Challenged     int64 `json:"challenged"`
 	UnderReview    int64 `json:"underReview"`
 	Blocked        int64 `json:"blocked"`
+	Approved       int64 `json:"approved"`
+	Rejected       int64 `json:"rejected"`
+	Review         int64 `json:"review"`
 	ActivePolicies int   `json:"activePolicies"`
 }
 
 const merchantTransactionAction = `COALESCE(t.policy_decision #>> '{finalDecision,action}', CASE WHEN t.outcome='LOW_RISK' THEN 'ALLOW' ELSE t.outcome END)`
+
+// Use the same effective status for persisted results, review eligibility,
+// filtering and counts. Historical risk evidence can differ from disposition.
+const merchantTransactionStatus = `CASE
+	WHEN t.disposition='cleared' THEN 'APPROVED'
+	WHEN t.disposition='rejected' THEN 'REJECTED'
+	WHEN t.outcome='HIGH_RISK' OR (` + merchantTransactionAction + `) IN ('BLOCK','HIGH_RISK') THEN 'REJECTED'
+	WHEN (` + merchantTransactionAction + `) IN ('ALLOW','LOW_RISK') THEN 'APPROVED'
+	ELSE 'REVIEW' END`
 const merchantTransactionReview = `CASE WHEN t.disposition IS NOT NULL THEN 'RESOLVED'
-	WHEN t.outcome='LOW_RISK' OR (t.scenario_id IS NULL AND (` + merchantTransactionAction + `) IN ('BLOCK','CHALLENGE')) THEN 'NONE'
-	ELSE 'NEEDS_DECISION' END`
+	WHEN (` + merchantTransactionStatus + `)='REVIEW' THEN 'NEEDS_DECISION'
+	ELSE 'NONE' END`
 
 func (s mockMerchantService) managementMerchantID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if _, ok := s.authorize(w, r, false); !ok {
@@ -197,14 +209,16 @@ func (s mockMerchantService) managedMerchantDetails(w http.ResponseWriter, r *ht
 	}
 	metrics := merchantMetrics{WindowDays: 30}
 	err = tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE action='ALLOW'), count(*) FILTER (WHERE action='CHALLENGE'),
-		count(*) FILTER (WHERE review='NEEDS_DECISION'),count(*) FILTER (WHERE action='BLOCK')
-		FROM (SELECT `+merchantTransactionAction+` AS action,`+merchantTransactionReview+` AS review
+		count(*) FILTER (WHERE action='BLOCK'), count(*) FILTER (WHERE status='APPROVED'),
+		count(*) FILTER (WHERE status='REJECTED'), count(*) FILTER (WHERE status='REVIEW')
+		FROM (SELECT `+merchantTransactionAction+` AS action,`+merchantTransactionStatus+` AS status
 		FROM merchant_demo_transactions t WHERE merchant_id=$1::text::uuid AND created_at>=now()-interval '30 days') events`, id).
-		Scan(&metrics.Total, &metrics.Allowed, &metrics.Challenged, &metrics.UnderReview, &metrics.Blocked)
+		Scan(&metrics.Total, &metrics.Allowed, &metrics.Challenged, &metrics.Blocked, &metrics.Approved, &metrics.Rejected, &metrics.Review)
 	if err != nil {
 		demoWriteError(w, err)
 		return
 	}
+	metrics.UnderReview = metrics.Review
 	active, err := readMerchantPolicies(ctx, tx, id, true)
 	if err != nil {
 		demoWriteError(w, err)
@@ -249,10 +263,12 @@ func (s mockMerchantService) managedTransactionPage(w http.ResponseWriter, r *ht
 	page, err := merchantPagination(values)
 	from, fromErr := merchantFilterDate(values.Get("from"))
 	to, toErr := merchantFilterDate(values.Get("to"))
-	outcome, review, search := values.Get("outcome"), values.Get("reviewState"), strings.ToLower(strings.TrimSpace(values.Get("q")))
+	outcome, review, status := values.Get("outcome"), values.Get("reviewState"), values.Get("status")
+	search := strings.ToLower(strings.TrimSpace(values.Get("q")))
 	if err != nil || fromErr != nil || toErr != nil || from != nil && to != nil && from.After(*to) || len(search) > 36 ||
 		!slices.Contains([]string{"", "LOW_RISK", "HIGH_RISK", "ALLOW", "BLOCK", "CHALLENGE", "REVIEW", "UNRESOLVED"}, outcome) ||
-		!slices.Contains([]string{"", "NONE", "NEEDS_DECISION", "RESOLVED"}, review) {
+		!slices.Contains([]string{"", "NONE", "NEEDS_DECISION", "RESOLVED"}, review) ||
+		!slices.Contains([]string{"", "APPROVED", "REJECTED", "REVIEW"}, status) {
 		problem(w, http.StatusBadRequest, "Use valid transaction filters, pagination, and UTC dates.")
 		return
 	}
@@ -274,13 +290,14 @@ func (s mockMerchantService) managedTransactionPage(w http.ResponseWriter, r *ht
 	filter := ` AND ($2='' OR strpos(t.id::text,$2)=1)
 		AND ($3='' OR ` + merchantTransactionAction + `=$3 OR ((t.scenario_id IS NULL OR $3='LOW_RISK') AND t.outcome=$3))
 		AND ($4='' OR ` + merchantTransactionReview + `=$4)
-		AND ($5::timestamptz IS NULL OR t.created_at>=$5) AND ($6::timestamptz IS NULL OR t.created_at<$6)`
-	args := []any{id, search, outcome, review, from, to}
+		AND ($5::timestamptz IS NULL OR t.created_at>=$5) AND ($6::timestamptz IS NULL OR t.created_at<$6)
+		AND ($7='' OR ` + merchantTransactionStatus + `=$7)`
+	args := []any{id, search, outcome, review, from, to, status}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM merchant_demo_transactions t WHERE t.merchant_id=$1::text::uuid`+filter, args...).Scan(&page.Total); err != nil {
 		demoWriteError(w, err)
 		return
 	}
-	transactions, err := readManagedTransactions(ctx, tx, mockTransactionReadQuery+filter+` ORDER BY t.created_at DESC,t.id DESC LIMIT $7 OFFSET $8`,
+	transactions, err := readManagedTransactions(ctx, tx, mockTransactionReadQuery+filter+` ORDER BY t.created_at DESC,t.id DESC LIMIT $8 OFFSET $9`,
 		append(args, page.Limit, (page.Page-1)*page.Limit)...)
 	if err != nil {
 		demoWriteError(w, err)

@@ -15,6 +15,8 @@ export type DemoDirectory = {
   role: "admin" | "merchant";
 };
 
+export type MerchantTransactionStatus = "APPROVED" | "REJECTED" | "REVIEW";
+
 export type DemoTransaction = {
   id: string;
   merchantId: string;
@@ -35,6 +37,7 @@ export type DemoTransaction = {
   jevConfigurationVersion?: number;
   jevRuleVersion?: string;
   outcome: "LOW_RISK" | "HIGH_RISK" | "REVIEW" | "UNRESOLVED";
+  status?: MerchantTransactionStatus;
   reason: string;
   ruleHits: string[];
   reviewState: "NONE" | "NEEDS_DECISION" | "RESOLVED";

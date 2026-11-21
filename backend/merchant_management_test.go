@@ -148,9 +148,12 @@ func TestMerchantManagementPostgres(t *testing.T) {
 	open := createTransaction(firstPath, firstScenario, openID, 7500, "example.test")
 	createTransaction(firstPath, firstScenario, resolvedID, 7600, "example.test")
 	blocked := createTransaction(firstPath, firstScenario, blockedID, 75, "skycannner.com")
-	if open.ReviewState != "NEEDS_DECISION" || blocked.PolicyDecision == nil || blocked.PolicyDecision.Final.Action != "BLOCK" {
+	if open.ReviewState != "NEEDS_DECISION" || open.Status != "REVIEW" || blocked.Status != "REJECTED" ||
+		blocked.PolicyDecision == nil || blocked.PolicyDecision.Final.Action != "BLOCK" {
 		t.Fatalf("fixture decisions: open=%s blocked=%+v", open.ReviewState, blocked.PolicyDecision)
 	}
+	request(t, http.MethodPost, firstPath+"/transactions/"+blockedID+"/decision", admin, map[string]string{"decision": "cleared"}, http.StatusConflict, nil)
+	request(t, http.MethodPost, firstPath+"/transactions/"+allowedID+"/decision", admin, map[string]string{"decision": "rejected"}, http.StatusConflict, nil)
 	request(t, http.MethodPost, firstPath+"/transactions/"+resolvedID+"/decision", admin, map[string]string{"decision": "cleared"}, http.StatusOK, nil)
 
 	t.Run("legacy directory and paginated search", func(t *testing.T) {
@@ -219,7 +222,7 @@ func TestMerchantManagementPostgres(t *testing.T) {
 		request(t, http.MethodGet, firstPath, tokenA, nil, http.StatusOK, &own)
 		if !reflect.DeepEqual(details, own) || details.Merchant.ID != first.ID || details.Merchant.Description != description ||
 			details.Profile.BusinessName != first.Name || len(details.RecentTransactions) != 5 ||
-			details.Metrics != (merchantMetrics{WindowDays: 30, Total: 4, Allowed: 1, UnderReview: 1, Blocked: 1, ActivePolicies: 1}) {
+			details.Metrics != (merchantMetrics{WindowDays: 30, Total: 4, Allowed: 1, UnderReview: 1, Blocked: 1, Approved: 2, Rejected: 1, Review: 1, ActivePolicies: 1}) {
 			t.Fatalf("unexpected stable merchant detail: %+v", details)
 		}
 		for _, suffix := range []string{"", "/policies", "/policies/" + savedPolicy.Rule.ID, "/audit", "/transactions?limit=1", "/transactions/" + allowedID} {
@@ -263,6 +266,9 @@ func TestMerchantManagementPostgres(t *testing.T) {
 			amount    int64
 		}{
 			{"outcome=BLOCK", blockedID, 75},
+			{"status=REJECTED", blockedID, 75},
+			{"status=REVIEW&reviewState=NEEDS_DECISION", openID, 7500},
+			{"status=APPROVED&reviewState=RESOLVED", resolvedID, 7600},
 			{"outcome=REVIEW&reviewState=NEEDS_DECISION", openID, 7500},
 			{"reviewState=RESOLVED&q=" + resolvedID, resolvedID, 7600},
 			{"q=" + allowedID, allowedID, 50},
@@ -273,6 +279,10 @@ func TestMerchantManagementPostgres(t *testing.T) {
 				t.Fatalf("filter %s returned wrong totals or amount: %+v", filter.query, listed)
 			}
 		}
+		request(t, http.MethodGet, path+"?status=APPROVED&limit=1&page=2", tokenA, nil, http.StatusOK, &listed)
+		if listed.Total != 3 || len(listed.Transactions) != 1 || listed.Transactions[0].ID != allowedID || listed.Transactions[0].Status != "APPROVED" {
+			t.Fatalf("status pagination did not preserve total and stable page: %+v", listed)
+		}
 		from := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 		to := time.Now().UTC().AddDate(0, 0, 1).Format("2006-01-02")
 		request(t, http.MethodGet, path+"?from="+from+"&to="+to, tokenA, nil, http.StatusOK, &listed)
@@ -281,6 +291,7 @@ func TestMerchantManagementPostgres(t *testing.T) {
 		}
 		request(t, http.MethodGet, path+"?from="+to+"&to="+from, admin, nil, http.StatusBadRequest, nil)
 		request(t, http.MethodGet, path+"?outcome=UNKNOWN", admin, nil, http.StatusBadRequest, nil)
+		request(t, http.MethodGet, path+"?status=UNKNOWN", admin, nil, http.StatusBadRequest, nil)
 		request(t, http.MethodGet, secondPath+"/transactions?q="+allowedID, tokenB, nil, http.StatusOK, &listed)
 		if listed.Total != 1 || len(listed.Transactions) != 1 || listed.Transactions[0].MerchantID != second.ID {
 			t.Fatal("identical transaction IDs crossed tenant boundaries")

@@ -97,6 +97,7 @@ type mockTransaction struct {
 	Product                 string     `json:"product,omitempty"`
 	AmountMinor             *int64     `json:"amountMinor"`
 	Outcome                 string     `json:"outcome"`
+	Status                  string     `json:"status"`
 	Reason                  string     `json:"reason"`
 	RuleHits                []string   `json:"ruleHits"`
 	JevStatus               string     `json:"jevStatus"`

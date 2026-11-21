@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Building2, ClipboardList } from "lucide-react";
-import { loadLocalMerchantDirectory, merchantDemoRequest, merchantOutcomeLabels, policyActionLabels } from "../merchant-demo";
+import { loadLocalMerchantDirectory, merchantDemoRequest } from "../merchant-demo";
 import type { DemoDirectory, DemoTransaction } from "../merchant-demo";
+import { TransactionStatusBadge, transactionStatus, transactionStatuses } from "../merchant-transaction-status";
 import { useWorkspaceView } from "../workspace-view";
 import { useRuleCredential } from "../settings/rule-composer";
 import { merchantDetailsHref } from "../settings/merchants/management-contracts";
@@ -50,7 +51,10 @@ function ConnectedOverview({ token, merchantView }: { token: string; merchantVie
     return () => controller.abort();
   }, [attempt, merchantView, token]);
 
-  const pending = data?.transactions.filter(transaction => transaction.reviewState === "NEEDS_DECISION").length;
+  const statusCounts = { APPROVED: 0, REJECTED: 0, REVIEW: 0 };
+  for (const transaction of data?.transactions ?? []) {
+    statusCounts[transactionStatus(transaction)]++;
+  }
   return <main className="mx-auto max-w-[1440px] space-y-6 px-4 py-7 sm:px-7 lg:px-9">
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -72,14 +76,17 @@ function ConnectedOverview({ token, merchantView }: { token: string; merchantVie
     </div>}
     {!loading && !error && !data && <p className="text-sm text-muted">{merchantView ? "Open Transactions to connect with your merchant access token." : "Open Merchants to connect as an administrator."}</p>}
     {data && <>
-      <dl id="risk-trends" className="grid gap-3 sm:grid-cols-3">
+      <dl id="risk-trends" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         {[
           ...(!merchantView ? [["Merchants", data.merchantCount]] : []),
-          ["Recent transactions", data.transactions.length],
-          ["Needs decision", pending ?? 0],
+          ["Transactions", data.transactions.length],
         ].map(([label, value]) => <div key={label} className="rounded-xl border border-line bg-white p-4">
           <dt className="text-sm text-muted">{label}</dt>
           <dd className="mt-2 text-2xl font-semibold tabular-nums">{value}</dd>
+        </div>)}
+        {transactionStatuses.map(status => <div key={status} className="rounded-xl border border-line bg-white p-4">
+          <dt><TransactionStatusBadge status={status} /></dt>
+          <dd className="mt-2 text-2xl font-semibold tabular-nums">{statusCounts[status]}</dd>
         </div>)}
       </dl>
       <section className="rounded-xl border border-line bg-white p-4 sm:p-5" aria-labelledby="recent-transactions">
@@ -90,7 +97,7 @@ function ConnectedOverview({ token, merchantView }: { token: string; merchantVie
             <Link href={merchantDetailsHref(item.merchantId, "transactions", item.id)}
               className="flex flex-wrap items-center justify-between gap-2 py-3 hover:text-accent">
               <span className="text-sm"><strong>{item.merchantName}</strong> · {item.source === "checkout" ? "Mock Checkout" : "Simulation Lab"}</span>
-              <span className="text-sm text-muted">{item.policyDecision ? policyActionLabels[item.policyDecision.finalDecision.action] ?? item.policyDecision.finalDecision.action : merchantOutcomeLabels[item.outcome]}</span>
+              <TransactionStatusBadge status={transactionStatus(item)} />
             </Link>
           </li>)}
           </ul>}

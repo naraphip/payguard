@@ -27,6 +27,9 @@ export type MerchantDetails = {
   metrics: {
     windowDays: number;
     totalTransactions: number;
+    approved?: number;
+    rejected?: number;
+    review?: number;
     allowed: number;
     challenged: number;
     underReview: number;

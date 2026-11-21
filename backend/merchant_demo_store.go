@@ -59,8 +59,9 @@ CREATE TABLE IF NOT EXISTS merchant_demo_transactions (
   decided_at timestamptz,
   PRIMARY KEY (merchant_id, id),
   FOREIGN KEY (merchant_id, scenario_id, scenario_revision) REFERENCES merchant_demo_scenarios(merchant_id, id, revision),
-  CHECK ((disposition IS NULL AND decided_by IS NULL AND decided_at IS NULL) OR
-         (disposition IS NOT NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL AND outcome <> 'LOW_RISK'))
+  CONSTRAINT merchant_demo_disposition_metadata_check
+    CHECK ((disposition IS NULL AND decided_by IS NULL AND decided_at IS NULL) OR
+           (disposition IS NOT NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS merchant_demo_transactions_created_idx
   ON merchant_demo_transactions(merchant_id, created_at DESC, id DESC);
@@ -76,6 +77,7 @@ ALTER TABLE merchant_demo_transactions
   ADD COLUMN IF NOT EXISTS jev_answer text NOT NULL DEFAULT '' CHECK (jev_answer IN ('', 'LOW_RISK', 'REVIEW')),
   ADD COLUMN IF NOT EXISTS jev_decision_id text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS jev_confidence double precision CHECK (jev_confidence BETWEEN 0 AND 1),
+  DROP CONSTRAINT IF EXISTS merchant_demo_transactions_check,
   DROP CONSTRAINT IF EXISTS merchant_demo_transactions_jev_status_check,
   DROP CONSTRAINT IF EXISTS merchant_demo_transactions_outcome_check;
 CREATE INDEX IF NOT EXISTS merchant_demo_transactions_customer_history_idx
@@ -86,6 +88,14 @@ CREATE INDEX IF NOT EXISTS merchant_demo_transactions_mailbox_history_idx
   WHERE customer_mailbox_ref <> '';
 DO $migration$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'merchant_demo_transactions'::regclass AND conname = 'merchant_demo_disposition_metadata_check'
+  ) THEN
+    ALTER TABLE merchant_demo_transactions ADD CONSTRAINT merchant_demo_disposition_metadata_check
+      CHECK ((disposition IS NULL AND decided_by IS NULL AND decided_at IS NULL) OR
+             (disposition IS NOT NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL));
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conrelid = 'merchant_demo_transactions'::regclass AND conname = 'merchant_demo_jev_status_v2_check'
@@ -348,7 +358,7 @@ SELECT t.id::text, t.merchant_id::text, COALESCE(t.scenario_id::text, ''), COALE
 	s.threshold_minor, t.source, t.product, t.amount_minor, t.simulate_timeout, t.outcome, t.reason, t.rule_hits, t.jev_status,
 	t.jev_version, t.jev_rule_version, t.jev_answer, t.jev_decision_id, t.jev_confidence, t.jev_configuration_version,
 	t.created_at, t.disposition, t.decided_by, t.decided_at, t.customer_email_domain, t.customer_mailbox_ref, t.customer_id_ref, t.policy_decision,
-	t.platform_rule_version, t.jev_reason, t.account_age_days, t.custom_signals, ` + merchantTransactionReview + `
+	t.platform_rule_version, t.jev_reason, t.account_age_days, t.custom_signals, ` + merchantTransactionStatus + `, ` + merchantTransactionReview + `
 FROM merchant_demo_transactions t
 JOIN merchant_demo_merchants m ON m.id=t.merchant_id AND m.deleted_at IS NULL
 LEFT JOIN merchant_demo_scenarios s ON s.merchant_id=t.merchant_id AND s.id=t.scenario_id AND s.revision=t.scenario_revision
@@ -360,7 +370,7 @@ func scanMockTransaction(row pgx.Row) (mockTransaction, error) {
 		&result.ThresholdMinor, &result.Source, &result.Product, &result.AmountMinor, &result.simulateTimeout, &result.Outcome,
 		&result.Reason, &result.RuleHits, &result.JevStatus, &result.JevVersion, &result.JevRuleVersion, &result.JevAnswer, &result.JevDecisionID, &result.JevConfidence, &result.JevConfigurationVersion, &result.CreatedAt,
 		&result.Disposition, &result.DecidedBy, &result.DecidedAt, &result.CustomerEmailDomain, &result.customerMailboxRef, &result.customerIDRef, &result.PolicyDecision,
-		&result.RuleVersion, &result.JevReason, &result.AccountAgeDays, &result.CustomSignals, &result.ReviewState)
+		&result.RuleVersion, &result.JevReason, &result.AccountAgeDays, &result.CustomSignals, &result.Status, &result.ReviewState)
 	if err != nil {
 		return result, err
 	}
@@ -555,19 +565,19 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		}
 
 		err = tx.QueryRow(ctx, `
-			INSERT INTO merchant_demo_transactions
+			INSERT INTO merchant_demo_transactions AS t
 				(merchant_id, id, scenario_id, scenario_revision, source, product, amount_minor, simulate_timeout,
 				 outcome, reason, rule_hits, jev_status, jev_version, jev_rule_version, customer_email_domain, customer_mailbox_ref,
 				 policy_decision, jev_answer, jev_decision_id, jev_confidence, jev_configuration_version,
 			 platform_rule_version, jev_reason, account_age_days, custom_signals, customer_id_ref)
 			VALUES ($1::text::uuid, $2::text::uuid, NULLIF($3::text,'')::uuid, NULLIF($4::int,0), $5, $6, $7, $8, $9, $10, $11, $12, $13,
 			 $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
-			RETURNING created_at`,
+			RETURNING created_at, `+merchantTransactionStatus+`, `+merchantTransactionReview,
 			merchantID, input.ID, input.ScenarioID, result.ScenarioVersion, input.Source, input.Product, input.AmountMinor,
 			input.SimulateTimeout, result.Outcome, result.Reason, result.RuleHits, result.JevStatus, result.JevVersion,
 			result.JevRuleVersion, result.CustomerEmailDomain, result.customerMailboxRef, result.PolicyDecision,
 			result.JevAnswer, result.JevDecisionID, result.JevConfidence, result.JevConfigurationVersion,
-			result.RuleVersion, result.JevReason, result.AccountAgeDays, result.CustomSignals, result.customerIDRef).Scan(&result.CreatedAt)
+			result.RuleVersion, result.JevReason, result.AccountAgeDays, result.CustomSignals, result.customerIDRef).Scan(&result.CreatedAt, &result.Status, &result.ReviewState)
 		created = err == nil
 		return err
 	})
@@ -602,7 +612,7 @@ func (r repository) decideMockTransaction(ctx context.Context, merchantID, trans
 			result = current
 			return nil
 		}
-		if current.ReviewState != "NEEDS_DECISION" {
+		if current.Status != "REVIEW" {
 			return errDemoDecisionConflict
 		}
 		_, err = tx.Exec(ctx, `

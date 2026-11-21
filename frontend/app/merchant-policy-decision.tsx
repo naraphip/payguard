@@ -39,7 +39,7 @@ export function PolicyDecisionDetails({ decision }: { decision: MerchantPolicyDe
   const { platformDecision, merchantPolicyDecision, jevDecision, finalDecision } = decision;
   return <dl className={`grid gap-3 rounded-lg border border-line bg-white p-3 text-sm ${jevDecision ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"}`}>
     <div>
-      <dt className="text-xs text-muted">Final decision</dt>
+      <dt className="text-xs text-muted">Automated decision</dt>
       <dd className="mt-0.5 font-semibold">{policyActionLabels[finalDecision.action] ?? finalDecision.action}</dd>
       <dd className="text-xs text-muted">{sources[finalDecision.source] ?? finalDecision.source}</dd>
     </div>
