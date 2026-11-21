@@ -1,3 +1,6 @@
+import { payguardFetch } from "../../production-auth";
+import { actionButton } from "../../action-styles";
+
 export const rulesEndpoint = "/api/v1/system/rules";
 
 export const stages = {
@@ -104,7 +107,7 @@ export type Preview = {
 };
 
 export async function ruleRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const response = await payguardFetch(path, init);
   const body = await response.json().catch(() => null);
   if (!response.ok || body === null) {
     throw new Error(body?.error ?? "The rules service is unavailable. Try again.");
@@ -112,8 +115,8 @@ export async function ruleRequest<T>(path: string, init?: RequestInit): Promise<
   return body as T;
 }
 
-export const primaryButton = "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-55";
-export const outlineButton = "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-xs transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-55";
+export const primaryButton = actionButton.primary;
+export const outlineButton = actionButton.secondary;
 export const fieldControl = "h-9 min-w-0 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-xs disabled:bg-slate-50";
 
 export function formatDate(value: string) {

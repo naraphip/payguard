@@ -345,7 +345,7 @@ type merchantAuditEntry struct {
 }
 
 func auditMerchant(ctx context.Context, tx pgx.Tx, id, action string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO merchant_demo_audit(merchant_id,action,actor) VALUES($1::text::uuid,$2,'platform-admin')`, id, action)
+	_, err := tx.Exec(ctx, `INSERT INTO merchant_demo_audit(merchant_id,action,actor) VALUES($1::text::uuid,$2,$3)`, id, action, auditActor(ctx, platformMaker))
 	return err
 }
 
@@ -367,7 +367,7 @@ func (s mockMerchantService) managedMerchantAudit(w http.ResponseWriter, r *http
 				NULL::int prior,NULL::int version,created_at AS occurred_at,'' AS reason
 				FROM merchant_demo_audit WHERE merchant_id=$1::text::uuid
 			UNION ALL
-			SELECT rule_id::text||':'||version,'POLICY_'||upper(change_reason),CASE WHEN created_by='platform-admin' THEN 'platform-admin' ELSE 'merchant' END,rule_id::text,
+			SELECT rule_id::text||':'||version,'POLICY_'||upper(change_reason),CASE WHEN created_by=merchant_id::text THEN 'merchant' ELSE created_by END,rule_id::text,
 				NULLIF(version-1,0),version,created_at,COALESCE(preview->>'approvalReason','')
 				FROM merchant_policy_rule_versions WHERE merchant_id=$1::text::uuid
 			UNION ALL

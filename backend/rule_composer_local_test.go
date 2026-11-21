@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -113,7 +112,7 @@ func TestComposerMerchantSchemaRoutesSupportedFieldTypes(t *testing.T) {
 	}
 }
 
-func TestManagedAuthoringWithoutComposerPostgres(t *testing.T) {
+func TestManagedComposerRoutingPostgres(t *testing.T) {
 	db := openPolicyTestDatabase(t)
 	repo := repository{db}
 	merchant, _, err := repo.createMockMerchant(t.Context(), mockMerchantInput{
@@ -131,9 +130,10 @@ func TestManagedAuthoringWithoutComposerPostgres(t *testing.T) {
 	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/policy-interpret", func(w http.ResponseWriter, r *http.Request) {
 		composer.interpret(w, r)
 	})
-	call := func(instruction string) composerInterpretation {
+	call := func(t *testing.T, payload map[string]any) composerInterpretation {
 		t.Helper()
-		body, _ := json.Marshal(map[string]string{"scope": "MERCHANT", "instruction": instruction})
+		payload["scope"] = composerMerchant
+		body, _ := json.Marshal(payload)
 		req := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(body)))
 		req.Header.Set("Authorization", "Bearer "+admin)
 		rec := httptest.NewRecorder()
@@ -147,45 +147,90 @@ func TestManagedAuthoringWithoutComposerPostgres(t *testing.T) {
 		}
 		return result
 	}
-	if result := call("Block physical goods when email domain equals example.test"); result.Status != "READY" || !result.Validation.Valid {
+	interpret := func(t *testing.T, instruction string) composerInterpretation {
+		t.Helper()
+		return call(t, map[string]any{"instruction": instruction})
+	}
+	const domainInstruction = "Block physical goods when email domain equals example.test"
+	if result := interpret(t, domainInstruction); result.Status != "READY" || !result.Validation.Valid ||
+		result.Source != composerSourceLocalFallback || !strings.Contains(result.Message, "not configured") || result.Model != "" {
 		t.Fatalf("local policy draft: %+v", result)
 	}
 	const customInstruction = "Block ticket ที่เป็น *disney* land hongkong และ ip มาจาก india"
-	originalDraft := call(customInstruction)
+	originalDraft := interpret(t, customInstruction)
 	if originalDraft.Status != "READY" || !originalDraft.Validation.Valid || originalDraft.SemanticDraft != nil {
 		t.Fatalf("eligible unsupported instruction should produce a directly savable draft: %+v", originalDraft)
 	}
-	if result := call("Block theme park tickets for 2 min"); result.Status != "CLARIFICATION" || result.Proposal != nil {
+	if result := interpret(t, "Block theme park tickets for 2 min"); result.Status != "CLARIFICATION" || result.Proposal != nil ||
+		result.Source != composerSourceLocal {
 		t.Fatalf("unsupported expiry should require clarification: %+v", result)
 	}
-	if result := call(`{"scope":"MERCHANT","unknownField":"Block theme park tickets"}`); result.Status != "CLARIFICATION" || result.Proposal != nil {
+	if result := interpret(t, `{"scope":"MERCHANT","unknownField":"Block theme park tickets"}`); result.Status != "CLARIFICATION" || result.Proposal != nil ||
+		result.Source != composerSourceLocal {
 		t.Fatalf("invalid JSON must remain a validation error: %+v", result)
 	}
-	providerCases := []struct {
-		name, payload string
-		err           error
+
+	const domainDraft = `{"status":"READY","message":"","proposal":{"scope":"MERCHANT","name":"OpenAI domain draft","product_types":["physical"],"stages":["CHECKOUT"],"conditions":{"logic":"AND","rules":[{"field":"customer.email_domain","operator":"eq","value":"example.test"}]},"action":"BLOCK"}}`
+	const thaiDraft = `{"status":"READY","message":"","proposal":{"scope":"MERCHANT","name":"ตรวจสอบยอดสินค้าจริง","product_types":["physical"],"stages":["CHECKOUT"],"conditions":{"logic":"AND","rules":[{"field":"order.amount_minor","operator":"gte","value":50000}]},"action":"REVIEW"}}`
+	const emailRisk = "บล็อกสินค้าทั่วไปเมื่อเป็นอีเมลชั่วคราวหรือชื่อก่อน @ ดูสุ่ม"
+	const emailDraft = `{"status":"READY","message":"","proposal":{"scope":"MERCHANT","name":"Email risk","product_types":["physical"],"stages":["CHECKOUT"],"conditions":{"logic":"OR","rules":[{"field":"customer.email_local_part_random","operator":"eq","value":true},{"field":"customer.email_disposable","operator":"eq","value":true}]},"action":"BLOCK"}}`
+	composer.model = "gpt-4.1-mini"
+	for _, test := range []struct {
+		name, instruction, response, source, status, detail string
+		err                                                 error
 	}{
-		{name: "provider unavailable", err: errors.New("test provider timeout")},
-		{name: "provider invalid response", payload: `{"status":"READY"}`},
-		{name: "provider clarification", payload: `{"status":"CLARIFICATION","message":"Country field is unavailable","proposal":null}`},
-	}
-	for _, test := range providerCases {
+		{name: "native rule reaches model", instruction: domainInstruction, response: domainDraft, source: composerSourceOpenAI, status: "READY", detail: "OpenAI domain draft"},
+		{name: "natural Thai reaches model", instruction: "ส่งรายการสินค้าจริงให้ตรวจสอบเมื่อยอดตั้งแต่ 50000 หน่วยย่อย", response: thaiDraft, source: composerSourceOpenAI, status: "READY", detail: "ตรวจสอบยอดสินค้าจริง"},
+		{name: "Thai email risk reaches model", instruction: emailRisk, response: emailDraft, source: composerSourceOpenAI, status: "READY", detail: policyRandomEmail},
+		{name: "email conditions cannot be dropped", instruction: emailRisk, response: strings.Replace(emailDraft, `{"field":"customer.email_disposable","operator":"eq","value":true}`, `{"field":"product.type","operator":"eq","value":"physical"}`, 1), source: composerSourceLocalFallback, status: "READY", detail: "did not pass PayGuard validation"},
+		{name: "provider unavailable", instruction: customInstruction, err: composerProviderTimeout, source: composerSourceLocalFallback, status: "READY", detail: "timed out"},
+		{name: "provider invalid response", instruction: customInstruction, response: `{"status":"READY"}`, source: composerSourceLocalFallback, status: "READY", detail: "did not pass PayGuard validation"},
+		{name: "provider clarification takes precedence", instruction: customInstruction, response: `{"status":"CLARIFICATION","message":"Country field is unavailable","proposal":null}`, source: composerSourceOpenAI, status: "CLARIFICATION", detail: "Country field is unavailable"},
+	} {
 		t.Run(test.name, func(t *testing.T) {
+			calls := 0
 			composer.provider = testComposerProvider(func(_ context.Context, scope, _, instruction string) ([]byte, error) {
-				if scope != composerMerchant || instruction != customInstruction {
+				calls++
+				if scope != composerMerchant || instruction != test.instruction {
 					t.Errorf("unexpected provider input %s %q", scope, instruction)
 				}
-				return []byte(test.payload), test.err
+				return []byte(test.response), test.err
 			})
-			result := call(customInstruction)
-			if after, _ := json.Marshal(result.Proposal); result.Status != "READY" || string(after) != proposalJSON(t, originalDraft) {
-				t.Errorf("draft should use the original instruction: %+v", result)
+			result := interpret(t, test.instruction)
+			if calls != 1 || result.Source != test.source || result.Status != test.status ||
+				!strings.Contains(result.Message+proposalJSON(t, result), test.detail) {
+				t.Fatalf("expected %s from %s in one provider call, got %+v with %d calls", test.status, test.source, result, calls)
 			}
-			if native := call("Block physical goods when amount is at least 100 minor units and email domain equals example.test"); native.Status != "READY" ||
-				strings.Contains(proposalJSON(t, native), semanticOperator) {
-				t.Errorf("supported conditions should remain local: %+v", native)
+			wantModel := ""
+			if test.source == composerSourceOpenAI {
+				wantModel = composer.model
+			}
+			if result.Model != wantModel || (result.Status == "CLARIFICATION" && result.Proposal != nil) {
+				t.Fatalf("incorrect model provenance or clarification: %+v", result)
+			}
+			if test.source == composerSourceLocalFallback && test.instruction == customInstruction &&
+				proposalJSON(t, result) != proposalJSON(t, originalDraft) {
+				t.Fatalf("fallback changed the original local draft: %+v", result)
 			}
 		})
+	}
+
+	composer.provider = testComposerProvider(func(context.Context, string, string, string) ([]byte, error) {
+		t.Error("private or structured authoring reached OpenAI")
+		return nil, nil
+	})
+	if result := call(t, map[string]any{"mailboxBlock": map[string]any{
+		"mailboxDigest": strings.Repeat("a", 64), "durationMinutes": 2,
+	}}); result.Status != "READY" || result.Source != composerSourceLocal || result.Model != "" {
+		t.Fatalf("exact mailbox draft must stay local: %+v", result)
+	}
+	if result := interpret(t, `{"scope":"MERCHANT","unknownField":"Block theme park tickets"}`); result.Status != "CLARIFICATION" ||
+		result.Source != composerSourceLocal {
+		t.Fatalf("explicit structured text must be checked locally: %+v", result)
+	}
+	if result := interpret(t, "Block physical goods when the email is disposable for two minutes"); result.Status != "CLARIFICATION" ||
+		result.Source != composerSourceLocal {
+		t.Fatalf("a temporary email-risk rule must request clarification: %+v", result)
 	}
 }
 

@@ -5,7 +5,8 @@ import type { RuleTransport } from "./contracts";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import Link from "next/link";
-import { ArrowUpRight, CircleAlert, FlaskConical, LoaderCircle, LockKeyhole, Plus, Trash2, X } from "lucide-react";
+import { ArrowUpRight, CircleAlert, FlaskConical, LoaderCircle, LockKeyhole, Plus, Save, Trash2, X } from "lucide-react";
+import { actionButton, ruleActionTone, stateBadge } from "../../action-styles";
 import {
   actions, fieldControl, formatDate, operators, outlineButton, primaryButton,
   globalRuleTransport, signalDetails, stages,
@@ -34,12 +35,13 @@ function PreviewResults({ result }: { result: Preview }) {
   return <div className="space-y-3" role="status">
     <dl className="grid grid-cols-3 gap-2">
       {[
-        { label: "Evaluated", value: result.eligible },
-        { label: "Matched", value: result.matched },
-        { label: "Skipped", value: result.skipped },
-      ].map(({ label, value }) => <div key={label} className="rounded-lg border border-slate-200 bg-white p-2.5">
+        { label: "Evaluated", value: result.eligible, tone: "border-slate-200 bg-white text-slate-900" },
+        { label: "Matched", value: result.matched, tone: "border-sky-200 bg-sky-50 text-sky-950" },
+        { label: "Skipped", value: result.skipped, tone: result.skipped > 0
+          ? "border-amber-200 bg-amber-50 text-amber-950" : "border-slate-200 bg-white text-slate-900" },
+      ].map(({ label, value, tone }) => <div key={label} className={`rounded-lg border p-2.5 ${tone}`}>
         <dt className="text-xs text-slate-600">{label}</dt>
-        <dd className="mt-1 text-lg font-semibold text-slate-900 tabular-nums">{value}</dd>
+        <dd className="mt-1 text-lg font-semibold tabular-nums">{value}</dd>
       </div>)}
     </dl>
     {result.skipped > 0 && <p className="text-xs text-slate-600">Skipped events were missing a signal required by this rule.</p>}
@@ -208,7 +210,10 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
           </div>
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-lg border border-slate-200 p-3"><dt className="text-xs text-slate-600">Stage</dt><dd className="mt-1 font-medium">{stages[rule.stage]}</dd></div>
-            <div className="rounded-lg border border-slate-200 p-3"><dt className="text-xs text-slate-600">Action</dt><dd className="mt-1 font-medium">{actions[rule.action]}</dd></div>
+            <div className="rounded-lg border border-slate-200 p-3">
+              <dt className="text-xs text-slate-600">Action</dt>
+              <dd className="mt-1"><span className={stateBadge(ruleActionTone(rule.action))}>{actions[rule.action]}</span></dd>
+            </div>
           </dl>
           <section aria-labelledby="current-conditions" className="space-y-2">
             <h3 id="current-conditions" className="text-sm font-semibold">Conditions</h3>
@@ -269,7 +274,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
                     <option value="" disabled>Choose a signal</option>
                     {available.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
                   </select></Field>
-                  <button type="button" className="mt-auto grid size-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-45"
+                  <button type="button" className={`${actionButton.dangerOutline} mt-auto w-10 p-0!`}
                     disabled={form.conditions.length === 1} aria-label={`Remove condition ${index + 1}`}
                     onClick={() => change({ ...form, conditions: form.conditions.filter((_, position) => position !== index) })}>
                     <Trash2 className="size-4" aria-hidden="true" />
@@ -299,7 +304,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
 
           <section aria-labelledby="preview-rule" className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
             <div className="flex items-start gap-2.5">
-              <FlaskConical className="mt-0.5 size-4 shrink-0 text-indigo-700" aria-hidden="true" />
+              <FlaskConical className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden="true" />
               <div>
                 <h3 id="preview-rule" className="text-sm font-semibold">Preview on saved run</h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-600">Compare this draft with saved synthetic events.</p>
@@ -317,7 +322,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
                 {task === "preview" && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 {task === "preview" ? "Previewing…" : "Preview"}
               </button>
-            </div> : <Link href="/simulation-lab" className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-700 hover:underline">
+            </div> : <Link href="/simulation-lab" className="inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:underline">
               Save a run in Simulation Lab <ArrowUpRight className="size-4" aria-hidden="true" />
             </Link>}
             {previewError && <Message>{previewError}</Message>}
@@ -329,10 +334,12 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
         {saveError && <div className="mb-3"><Message>{saveError}</Message></div>}
         <div className="flex flex-wrap items-center justify-end gap-2">
           {rule?.updatedAt && !readOnly && <span className="mr-auto text-xs text-slate-600">Revision {rule.version} · {formatDate(rule.updatedAt)}</span>}
-          {rule && !readOnly && <button type="button" className="mr-auto text-sm font-semibold text-red-700" disabled={!!task} onClick={() => void removeDraft()}>Delete draft</button>}
+          {rule && !readOnly && <button type="button" className={`${actionButton.dangerOutline} mr-auto`} disabled={!!task} onClick={() => void removeDraft()}>
+            <Trash2 className="size-4 shrink-0" aria-hidden="true" />Delete draft
+          </button>}
           <button type="button" className={outlineButton} onClick={onClose} disabled={task === "save"}>{readOnly ? "Close" : "Cancel"}</button>
           {!readOnly && <button type="submit" className={primaryButton} disabled={task !== null}>
-            {task === "save" && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
+            {task === "save" ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : <Save className="size-4 shrink-0" aria-hidden="true" />}
             {task === "save" ? "Saving…" : "Save draft"}
           </button>}
         </div>

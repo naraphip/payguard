@@ -7,6 +7,7 @@ import { Network } from "./network";
 import { DemoScenarioSimulation } from "./demo-scenario-runner";
 import type { MerchantTransactionStatus } from "./merchant-demo";
 import { TransactionStatusBadge } from "./merchant-transaction-status";
+import { payguardFetch, useProductionSession } from "./production-auth";
 import { CartProduct, catalog, defaultPrices, Storefront, thb, travelProduct } from "./storefront";
 import { TestPayment } from "./test-payment";
 import type { CheckoutConfig } from "./test-payment";
@@ -86,7 +87,7 @@ function evidenceLabel(value?: string) {
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await payguardFetch(url, init);
   const body = await response.json().catch(() => null);
   if (!response.ok || !body) throw new Error(body?.error ?? "Simulation API unavailable. Check the local Go service.");
   return body as T;
@@ -229,6 +230,7 @@ function Metrics({ report }: { report: Report }) {
 }
 
 export default function Home({ sharedRunId }: { sharedRunId?: string }) {
+  const production = useProductionSession() !== null;
   const [config, setConfig] = useState(defaults);
   const [contact, setContact] = useState(emptyContact);
   const [contactEmailError, setContactEmailError] = useState(false);
@@ -252,7 +254,7 @@ export default function Home({ sharedRunId }: { sharedRunId?: string }) {
   const resultsHeading = useRef<HTMLHeadingElement>(null);
   const pendingFocus = useRef<"results" | "evidence" | null>(null);
   const run = completedRun?.snapshot;
-  const scoped = tenantToken.trim();
+  const scoped = production ? "" : tenantToken.trim();
   const ota = travelProduct(config.product);
   const cartProduct = config.product === "payment_gateway" ? null : config.product;
   const item = cartProduct ? catalog[cartProduct] : null;
@@ -277,12 +279,13 @@ export default function Home({ sharedRunId }: { sharedRunId?: string }) {
     : "";
 
   useEffect(() => {
+    if (production) return;
     const controller = new AbortController();
     api<CheckoutConfig>("/api/v1/simulation/checkout/config", { signal: controller.signal, cache: "no-store" })
       .then(data => { if (!controller.signal.aborted) setCheckout(data); })
       .catch(() => { if (!controller.signal.aborted) setCheckoutError(true); });
     return () => controller.abort();
-  }, []);
+  }, [production]);
 
   useEffect(() => {
     const hash = window.location.hash.slice(1);
@@ -485,7 +488,7 @@ export default function Home({ sharedRunId }: { sharedRunId?: string }) {
                 </span>
               </summary>
               <div className="mt-4 space-y-4 border-t border-[#eee7f4] pt-4">
-                <Field label="Demo merchant token (optional)">
+                {!production && <Field label="Demo merchant token (optional)">
                   <input className="control" type="password" autoComplete="off" disabled={reportBusy} value={tenantToken}
                     onChange={event => {
                       const value = event.currentTarget.value;
@@ -500,7 +503,7 @@ export default function Home({ sharedRunId }: { sharedRunId?: string }) {
                       setReportError("");
                     }} />
                   <span className="text-xs font-normal text-muted">Enter a token to scope linked entities and saved runs to your demo merchant.</span>
-                </Field>
+                </Field>}
                 <Field label="Traffic pattern"><select className="control" value={config.scenario} onChange={e => update("scenario", e.target.value as Scenario)}>
                   <option value="mixed">Mixed traffic</option><option value="normal">Normal traffic</option><option value="fraud">Fraud ring</option>
                 </select></Field>
@@ -551,10 +554,10 @@ export default function Home({ sharedRunId }: { sharedRunId?: string }) {
                 {busy ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
                 {busy ? "Running batch simulation…" : "Run batch simulation"}
               </button>
-              {cartProduct && !scoped ? <TestPayment config={checkout} runId={runMatchesCart && run ? run.id : null} amount={subtotal}
+              {!production && (cartProduct && !scoped ? <TestPayment config={checkout} runId={runMatchesCart && run ? run.id : null} amount={subtotal}
                 disabledReason={paymentDisabled} onBusyChange={setPaymentBusy} /> : <p className="text-xs text-[#5f516d]">
                   {cartProduct ? "Omise Test Mode is available for anonymous storefront runs." : "Gateway runs simulate authorization. Omise Test Mode is available for anonymous storefront runs."}
-                </p>}
+                </p>)}
             </div>
           </aside>
         </form>

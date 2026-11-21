@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { PayGuardLogo } from "./payguard-logo";
+import { useProductionSession } from "./production-auth";
+import type { ProductionRole } from "./production-auth";
 import { merchantDetailsHref } from "./settings/merchants/management-contracts";
 import { setWorkspaceView, useMerchantDemoRole, useWorkspaceView } from "./workspace-view";
 import type { WorkspaceView } from "./workspace-view";
@@ -23,8 +25,9 @@ type Destination = {
   platformOnly?: boolean;
   standalone?: boolean;
 };
+type NavigationGroup = { label: string; items: Destination[] };
 
-const groups: { label: string; items: Destination[] }[] = [
+const groups: NavigationGroup[] = [
   {
     label: "Overview",
     items: [
@@ -74,8 +77,21 @@ const merchantTransactions: Destination = {
 const merchantRules: Destination = { href: "/settings/merchant-rules", label: "Merchant AI Rules", Icon: Store };
 const merchantDashboard: Destination = { href: "/dashboard", label: "Dashboard", Icon: LayoutDashboard };
 const merchantSettings: Destination = { href: "/settings", label: "Settings", Icon: Settings };
+const directory: Destination = { href: merchantPath, label: "Merchants", Icon: Building2 };
 const merchantDestinations = [merchantDashboard, merchantTransactions, merchantRules, merchantSettings];
 const merchantGroups = [{ label: "Merchant", items: merchantDestinations }];
+const productionMerchantGroups = [{ label: "Merchant", items: [directory, ...merchantDestinations] }];
+const productionAdminGroups = groups.map(group => ({
+  ...group,
+  items: group.items.filter(item => !item.standalone && item.href !== "/settings/mock-checkout")
+    .map(item => item.href === "/settings/operations#transactions" ? merchantTransactions : item),
+}));
+const checkerGroups = [{ label: "Decision Engine", items: [groups[2].items[0]] }];
+const roleLabels: Record<ProductionRole, string> = {
+  platform_admin: "Platform Admin",
+  platform_checker: "Platform Checker",
+  merchant: "Merchant",
+};
 
 function subscribeToHash(listener: () => void) {
   const navigation = (window as Window & { navigation?: EventTarget }).navigation;
@@ -100,8 +116,9 @@ function getServerHash() {
   return "";
 }
 
-function Sidebar({ view, activeHref, collapsed, drawer, onToggle, onNavigate, localMerchantPreview }: {
+function Sidebar({ view, activeHref, collapsed, drawer, onToggle, onNavigate, localMerchantPreview, productionRole }: {
   localMerchantPreview: boolean;
+  productionRole?: ProductionRole;
   view: WorkspaceView | null;
   activeHref: string;
   collapsed?: boolean;
@@ -111,8 +128,9 @@ function Sidebar({ view, activeHref, collapsed, drawer, onToggle, onNavigate, lo
 }) {
   const Action = drawer ? X : collapsed ? PanelLeftOpen : PanelLeftClose;
   const actionLabel = drawer ? "Close navigation" : collapsed ? "Expand sidebar" : "Collapse sidebar";
-  const visibleGroups = view === "merchant" ? merchantGroups : view === "platform" ? groups : [];
-  const home = "/dashboard";
+  const visibleGroups = productionRole === "merchant" ? productionMerchantGroups : productionRole === "platform_checker" ? checkerGroups
+    : productionRole === "platform_admin" ? productionAdminGroups : view === "merchant" ? merchantGroups : view === "platform" ? groups : [];
+  const home = productionRole === "platform_checker" ? "/settings/system-rules" : productionRole ? merchantPath : "/dashboard";
   return <div className="shell-sidebar-inner">
     <div className="shell-sidebar-brand">
       <Link href={home} className="shell-logo" aria-label="PayGuard dashboard" onClick={onNavigate}>
@@ -152,17 +170,26 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
   const hash = useSyncExternalStore(subscribeToHash, getHash, getServerHash);
   const view = useWorkspaceView();
   const verifiedRole = useMerchantDemoRole();
+  const production = useProductionSession();
+  const roleLabel = production ? roleLabels[production.role] : view === "merchant" ? "Merchant" : "Platform Admin";
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawer = useRef<HTMLDialogElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const merchantDetails = pathname.startsWith(`${merchantPath}/`);
-  const merchantDestination = pathname === merchantPath || merchantDetails ? merchantTransactions
+  const merchantDestination = pathname === merchantPath || merchantDetails
+    ? production && !merchantDetails && hash !== "?view=transactions" ? directory : merchantTransactions
     : merchantDestinations.find(destination => destination.href === pathname);
   const merchantPathAllowed = Boolean(merchantDestination);
   const openMerchantDirectory = view === "platform" && pathname === merchantRules.href;
-  const allowed = (view === "platform" && !openMerchantDirectory) || (view === "merchant" && merchantPathAllowed);
-  const activeDestinations = localMerchantPreview
+  const productionHome = production?.role === "platform_checker" ? "/settings/system-rules" : merchantPath;
+  const canOpenProductionPage = production?.role === "platform_checker" ? pathname === productionHome :
+    production?.role === "merchant"
+      ? merchantPathAllowed && (!merchantDetails || pathname === `${merchantPath}/${production.merchantId}`)
+      : merchantDetails || productionAdminGroups.some(group => group.items.some(item => item.href === pathname));
+  const allowed = production ? canOpenProductionPage :
+    (view === "platform" && !openMerchantDirectory) || (view === "merchant" && merchantPathAllowed);
+  const activeDestinations = localMerchantPreview || production?.role === "platform_admin"
     ? destinations.filter(destination => !destination.standalone).map(destination =>
         destination.href === "/settings/operations#transactions"
           ? { ...destination, href: merchantTransactions.href }
@@ -175,12 +202,16 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
     : undefined;
 
   useEffect(() => {
+    if (production) {
+      if (!canOpenProductionPage) router.replace(productionHome);
+      return;
+    }
     if (view === "merchant" && !merchantPathAllowed) router.replace(merchantTransactions.href);
     if (openMerchantDirectory) {
       const merchant = new URLSearchParams(window.location.search).get("merchant");
       router.replace(merchant ? merchantDetailsHref(merchant, "rules") : merchantPath);
     }
-  }, [view, merchantPathAllowed, openMerchantDirectory, router]);
+  }, [view, merchantPathAllowed, openMerchantDirectory, router, production, canOpenProductionPage, productionHome]);
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 1024px)");
@@ -208,13 +239,13 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
   return <div className="app-shell" data-collapsed={collapsed}>
     <a className="shell-skip-link" href="#page-content">Skip to content</a>
     <aside className="shell-sidebar">
-      <Sidebar localMerchantPreview={localMerchantPreview} view={view} activeHref={current?.href ?? ""} collapsed={collapsed} onToggle={() => setCollapsed(value => !value)} />
+      <Sidebar localMerchantPreview={localMerchantPreview} productionRole={production?.role} view={view} activeHref={current?.href ?? ""} collapsed={collapsed} onToggle={() => setCollapsed(value => !value)} />
     </aside>
     <dialog id="mobile-navigation" aria-label="PayGuard navigation" className="shell-drawer" ref={drawer}
       onClose={handleDrawerClose} onClick={event => {
         if (event.target === event.currentTarget) closeDrawer();
       }}>
-      <Sidebar localMerchantPreview={localMerchantPreview} view={view} activeHref={current?.href ?? ""} drawer onToggle={closeDrawer} onNavigate={closeDrawer} />
+      <Sidebar localMerchantPreview={localMerchantPreview} productionRole={production?.role} view={view} activeHref={current?.href ?? ""} drawer onToggle={closeDrawer} onNavigate={closeDrawer} />
     </dialog>
     <div className="shell-main">
       <header className="shell-topbar">
@@ -232,6 +263,7 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
           </nav>
         </div>
         <div className="shell-topbar-actions">
+          {production ? <div className="shell-workspace"><Building2 size={16} aria-hidden="true" />{roleLabel}</div> : <>
           <label className="shell-workspace">
             <Building2 size={16} aria-hidden="true" />
             <span className="shell-workspace-name" aria-hidden="true">{view === "merchant" ? "Merchant" : "Platform workspace"}</span>
@@ -242,6 +274,7 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
             </select>
           </label>
           <span className="shell-sandbox">Sandbox</span>
+          </>}
           <details name="payguard-topbar" className="shell-popover">
             <summary className="shell-icon-button" aria-label="Notifications" title="Notifications"><Bell size={17} aria-hidden="true" /></summary>
             <div className="shell-popover-content">
@@ -250,10 +283,12 @@ export function AppShell({ children, localMerchantPreview }: { children: ReactNo
             </div>
           </details>
           <details name="payguard-topbar" className="shell-popover">
-            <summary className="shell-icon-button shell-user" aria-label="User menu" title="User menu"><span aria-hidden="true">{view === "merchant" ? "M" : "PA"}</span></summary>
+            <summary className="shell-icon-button shell-user" aria-label="User menu" title="User menu"><span aria-hidden="true">{production?.role === "platform_checker" ? "PC" : view === "merchant" ? "M" : "PA"}</span></summary>
             <div className="shell-popover-content">
-              <p className="font-semibold text-ink">{view === "merchant" ? "Merchant" : "Platform Admin"}</p>
-              <p className="mt-1">Sandbox workspace view</p>
+              <p className="font-semibold text-ink">{roleLabel}</p>
+              {production ? <form className="mt-2" method="post" action="/api/auth/logout">
+                <button className="font-semibold text-accent hover:underline" type="submit">Sign out</button>
+              </form> : <p className="mt-1">Sandbox workspace view</p>}
             </div>
           </details>
         </div>

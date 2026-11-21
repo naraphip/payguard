@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"regexp"
 	"slices"
@@ -110,4 +111,35 @@ func emailRiskProposalHasSignal(proposal merchantPolicyProposal) bool {
 		}
 		return false
 	})
+}
+
+func composerPreservesEmailRisk(instruction string, profile merchantPolicyProfile, output composerInterpretation) bool {
+	proposal, ready := output.Proposal.(merchantPolicyProposal)
+	if !ready || !emailRiskMention.MatchString(instruction) {
+		return true
+	}
+	if !emailRiskProposalHasSignal(proposal) {
+		return false
+	}
+	// If the local interpreter can resolve the complete email policy, check
+	// that the model preserved the product scope and the requested conditions.
+	local, _ := interpretEmailRiskRule(instruction, profile)
+	expected, ready := local.Proposal.(merchantPolicyProposal)
+	if !ready {
+		return true
+	}
+	if proposal.Action != expected.Action ||
+		!slices.Equal(sortedPolicyValues(proposal.ProductTypes), sortedPolicyValues(expected.ProductTypes)) ||
+		len(proposal.Conditions.Rules) != len(expected.Conditions.Rules) ||
+		(len(expected.Conditions.Rules) > 1 && proposal.Conditions.Logic != expected.Conditions.Logic) {
+		return false
+	}
+	for _, wanted := range expected.Conditions.Rules {
+		if !slices.ContainsFunc(proposal.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+			return condition.Field == wanted.Field && condition.Operator == wanted.Operator && bytes.Equal(condition.Value, wanted.Value)
+		}) {
+			return false
+		}
+	}
+	return true
 }

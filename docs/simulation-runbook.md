@@ -4,6 +4,8 @@ Follow the [local startup steps](../README.md). PostgreSQL initializes its demo 
 
 The app opens Dashboard at `/dashboard`. Dashboard totals and recent transactions come from saved merchant records. Use `/simulation-lab` for Simulation Lab and `/settings/merchants` for the merchant directory.
 
+This runbook covers the local sandbox. The [production authentication guide](requirements/production-authentication.md) covers OIDC runtime configuration, account grants, migration and release verification.
+
 ## Local keys and Omise sandbox preparation
 
 Docker Compose reads the repository-root `.env` for demo merchant tokens and optional enrichment settings. Create it from the [example template](../.env.example) if it does not already exist.
@@ -98,7 +100,7 @@ If a valid merchant save returns **Expected one valid JSON request object.**, ve
 
 ### Check the default mock flow
 
-1. Open **Merchants → Create merchant**. Enter a name and choose the catalogue products and signals the integration supplies. Select **Add custom field** under **Custom fraud signals** and register `custom_ticket_title` as Text and `custom_ip_country` as Country code for this synthetic check. Save the merchant.
+1. Open **Merchants → Create merchant** and enter a name. Expand **Business and integration settings (optional)** to choose the products and signals for this check. Select **Add custom field** under **Custom fraud signals** and register `custom_ticket_title` as Text and `custom_ip_country` as Country code. Select **Create merchant**.
 2. Open that merchant's **AI Rule** tab. Expand **Rule fields** and choose a product, the **Block** action, and **All conditions (AND)**. Add a title condition with **contains** and `disney`, then a country condition with **equals** and `IN`. Select **Review rule** and **Save Rule**. Check that the rule is active. Text matching uses literal substrings and ignores case.
 3. Open **Mock Checkout**, choose the merchant and the same product, and run a synthetic purchase with ticket title `Hong Kong Disneyland ticket` and country `IN`. Enter a booking amount so the mock Jev advisory can evaluate. Expect **High risk** and **Block**, with Merchant Policy as the final decision source.
 4. Open **Simulation Lab → Merchant rule simulation**. Enter the same product and evidence and select **Run merchant simulation**. Compare the action and matched rule versions and confirm the distinct submission source. Omit the country and confirm the condition is recorded as unavailable. Batch simulation remains available on the same page.
@@ -160,7 +162,7 @@ Run a merchant-selected test in each tool with a synthetic amount and the timeou
 
 ## Merchant Management
 
-Sign in as Platform Admin and open `/settings/merchants`. Search by the merchant's name or ID, or sort by its creation date or last activity. Create a synthetic merchant, choose its supplied catalogue products, and select **Copy token** on the one-time issuance message. Open the merchant's detail URL and confirm the actual stored totals, effective policies, and audit entries.
+Sign in as Platform Admin and open `/settings/merchants`. Search by the merchant's name or ID, or sort by its creation date or last activity. Select **Create merchant**, enter a name, and submit. Enter products and signals under **Business and integration settings (optional)** or add them later from **Overview**. Local Platform Admin preview and OIDC open the merchant details after creation. In the ordinary token-based Sandbox, copy the one-time credential from the receipt, then select **Open merchant details**. Check the stored totals, effective policies, and audit entries in the detail workspace.
 
 To sign in to an existing merchant for a Sandbox walkthrough, open its **Overview** as Platform Admin and select **Get temporary token**. Select **Copy token**, or use **Show token** to view it. In a separate browser tab, choose the **Merchant** workspace, paste the token in the access form, and select **Connect**. The token expires an hour after issuance. The merchant’s original token remains valid.
 
@@ -352,30 +354,36 @@ PAYGUARD_RULE_COMPOSER_PROVIDER=openai
 PAYGUARD_RULE_COMPOSER_MODEL=gpt-4.1-mini
 ```
 
-Set `OPENAI_API_KEY` in the ignored `backend/.env`. The optional OpenRouter key belongs to the [Jev assessment and diagnostic](#jev-ai-configuration). Use a checker token distinct from the administrator token to enable independent Platform Rule approval and rollback. For a host-run backend, export the same variables into the Go process before starting it. For Compose, restart the backend with `docker compose up -d --wait backend` after an environment change. Build the application after changing code. With the general-purpose OpenAI composer disabled, the merchant form can still parse supported Thai or English instructions and typed JSON. A safe instruction that cannot map to native conditions can produce a **Custom rule · Jev** preview. If the editor asks for clarification, complete the missing details under **Rule fields**. Jev runtime uses the effective Jev settings. [Rule fields, actions, and lifecycle](requirements/ai-rule-management.md)
+Set `OPENAI_API_KEY` in the ignored `backend/.env`, which Compose loads into Go. Use a checker token distinct from the administrator token to enable independent Platform Rule approval and rollback. For a host-run backend, export the composer variables and `OPENAI_API_KEY` into the Go process before starting it. For Compose, recreate the backend with `docker compose up -d --wait backend` after an environment change. Build the application after changing code. The OpenRouter key belongs to the [Jev assessment and diagnostic](#jev-ai-configuration). [Rule fields, actions, and lifecycle](requirements/ai-rule-management.md)
 
-1. Create a synthetic merchant in **Merchants** as Platform Admin. In the merchant registration or edit form, record its catalogue products and declare email domain support only if the integration supplies it. Copy the one-time merchant credential for the test. Existing merchant setup and observed evidence can supply available signals.
-2. As Platform Admin, open **Merchants**, select the shop, and open **AI Rule**. In the Merchant workspace, use **Merchant AI Rules**. Describe the rule in Thai or English and select **Generate preview**. For a merchant that supplies flight tickets and email domains, try “Block flight tickets when email domain equals skycannner.com.” Check the product, stage, signal, and action before selecting **Save Rule**.
+1. Create a synthetic merchant in **Merchants** as Platform Admin. Enter its catalogue products under **Business and integration settings** and declare email domain support only if the integration supplies it. For the Merchant workspace test, use the one-time Sandbox credential or issue a temporary credential from **Overview**. Existing merchant setup and observed evidence can supply available signals.
+2. As Platform Admin, open **Merchants**, select the shop, and open **AI Rule**. In the Merchant workspace, use **Merchant AI Rules**. Describe the rule in Thai or English and select **Draft rule**. For a merchant that supplies flight tickets and email domains, try “Block flight tickets when email domain equals example.test.” The **OpenAI** label and model identify a result from the live composer. **PayGuard fallback** indicates local parsing after OpenAI was disabled or unavailable. Review the source, product, stage, signal, and action before selecting **Save Rule**. If the draft asks for more detail, revise the instruction or use **Rule fields**.
 3. Check the saved status and preview counts. Use **Test rule** to replay against recent stored evidence. An active policy applies to future merchant transactions. Submit a matching synthetic transaction in Mock Checkout or the merchant rule panel of Simulation Lab, then inspect the Platform, Merchant Policy, and Final decisions. An older transaction with the same input and ID returns its saved decision.
 4. As Platform Admin, open `/settings/system-rules`. Compose a global rule, select a shared Simulation Lab run for optional replay, and save it as a draft. To request activation in the local test stack, open **Platform rule approval** and submit the current draft with a shared run that has eligible events and a reason.
 5. Use the independent checker credential to review the pending revision and its recorded replay. Approve with a reason to apply the revision on new Simulation Lab runs. The checker can also restore an earlier active revision or disable the rule. Compare the ruleset version and rule hits on a new run with the original stored run.
 
+### Test multiple active Merchant Rules
+
+1. Use an isolated synthetic merchant and save a Block rule and a Review rule whose conditions can match the same transaction. Check the pending version and its overlap warning, then select **Activate** for that version.
+2. Confirm **Saved rules** shows both policies as active. Submit a matching synthetic transaction and check the matched rule IDs and versions in the Merchant Policy decision. Block takes priority when both match.
+3. Disable the Block rule. Submit a new matching transaction and confirm that the Review rule still applies. Replay the original transaction and check its stored result and rule versions.
+
 ### Test a condition with live Jev
 
 1. Enable OpenRouter for the [effective Jev settings](#jev-ai-configuration). Use a synthetic merchant that supplies physical goods.
-2. Open **AI Rule**, enter `Block physical goods when transaction description means "admission to Hong Kong Disneyland"`, and select **Generate preview**. The preview labels the condition **Custom rule · Jev**. Verify the product, action, evidence field, and full criterion before selecting **Save Rule**.
+2. Open **AI Rule**, enter `Block physical goods when transaction description means "admission to Hong Kong Disneyland"`, and select **Draft rule**. A semantic condition in the preview carries the **Custom rule · Jev** label. Verify the product, action, evidence field, and full criterion before selecting **Save Rule**.
 3. Open **Mock Checkout**, select that merchant and physical goods, set the amount to 7,900 minor units, and enter `One-day entry ticket for Hong Kong Disneyland theme park` in the description field. Expect **High risk** and **Block** when Jev returns `MATCH`.
 4. Open **Simulation Lab → Merchant rule simulation** and use the same merchant, product, and amount with `A shuttle bus transfer to the airport, transport only`. Expect Jev `NO_MATCH` and **Low risk** when no other rule escalates it.
 5. Submit a fresh test with no description. An applicable unresolved rule records `UNKNOWN` / `NOT_RUN` and produces **Review** with **Unresolved** in the automated decision evidence. In **Transactions**, open each result to check the rule version and answer, and the served model and provider decision ID when available. An exact replay returns the stored result.
 
-To test the automatic fallback from a natural-language instruction, enter `Block ticket ที่เป็น *disney* land hongkong และ ip มาจาก india`. With a registered `custom_ip_country` country field, check that the preview requires both `IN` checked by PayGuard and the ticket meaning checked by Jev. Without that field, check that the full condition remains in the **Custom rule · Jev** preview and uses **Transaction description**. Supply non-identifying evidence about both the ticket and the country when that description is the only evidence field. Verify the complete rule before saving.
+To test fallback in an isolated Sandbox with OpenAI disabled, enter `Block ticket ที่เป็น *disney* land hongkong และ ip มาจาก india`. Look for **PayGuard fallback**. With a registered `custom_ip_country` country field, check that the preview preserves both the `IN` condition and the ticket condition. Verify every clause and its evidence field before saving.
 
 When the editor shows an error while loading rule fields, use **Retry loading rule fields**. A connection error calls for checking whether the local Go backend is running. An unavailable API route calls for checking that Go and Next.js were built from the same checkout. A timeout or unreadable response calls for checking backend logs. Jev runtime status is recorded with the transaction result.
 
 ### Temporary exact-email block
 
 1. Open **Merchant AI Rules** with the merchant's credential or open the merchant's **AI Rule** tab as Platform Admin. The merchant needs at least one supported product in its profile.
-2. Enter `block buyer@example.test 2min` or `บล็อกอีเมล buyer@example.test 2 นาที`, then select **Generate preview**. The form also accepts hour-based commands such as `Block email buyer@example.test for 12 hours`. Use one synthetic address and a duration from 1 minute to 365 days, in whole minutes or hours.
+2. Enter `block buyer@example.test 2min` or `บล็อกอีเมล buyer@example.test 2 นาที`, then select **Draft rule**. The preview is labeled **Processed in PayGuard**. The form also accepts hour-based commands such as `Block email buyer@example.test for 12 hours`. Use one synthetic address and a duration from 1 minute to 365 days, in whole minutes or hours.
 3. Verify the address, duration, and products in the preview, then select **Save Rule**. The rule covers all supported products shown in the preview. The timer starts when the rule becomes active, and **Saved rules** shows the expiry. From **Edit**, saving creates a new version of that rule.
 4. Run a merchant-selected test in **Mock Checkout** and **Simulation Lab** with `buyer@example.test`. Check that the final decision is **Block** and the merchant policy is the source. Run again with `other@example.test` to confirm this rule only matches the first mailbox.
 5. Once the rule expires, submit a new transaction with `buyer@example.test` and verify the expired rule does not match. Replaying the original transaction with its original ID and input returns its saved decision.
@@ -401,7 +409,7 @@ curl --fail-with-body --silent --show-error \
   "$api/api/v1/booking/rule-composer/interpret"
 ```
 
-An interpretation returns `READY` with a validated proposal or `CLARIFICATION` with a message or validation errors. Pass the returned proposal as `{"proposal":{...}}` when saving. For a Platform draft with replay, add `"runId"` to the save body. The [browser flow](#ai-rule-composer) builds these requests from the preview.
+An interpretation returns `READY` with a validated proposal and a shared, read-only `definition` with `schemaVersion: 1`. A `CLARIFICATION` includes a message or validation errors and omits the definition. The `source` is `openai`, `local`, or `local_fallback`. Only `openai` includes `model`. Pass the returned scope-specific proposal as `{"proposal":{...}}` when saving. For a Platform draft with replay, add `"runId"` to the save body. [Shared rule preview data](requirements/ai-rule-management.md#shared-rule-preview-data)
 
 | Method and path | Purpose |
 | --- | --- |
@@ -418,13 +426,13 @@ An interpretation returns `READY` with a validated proposal or `CLARIFICATION` w
 | `PUT /api/v1/booking/demo/merchant-policy/rules/{id}` | Save a new version with `proposal` and `expectedVersion`. |
 | `DELETE /api/v1/booking/demo/merchant-policy/rules/{id}` | Remove the rule from the current policy list with `expectedVersion`. Stored versions and assessments retain their evidence. |
 | `POST /api/v1/booking/demo/merchant-policy/rules/{id}/simulate` | Preview the latest policy over up to 200 of the merchant's recent stored transactions. |
-| `POST /api/v1/booking/demo/merchant-policy/rules/{id}/activate` | Activate a pending policy version after validation and conflict checks. Send `expectedVersion`. |
+| `POST /api/v1/booking/demo/merchant-policy/rules/{id}/activate` | Revalidate and activate the selected policy version alongside the other active policies. Send `expectedVersion`. The preview records potential overlap. |
 | `POST /api/v1/booking/demo/merchant-policy/rules/{id}/disable` | Disable the rule by appending a version. Send `expectedVersion`. |
 | `POST /api/v1/booking/demo/merchant-policy/rules/{id}/rollback` | Restore an earlier proposal as a new version. Send its `version` and the latest `expectedVersion`. |
 
 Administrator paths start at `/api/v1/booking/demo/merchants/{merchantId}`. Use `GET /policy-profile` for the field registry, `POST /policy-interpret` for the AI composer, and `/policies` for the same versioned rule operations. For existing amount-based booking review rules, both the administrator and that merchant can read `GET /jev/rules`, edit with `PUT /jev/rules/{id}` using `{definition, expectedVersion}`, and remove with `DELETE /jev/rules/{id}` using `{expectedVersion}`. These writes use the active ruleset version returned by GET. The existing administrator-only `POST /jev/rules/preview` and `POST /jev/rules` API routes retain compatibility.
 
-Merchant transaction submission accepts an optional normalized `customerEmailDomain`, a `customerMailboxDigest` from the browser's exact-email flow, `accountAgeDays` for eligible Platform Rules, and typed `customSignals` from the merchant registry. The API persists the Platform, Merchant Policy, Jev and final outputs in `policyDecision`. Old transaction records can omit that object. Save and evaluation use the registered scope and current evidence. If activation returns 409, resolve the conflicting policy or refresh the latest version before retrying. If the general-purpose composition API returns 422, check the instruction length and remove personal data. For 502, check provider reachability and model support for structured output. For 503, check the backend's enable flag, API key, and text model configuration.
+Merchant transaction submission accepts an optional normalized `customerEmailDomain`, a `customerMailboxDigest` from the browser's exact-email flow, `accountAgeDays` for eligible Platform Rules, and typed `customSignals` from the merchant registry. The API persists the Platform, Merchant Policy, Jev and final outputs in `policyDecision`. Old transaction records can omit that object. Save and evaluation use the registered scope and current evidence. If activation returns 409, reload the latest version and review it before retrying. If the general-purpose composition API returns 422, check the instruction length and remove personal data. For 502, check provider reachability and model support for structured output. For 503, check the backend's enable flag, API key, and text model configuration.
 
 ### Migration and recovery
 

@@ -1,11 +1,12 @@
 import { Check, Clock3, X } from "lucide-react";
+import { stateBadge } from "./action-styles";
 import type { DemoTransaction, MerchantTransactionStatus } from "./merchant-demo";
 import { merchantDate } from "./settings/merchants/management-contracts";
 
 const appearances = {
-  APPROVED: { label: "Approved", Icon: Check, classes: "border-emerald-200 bg-emerald-50 text-emerald-900" },
-  REJECTED: { label: "Rejected", Icon: X, classes: "border-red-200 bg-red-50 text-red-900" },
-  REVIEW: { label: "Review", Icon: Clock3, classes: "border-amber-200 bg-amber-50 text-amber-900" },
+  APPROVED: { label: "Approved", Icon: Check, tone: "positive" },
+  REJECTED: { label: "Rejected", Icon: X, tone: "danger" },
+  REVIEW: { label: "Review", Icon: Clock3, tone: "warning" },
 } as const;
 
 export const transactionStatuses: MerchantTransactionStatus[] = ["APPROVED", "REJECTED", "REVIEW"];
@@ -25,8 +26,8 @@ export function transactionStatus(transaction: DemoTransaction): MerchantTransac
 }
 
 export function TransactionStatusBadge({ status }: { status: MerchantTransactionStatus }) {
-  const { label, Icon, classes } = appearances[status];
-  return <span className={`inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${classes}`}>
+  const { label, Icon, tone } = appearances[status];
+  return <span className={`whitespace-nowrap ${stateBadge(tone)}`}>
     <Icon size={14} aria-hidden="true" />{label}
   </span>;
 }

@@ -53,6 +53,7 @@ type platformRuleRevision struct {
 	SourceVersion *int64      `json:"sourceVersion,omitempty"`
 	Reason        string      `json:"reason"`
 	Actor         string      `json:"actor"`
+	ActorID       *string     `json:"actorId,omitempty"`
 	CreatedAt     time.Time   `json:"createdAt"`
 }
 
@@ -92,6 +93,13 @@ func (g platformRuleGovernance) credentialMatches(r *http.Request, want [sha256.
 }
 
 func (g platformRuleGovernance) requireChecker(w http.ResponseWriter, r *http.Request) bool {
+	if actor, ok := productionActorFromRequest(r); ok {
+		if actor.Role == productionRoleChecker {
+			return true
+		}
+		problem(w, http.StatusForbidden, "An independent platform checker is required for this operation.")
+		return false
+	}
 	if g.checkerEnabled && g.credentialMatches(r, g.checkerHash) {
 		return true
 	}
@@ -104,7 +112,7 @@ func (g platformRuleGovernance) requireChecker(w http.ResponseWriter, r *http.Re
 	return false
 }
 
-const platformRevisionColumns = "rule_id,version,draft_version,action,rule_input,preview,source_version,reason,actor,created_at"
+const platformRevisionColumns = "rule_id,version,draft_version,action,rule_input,preview,source_version,reason,actor,actor_id::text,created_at"
 
 var platformDraftID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
@@ -119,7 +127,7 @@ func platformPathID(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 func (revision *platformRuleRevision) scan(row pgx.Row) error {
 	err := row.Scan(&revision.ID, &revision.Version, &revision.DraftVersion, &revision.Action, &revision.Rule,
-		&revision.Preview, &revision.SourceVersion, &revision.Reason, &revision.Actor, &revision.CreatedAt)
+		&revision.Preview, &revision.SourceVersion, &revision.Reason, &revision.Actor, &revision.ActorID, &revision.CreatedAt)
 	switch revision.Action {
 	case "SUBMITTED":
 		revision.Status = "PENDING"
@@ -140,10 +148,24 @@ func readPlatformRevision(ctx context.Context, db systemDraftWriter, condition s
 func insertPlatformRevision(ctx context.Context, tx pgx.Tx, next platformRuleRevision) (platformRuleRevision, error) {
 	var result platformRuleRevision
 	err := result.scan(tx.QueryRow(ctx, `INSERT INTO platform_rule_revisions
-		(rule_id,version,draft_version,action,rule_input,preview,source_version,reason,actor)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+platformRevisionColumns,
-		next.ID, next.Version, next.DraftVersion, next.Action, next.Rule, next.Preview, next.SourceVersion, next.Reason, next.Actor))
+		(rule_id,version,draft_version,action,rule_input,preview,source_version,reason,actor,actor_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text::uuid) RETURNING `+platformRevisionColumns,
+		next.ID, next.Version, next.DraftVersion, next.Action, next.Rule, next.Preview, next.SourceVersion, next.Reason, next.Actor, next.ActorID))
 	return result, err
+}
+
+func platformAccountID(r *http.Request) *string {
+	if actor, ok := productionActorFromRequest(r); ok {
+		return &actor.ID
+	}
+	return nil
+}
+
+func samePlatformAccount(first, second *string) bool {
+	if first == nil || second == nil {
+		return first == nil && second == nil
+	}
+	return *first == *second
 }
 
 func platformChangeReason(value string) (string, bool) {
@@ -158,6 +180,7 @@ var (
 	errPlatformNoPending  = errors.New("That pending revision is no longer eligible for approval.")
 	errPlatformNotCurrent = errors.New("The active revision has changed. Reload the version history before rolling back.")
 	errPlatformBadTarget  = errors.New("Choose an earlier active revision or disable the rule.")
+	errPlatformSelfCheck  = errors.New("Approval requires a recorded submitter and a different platform checker.")
 )
 
 func (g platformRuleGovernance) writeRevision(w http.ResponseWriter, r *http.Request, operation func(context.Context, pgx.Tx, string, platformRuleRevision) (platformRuleRevision, error)) {
@@ -190,6 +213,8 @@ func (g platformRuleGovernance) writeRevision(w http.ResponseWriter, r *http.Req
 		problem(w, http.StatusConflict, err.Error())
 	case errors.Is(err, errPlatformNoEvidence), errors.Is(err, errPlatformBadTarget):
 		problem(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, errPlatformSelfCheck):
+		problem(w, http.StatusForbidden, err.Error())
 	case err != nil:
 		unavailable(w, err)
 	default:
@@ -222,6 +247,7 @@ func (g platformRuleGovernance) submit(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusUnprocessableEntity, "Choose a draft version, a saved simulation run, and a reason of 1 to 250 characters without personal data.")
 		return
 	}
+	accountID := platformAccountID(r)
 	g.writeRevision(w, r, func(ctx context.Context, tx pgx.Tx, id string, latest platformRuleRevision) (platformRuleRevision, error) {
 		draft, err := readDraft(tx.QueryRow(ctx, `SELECT rule_id,input,version,updated_at FROM system_rule_drafts
 			WHERE tenant_id=$1 AND rule_id=$2 FOR SHARE`, merchantID, id))
@@ -231,7 +257,8 @@ func (g platformRuleGovernance) submit(w http.ResponseWriter, r *http.Request) {
 		if draft.Version != input.DraftVersion {
 			return platformRuleRevision{}, errPlatformDraftStale
 		}
-		if latest.Status == "PENDING" && latest.DraftVersion == draft.Version && latest.Preview.RunID == input.RunID && latest.Reason == reason {
+		if latest.Status == "PENDING" && latest.DraftVersion == draft.Version && latest.Preview.RunID == input.RunID &&
+			latest.Reason == reason && samePlatformAccount(latest.ActorID, accountID) {
 			return latest, nil
 		}
 		// Shared simulation runs are bounded and immutable. The stored preview
@@ -247,7 +274,7 @@ func (g platformRuleGovernance) submit(w http.ResponseWriter, r *http.Request) {
 		}
 		return insertPlatformRevision(ctx, tx, platformRuleRevision{
 			ID: id, Version: latest.Version + 1, DraftVersion: draft.Version, Action: "SUBMITTED",
-			Rule: draft.ruleInput, Preview: preview, Reason: reason, Actor: platformMaker,
+			Rule: draft.ruleInput, Preview: preview, Reason: reason, Actor: platformMaker, ActorID: accountID,
 		})
 	})
 }
@@ -268,15 +295,21 @@ func (g platformRuleGovernance) approve(w http.ResponseWriter, r *http.Request) 
 		problem(w, http.StatusUnprocessableEntity, "Choose a pending revision and a reason of 1 to 250 characters without personal data.")
 		return
 	}
+	accountID := platformAccountID(r)
 	g.writeRevision(w, r, func(ctx context.Context, tx pgx.Tx, _ string, latest platformRuleRevision) (platformRuleRevision, error) {
-		if latest.Action == "APPROVED" && latest.SourceVersion != nil && *latest.SourceVersion == input.Version && latest.Reason == reason {
+		if latest.Action == "APPROVED" && latest.SourceVersion != nil && *latest.SourceVersion == input.Version &&
+			latest.Reason == reason && samePlatformAccount(latest.ActorID, accountID) {
 			return latest, nil
 		}
 		if latest.Action != "SUBMITTED" || latest.Version != input.Version || latest.Actor != platformMaker {
 			return platformRuleRevision{}, errPlatformNoPending
 		}
+		if (latest.ActorID == nil) != (accountID == nil) || (accountID != nil && samePlatformAccount(latest.ActorID, accountID)) {
+			return platformRuleRevision{}, errPlatformSelfCheck
+		}
 		next := latest
 		next.Action, next.Actor, next.Reason = "APPROVED", platformChecker, reason
+		next.ActorID = accountID
 		next.Version, next.SourceVersion = latest.Version+1, &latest.Version
 		return insertPlatformRevision(ctx, tx, next)
 	})
@@ -328,12 +361,19 @@ func (g platformRuleGovernance) rollback(w http.ResponseWriter, r *http.Request)
 		sourceVersion := next.Version
 		next.Version, next.SourceVersion = latest.Version+1, &sourceVersion
 		next.Actor, next.Reason = platformChecker, reason
+		next.ActorID = platformAccountID(r)
 		return insertPlatformRevision(ctx, tx, next)
 	})
 }
 
 func (g platformRuleGovernance) versions(w http.ResponseWriter, r *http.Request) {
-	if !g.checkerEnabled || !g.credentialMatches(r, g.checkerHash) {
+	account, production := productionActorFromRequest(r)
+	if production {
+		if account.Role != productionRoleAdmin && account.Role != productionRoleChecker {
+			problem(w, http.StatusForbidden, "Platform rule history requires a platform account.")
+			return
+		}
+	} else if !g.checkerEnabled || !g.credentialMatches(r, g.checkerHash) {
 		if _, ok := g.access.authorize(w, r, true); !ok {
 			return
 		}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowRight, CircleAlert, FilePenLine, Layers3, LoaderCircle, Plus, Search, ShieldCheck } from "lucide-react";
+import { ruleActionTone, stateBadge } from "../../action-styles";
 import { RuleSheet } from "./rule-sheet";
 import { actions, outlineButton, primaryButton, globalRuleTransport, stages } from "./contracts";
 import type { Rule, RuleCatalogue, RuleTransport } from "./contracts";
@@ -10,18 +11,13 @@ const filters = { all: "All rules", ACTIVE: "Active", DRAFT: "Drafts" } as const
 type Filter = keyof typeof filters;
 
 export function StatusBadge({ status }: { status: Rule["status"] }) {
-  return status === "ACTIVE"
-    ? <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
-      <span className="size-1.5 rounded-full bg-emerald-600" aria-hidden="true" />Active
-    </span>
-    : <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-      <span className="size-1.5 rounded-full bg-slate-500" aria-hidden="true" />Draft
-    </span>;
+  return <span className={stateBadge(status === "ACTIVE" ? "positive" : "neutral")}>
+    {status === "ACTIVE" ? "Active" : "Draft"}
+  </span>;
 }
 
 export function ActionBadge({ action }: { action: Rule["action"] }) {
-  const color = action === "REVIEW" ? "bg-amber-50 text-amber-900 ring-amber-200" : "bg-indigo-50 text-indigo-800 ring-indigo-200";
-  return <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${color}`}>{actions[action]}</span>;
+  return <span className={stateBadge(ruleActionTone(action))}>{actions[action]}</span>;
 }
 
 export function SystemRulesDashboard({ request = globalRuleTransport, merchantName, canEdit = true, embedded = false }: {
@@ -105,7 +101,7 @@ export function SystemRulesDashboard({ request = globalRuleTransport, merchantNa
 
         <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
           {[
-            { label: "Total rules", total: counts.all, Icon: Layers3, color: "bg-indigo-50 text-indigo-700" },
+            { label: "Total rules", total: counts.all, Icon: Layers3, color: "bg-soft text-accent" },
             { label: "Active rules", total: counts.ACTIVE, Icon: ShieldCheck, color: "bg-emerald-50 text-emerald-700" },
             { label: "Draft rules", total: counts.DRAFT, Icon: FilePenLine, color: "bg-slate-100 text-slate-700" },
           ].map(({ label, total, Icon, color }) =>
@@ -139,7 +135,9 @@ export function SystemRulesDashboard({ request = globalRuleTransport, merchantNa
                 key={key}
                 type="button"
                 aria-pressed={filter === key}
-                className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${filter === key ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
+                className={`rounded-md px-2.5 py-1.5 text-xs transition ${filter === key
+                  ? "bg-white font-semibold text-accent shadow-xs ring-1 ring-accent/20"
+                  : "font-medium text-slate-600 hover:text-slate-900"}`}
                 onClick={() => setFilter(key)}
               >{filters[key]} <span className="ml-0.5 text-slate-500 tabular-nums">{counts[key]}</span></button>)}
             </div>

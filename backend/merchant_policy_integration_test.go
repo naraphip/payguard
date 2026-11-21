@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -148,33 +149,72 @@ func TestMerchantPolicyLifecyclePostgres(t *testing.T) {
 		t.Fatalf("subdomain result: %+v", allowed.PolicyDecision)
 	}
 
-	conflict := exampleMerchantPolicy()
-	conflict.Action, conflict.Name = "REVIEW", "Another action for same flight"
-	var pending change
-	request(http.MethodPost, policyEndpoint, tokenA, map[string]any{"proposal": conflict}, http.StatusCreated, &pending)
-	if pending.Rule.Status != "PENDING_APPROVAL" || len(pending.Rule.Preview.ConflictRuleIDs) != 1 {
-		t.Fatalf("pending: %+v", pending.Rule)
+	activateOverlappingRule := func(action, name string, overlapIDs ...string) merchantPolicyRule {
+		t.Helper()
+		proposal := exampleMerchantPolicy()
+		proposal.Action, proposal.Name = action, name
+		var pending change
+		request(http.MethodPost, policyEndpoint, tokenA, map[string]any{"proposal": proposal}, http.StatusCreated, &pending)
+		if pending.Rule.Status != "PENDING_APPROVAL" || len(pending.Rule.Preview.ConflictRuleIDs) != len(overlapIDs) {
+			t.Fatalf("pending: %+v", pending.Rule)
+		}
+		path := policyEndpoint + "/" + pending.Rule.ID + "/activate"
+		request(http.MethodPost, path, tokenB, map[string]int{"expectedVersion": 1}, http.StatusNotFound, nil)
+		request(http.MethodPost, path, tokenA, map[string]int{"expectedVersion": 2}, http.StatusConflict, nil)
+		var active change
+		request(http.MethodPost, path, tokenA, map[string]int{"expectedVersion": 1}, http.StatusOK, &active)
+		if active.Rule.Status != "ACTIVE" || active.Rule.Version != 2 || active.Rule.ActiveVersion != 2 ||
+			active.Rule.Preview.ApprovalReason != "" || len(active.Rule.Preview.ConflictRuleIDs) != len(overlapIDs) {
+			t.Fatalf("activated: %+v", active.Rule)
+		}
+		for _, id := range overlapIDs {
+			if !slices.Contains(active.Rule.Preview.ConflictRuleIDs, id) {
+				t.Fatalf("activated version omitted overlap with %s: %+v", id, active.Rule.Preview)
+			}
+		}
+		return active.Rule
 	}
-	request(http.MethodPost, policyEndpoint+"/"+pending.Rule.ID+"/activate", tokenA, map[string]int{"expectedVersion": 1}, http.StatusConflict, nil)
+	review := activateOverlappingRule("REVIEW", "Review the same flight", saved.Rule.ID)
+	challenge := activateOverlappingRule("CHALLENGE", "Challenge the same flight", saved.Rule.ID, review.ID)
+	assertPolicyDecision := func(transaction mockTransaction, action string, versions map[string]int) {
+		t.Helper()
+		decision := transaction.PolicyDecision
+		if decision == nil || decision.Final != (policyFinal{action, "MERCHANT_POLICY"}) ||
+			decision.Merchant.Action != action || !maps.Equal(decision.Merchant.RuleVersions, versions) ||
+			len(decision.Merchant.MatchedRuleIDs) != len(versions) {
+			t.Fatalf("expected %s with rules %v, got %+v", action, versions, decision)
+		}
+		for ruleID := range versions {
+			if !slices.Contains(decision.Merchant.MatchedRuleIDs, ruleID) {
+				t.Fatalf("matched rules %v omitted %s", decision.Merchant.MatchedRuleIDs, ruleID)
+			}
+		}
+	}
+	allVersions := map[string]int{saved.Rule.ID: 1, review.ID: 2, challenge.ID: 2}
+	multiMatch := newTransaction(first, firstScenario, "9fae5a36-59ae-4fb5-a773-f62b3bce9906", "skycannner.com", http.StatusCreated)
+	assertPolicyDecision(multiMatch, "BLOCK", allVersions)
+
 	request(http.MethodPost, rulePath+"/disable", tokenA, map[string]int{"expectedVersion": 1}, http.StatusOK, nil)
 	replayed := newTransaction(first, firstScenario, blocked.ID, "skycannner.com", http.StatusOK)
-	if replayed.PolicyDecision.Final != blocked.PolicyDecision.Final {
-		t.Fatal("Replay lost the original policy decision.")
-	}
-	allowed = newTransaction(first, firstScenario, "9fae5a36-59ae-4fb5-a773-f62b3bce9901", "skycannner.com", http.StatusCreated)
-	if allowed.PolicyDecision.Final.Action != "ALLOW" {
-		t.Fatalf("disabled result: %+v", allowed.PolicyDecision)
-	}
+	assertPolicyDecision(replayed, "BLOCK", map[string]int{saved.Rule.ID: 1})
+	replayed = newTransaction(first, firstScenario, multiMatch.ID, "skycannner.com", http.StatusOK)
+	assertPolicyDecision(replayed, "BLOCK", allVersions)
+	reviewed := newTransaction(first, firstScenario, "9fae5a36-59ae-4fb5-a773-f62b3bce9901", "skycannner.com", http.StatusCreated)
+	assertPolicyDecision(reviewed, "REVIEW", map[string]int{review.ID: 2, challenge.ID: 2})
+
+	request(http.MethodPost, policyEndpoint+"/"+review.ID+"/disable", tokenA, map[string]int{"expectedVersion": 2}, http.StatusOK, nil)
+	challenged := newTransaction(first, firstScenario, "9fae5a36-59ae-4fb5-a773-f62b3bce9907", "skycannner.com", http.StatusCreated)
+	assertPolicyDecision(challenged, "CHALLENGE", map[string]int{challenge.ID: 2})
+
 	var rollback change
 	request(http.MethodPost, rulePath+"/rollback", tokenA, map[string]int{"version": 1, "expectedVersion": 2}, http.StatusOK, &rollback)
-	if rollback.Rule.Version != 3 || rollback.Rule.Status != "ACTIVE" {
+	if rollback.Rule.Version != 3 || rollback.Rule.Status != "PENDING_APPROVAL" ||
+		!slices.Equal(rollback.Rule.Preview.ConflictRuleIDs, []string{challenge.ID}) {
 		t.Fatalf("rollback=%+v", rollback.Rule)
 	}
+	request(http.MethodPost, rulePath+"/activate", tokenA, map[string]int{"expectedVersion": 3}, http.StatusOK, nil)
 	afterRollback := newTransaction(first, firstScenario, "9fae5a36-59ae-4fb5-a773-f62b3bce9902", "skycannner.com", http.StatusCreated)
-	if afterRollback.PolicyDecision.Merchant.RuleVersions[saved.Rule.ID] != 3 ||
-		afterRollback.PolicyDecision.Final.Action != "BLOCK" {
-		t.Fatalf("rollback result: %+v", afterRollback.PolicyDecision)
-	}
+	assertPolicyDecision(afterRollback, "BLOCK", map[string]int{saved.Rule.ID: 4, challenge.ID: 2})
 
 	shopPolicy := merchantPolicyProposal{
 		Scope: "MERCHANT", Name: "Large checkout review", ProductTypes: []string{"digital", "payment_gateway"},

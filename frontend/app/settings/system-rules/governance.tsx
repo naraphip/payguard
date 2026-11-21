@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { Check, History, RotateCcw, Send, ShieldOff } from "lucide-react";
+import { actionButton, stateBadge } from "../../action-styles";
 import { adminRulePath, useLocalAdminPreview } from "../../local-admin-preview";
+import { useProductionSession } from "../../production-auth";
 import { useRuleCredential } from "../rule-composer";
 import { outlineButton, primaryButton, ruleRequest, rulesEndpoint } from "./contracts";
 import type { Preview, Rule, RuleCatalogue } from "./contracts";
@@ -23,6 +26,7 @@ type Operation = "submit" | "approve" | "rollback";
 
 const endpoint = "/api/v1/booking/rule-composer/platform";
 const versionLabels = { PENDING: "Pending approval", ACTIVE: "Active", DISABLED: "Disabled" };
+const versionTone = { PENDING: "warning", ACTIVE: "positive", DISABLED: "neutral" } as const;
 const actorLabels: Record<string, string> = { "platform-admin": "Platform administrator", "platform-checker": "Independent checker" };
 
 function request<T>(path: string, token: string, init?: RequestInit) {
@@ -46,6 +50,7 @@ export function PlatformGovernance({ catalogueRevision }: { catalogueRevision: n
 function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }) {
   const administrator = useRuleCredential("PLATFORM");
   const local = useLocalAdminPreview();
+  const production = useProductionSession();
   const [checker, setChecker] = useState("");
   const [catalogue, setCatalogue] = useState<RuleCatalogue | null>(null);
   const [selection, setSelection] = useState("");
@@ -60,6 +65,8 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
   const active = useRef<AbortController>(null);
   const drafts = catalogue?.rules.filter(rule => rule.status === "DRAFT") ?? [];
   const draft = drafts.find(rule => rule.id === selection);
+  const maySubmit = production ? production.role === "platform_admin" : Boolean(administrator) || local;
+  const mayApprove = production ? production.role === "platform_checker" : Boolean(checker.trim());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -81,7 +88,7 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
   }
 
   async function update(token: string, operation: Operation | "load", body?: unknown) {
-    if (active.current || !draft || (!token && !local)) return;
+    if (active.current || !draft || (!token && !local && !production)) return;
     const controller = new AbortController();
     const { signal } = controller;
     active.current = controller;
@@ -121,7 +128,7 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
     const button = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const operation = button?.value;
     const target = Number(version);
-    if (!history || !version || !checkerReason.trim() || !checker.trim()) return;
+    if (!history || !version || !checkerReason.trim() || !mayApprove) return;
     if (operation === "approve") void update(checker.trim(), operation, { version: target, reason: checkerReason.trim() });
     if (operation === "rollback") void update(checker.trim(), operation, {
       version: target, expectedActiveVersion: history.activeVersion, reason: checkerReason.trim(),
@@ -142,7 +149,7 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
           {drafts.map(item => <option key={item.id} value={item.id}>{item.name} · Draft v{item.version}</option>)}
         </select>
       </label>
-      {draft && (administrator || local) && <form className="space-y-3 border-t border-line pt-3" onSubmit={submit}>
+      {draft && maySubmit && <form className="space-y-3 border-t border-line pt-3" onSubmit={submit}>
         <h3 className="font-semibold">Submit for approval</h3>
         <label className="block max-w-md font-semibold">Saved simulation run
           <select className="control mt-1" required value={runId} onChange={event => setRunId(event.currentTarget.value)} disabled={busy !== null}>
@@ -154,26 +161,34 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
           <input className="control mt-1" required maxLength={500} value={reason} onChange={event => setReason(event.currentTarget.value)} disabled={busy !== null} />
         </label>
         <button className={primaryButton} type="submit" disabled={busy !== null || !runId || !reason.trim()}>
+          <Send className="size-4 shrink-0" aria-hidden="true" />
           {busy === "submit" ? "Submitting…" : "Submit for approval"}
         </button>
       </form>}
       {draft && <section className="space-y-3 border-t border-line pt-3" aria-label="Checker approval">
         <h3 className="font-semibold">Checker approval</h3>
-        <label className="block max-w-md font-semibold">Checker token
+        {!production && <label className="block max-w-md font-semibold">Checker token
           <input className="control mt-1" type="password" value={checker} autoComplete="off" disabled={busy !== null} onChange={event => {
             setChecker(event.currentTarget.value);
             setHistory(null);
             setVersion("");
           }} />
-        </label>
-        <button className={outlineButton} type="button" disabled={busy !== null || (!loaderToken && !local)} onClick={() => void update(loaderToken, "load")}>
+        </label>}
+        <button className={outlineButton} type="button" disabled={busy !== null || (!loaderToken && !local && !production)} onClick={() => void update(loaderToken, "load")}>
+          <History className="size-4 shrink-0" aria-hidden="true" />
           {busy === "load" ? "Loading versions…" : "Load versions"}
         </button>
         {history && <>
-          <p className="text-muted">{history.activeVersion ? `Active version ${history.activeVersion}` : "No version is active."}</p>
+          <div>
+            <span className={stateBadge(history.activeVersion ? "positive" : "neutral")}>
+              {history.activeVersion ? `Active version ${history.activeVersion}` : "No active version"}
+            </span>
+          </div>
           <ul className="divide-y divide-line">
             {history.versions.map(item => <li key={item.version} className="py-2">
-              <p className="font-semibold">Version {item.version} · {versionLabels[item.status]}</p>
+              <p className="mb-1 flex flex-wrap items-center gap-2 font-semibold">
+                Version {item.version} <span className={stateBadge(versionTone[item.status])}>{versionLabels[item.status]}</span>
+              </p>
               <p className="text-xs text-muted">
                 {actorLabels[item.actor] ?? item.actor}{item.createdAt && ` · ${new Date(item.createdAt).toLocaleString()}`}
               </p>
@@ -181,7 +196,7 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
               <p className="text-muted wrap-anywhere">{item.reason}</p>
             </li>)}
           </ul>
-          {checker.trim() && history.versions.length > 0 && <form className="space-y-3" onSubmit={check}>
+          {mayApprove && history.versions.length > 0 && <form className="space-y-3" onSubmit={check}>
             <label className="block max-w-md font-semibold">Version for approval or rollback
               <select className="control mt-1" required value={version} onChange={event => setVersion(event.currentTarget.value)} disabled={busy !== null}>
                 <option value="">Choose a version</option>
@@ -194,9 +209,16 @@ function GovernanceWorkflow({ catalogueRevision }: { catalogueRevision: number }
               <input className="control mt-1" required maxLength={500} value={checkerReason} disabled={busy !== null} onChange={event => setCheckerReason(event.currentTarget.value)} />
             </label>
             <div className="flex flex-wrap gap-2">
-              {selectedVersion?.status === "PENDING" && <button className={primaryButton} type="submit" value="approve" disabled={busy !== null || !checkerReason.trim()}>Approve version</button>}
-              {(selectedVersion?.status === "ACTIVE" || version === "0") && <button className={outlineButton} type="submit" value="rollback"
-                disabled={busy !== null || !checkerReason.trim()}>{version === "0" ? "Withdraw rule" : "Restore version"}</button>}
+              {selectedVersion?.status === "PENDING" && <button className={actionButton.positive} type="submit" value="approve" disabled={busy !== null || !checkerReason.trim()}>
+                <Check className="size-4 shrink-0" aria-hidden="true" />Approve version
+              </button>}
+              {(selectedVersion?.status === "ACTIVE" || version === "0") && <button
+                className={version === "0" ? actionButton.dangerOutline : actionButton.warning} type="submit" value="rollback"
+                disabled={busy !== null || !checkerReason.trim()}>
+                {version === "0"
+                  ? <><ShieldOff className="size-4 shrink-0" aria-hidden="true" />Withdraw rule</>
+                  : <><RotateCcw className="size-4 shrink-0" aria-hidden="true" />Restore version</>}
+              </button>}
             </div>
           </form>}
         </>}

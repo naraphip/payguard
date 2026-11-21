@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { FlaskConical, History, Pause, Pencil, Play, RotateCcw, Save, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
 import { getMerchantDemoRole, getMerchantDemoToken, merchantDemoRequest, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken, subscribeMerchantDemoSession } from "../merchant-demo";
@@ -8,9 +9,11 @@ import type { DemoDirectory } from "../merchant-demo";
 import { containsMailbox, merchantMailboxDigest, parseMailboxBlock } from "../merchant-mailbox";
 import type { MailboxBlockDuration } from "../merchant-mailbox";
 import { adminRulePath, useLocalAdminPreview } from "../local-admin-preview";
+import { useProductionSession } from "../production-auth";
 import { useWorkspaceView } from "../workspace-view";
 import type { ReactNode } from "react";
-import { merchantDate } from "./merchants/management-contracts";
+import { actionButton, ruleActionTone, stateBadge } from "../action-styles";
+import { merchantDate, merchantDetailsHref } from "./merchants/management-contracts";
 import { LegacyJevRuleItem, type LegacyJevRules } from "./jev-rules/panel";
 import type { Proposal as LegacyJevProposal } from "./jev-rules/proposal";
 import { merchantFieldLabels, merchantOperatorLabels, policyFieldLabel, StructuredRuleBuilder } from "./structured-rule-builder";
@@ -36,10 +39,25 @@ export type MerchantProposal = {
 };
 type PlatformProposal = { scope: "PLATFORM"; rule: RuleInput };
 type Proposal = MerchantProposal | PlatformProposal;
+type RuleDefinitionCondition = Omit<PolicyCondition, "value"> & { value: PolicyCondition["value"] | null };
+type RuleDefinition = {
+  schemaVersion: 1;
+  scope: Scope;
+  name: string;
+  description?: string;
+  productTypes?: string[];
+  stages: string[];
+  action: string;
+  conditions: { logic: "AND" | "OR"; rules: RuleDefinitionCondition[] };
+  duration?: { value: number; unit: "minute" | "hour" };
+};
 type Interpretation = {
   status: "READY" | "CLARIFICATION";
   proposal?: Proposal;
+  definition?: RuleDefinition;
   message?: string;
+  source?: "openai" | "local" | "local_fallback" | "manual";
+  model?: string;
   validation: { valid: boolean; errors?: string[]; warnings?: string[] };
   semanticDraft?: { field: string };
 };
@@ -93,6 +111,9 @@ const fields: Record<string, string> = {
 const statusLabels = {
   ACTIVE: "Active", PENDING_APPROVAL: "Pending approval", DISABLED: "Disabled", EXPIRED: "Expired", DRAFT: "Draft",
 };
+const statusTone = {
+  ACTIVE: "positive", PENDING_APPROVAL: "warning", DISABLED: "neutral", EXPIRED: "neutral", DRAFT: "neutral",
+} as const;
 const prompts: Record<Scope, string> = {
   MERCHANT: "Review all products when amount is at least 50000 minor units",
   PLATFORM: "Send a booking for review if the device placed at least four orders within 60 seconds.",
@@ -102,9 +123,10 @@ const emptyToken = () => "";
 const noRole = () => null;
 
 export function useRuleCredential(scope: Scope) {
+  const production = useProductionSession();
   const session = useSyncExternalStore(subscribeMerchantDemoSession, getMerchantDemoToken, emptyToken);
   const role = useSyncExternalStore(subscribeMerchantDemoSession, getMerchantDemoRole, noRole);
-  return role === (scope === "MERCHANT" ? "merchant" : "admin") ? session : "";
+  return !production && role === (scope === "MERCHANT" ? "merchant" : "admin") ? session : "";
 }
 
 function errorText(cause: unknown) {
@@ -116,7 +138,7 @@ function conditionLabel(field: string, profile?: BusinessProfile | null) {
   return capability ? policyFieldLabel(capability) : fields[field] ?? field;
 }
 
-function conditionDisplayValue({ field, value }: PolicyCondition) {
+function conditionDisplayValue({ field, value }: RuleDefinitionCondition) {
   if (field === "product.type") return products[String(value)] ?? String(value);
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
@@ -163,6 +185,7 @@ function merchantPolicyRequest<T>(resource: string, token: string, init?: Reques
 
 export function RuleAccess({ scope }: { scope: Scope }) {
   const token = useRuleCredential(scope);
+  const production = useProductionSession();
   const localAdmin = useLocalAdminPreview();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -196,7 +219,7 @@ export function RuleAccess({ scope }: { scope: Scope }) {
     }
   }
 
-  if (scope === "PLATFORM" && localAdmin && !token) return null;
+  if (production || (scope === "PLATFORM" && localAdmin && !token)) return null;
 
   if (token) return <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
     <p className="font-semibold text-emerald-800">{roleLabel} connected</p>
@@ -217,24 +240,38 @@ export function RuleAccess({ scope }: { scope: Scope }) {
   </form>;
 }
 
-export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal; mailbox?: string; profile?: BusinessProfile | null }) {
-  const merchant = proposal.scope === "MERCHANT";
-  const name = merchant ? proposal.name : proposal.rule.name;
-  const action = merchant ? proposal.action : proposal.rule.action;
-  const ruleStages = merchant ? proposal.stages : [proposal.rule.stage];
-  const conditions = merchant ? proposal.conditions.rules : proposal.rule.conditions.map(({ signal, operator, value }) => ({ field: signal, operator, value }));
-  const logic = merchant && proposal.conditions.logic === "OR" ? "Any condition" : "All conditions";
+function legacyRuleDefinition(proposal: Proposal): RuleDefinition {
+  if (proposal.scope === "PLATFORM") {
+    const { name, description, stage, action, conditions } = proposal.rule;
+    return { schemaVersion: 1, scope: "PLATFORM", name, description, stages: [stage], action,
+      conditions: { logic: "AND", rules: conditions.map(({ signal, operator, value }) => ({ field: signal, operator, value })) } };
+  }
+  const { name, product_types, stages, action, conditions, durationMinutes, durationHours } = proposal;
+  const duration = durationMinutes ? { value: durationMinutes, unit: "minute" as const }
+    : durationHours ? { value: durationHours, unit: "hour" as const } : undefined;
+  return { schemaVersion: 1, scope: "MERCHANT", name, productTypes: product_types, stages, action, duration,
+    conditions: { logic: conditions.logic, rules: conditions.rules.map(condition =>
+      condition.field === mailboxField ? { ...condition, value: null } : condition) } };
+}
+
+export function RulePreview({ proposal, definition, mailbox, profile }: {
+  proposal: Proposal; definition?: RuleDefinition; mailbox?: string; profile?: BusinessProfile | null;
+}) {
+  const rule = definition?.schemaVersion === 1 && definition.scope === proposal.scope ? definition : legacyRuleDefinition(proposal);
+  const { name, action, stages: ruleStages, duration } = rule;
+  const merchant = rule.scope === "MERCHANT";
+  const conditions = rule.conditions.rules;
+  const logic = rule.conditions.logic === "OR" ? "Any condition" : "All conditions";
   const hasMailbox = conditions.some(condition => condition.field === mailboxField);
-  const duration = merchant ? proposal.durationMinutes ?? proposal.durationHours : undefined;
-  const durationUnit = merchant && proposal.durationMinutes !== undefined ? "minute" : "hour";
   return <div className="space-y-4 rounded-lg border border-line bg-paper p-4">
     <dl className="grid gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
       <div><dt className="text-muted">Rule name</dt><dd className="font-semibold wrap-anywhere">{name}</dd></div>
-      <div><dt className="text-muted">Policy source</dt><dd className="font-semibold">{scopeLabels[proposal.scope]}</dd></div>
-      {merchant && <div><dt className="text-muted">Products</dt><dd>{proposal.product_types.map(product => products[product] ?? product).join(", ")}</dd></div>}
+      <div><dt className="text-muted">Policy source</dt><dd className="font-semibold">{scopeLabels[rule.scope]}</dd></div>
+      {rule.productTypes && <div><dt className="text-muted">Products</dt><dd>{rule.productTypes.map(product => products[product] ?? product).join(", ")}</dd></div>}
       <div><dt className="text-muted">When</dt><dd>{ruleStages.map(stage => stages[stage as keyof typeof stages] ?? stage).join(", ")}</dd></div>
-      <div><dt className="text-muted">Action</dt><dd className="font-semibold">{policyActionLabels[action] ?? action}</dd></div>
-      {duration && <div><dt className="text-muted">Duration</dt><dd>{duration} {durationUnit}{duration === 1 ? "" : "s"} from activation</dd></div>}
+      <div><dt className="text-muted">Action</dt><dd className="mt-1"><RuleActionBadge action={action} /></dd></div>
+      {duration && <div><dt className="text-muted">Duration</dt><dd>{duration.value} {duration.unit}{duration.value === 1 ? "" : "s"} from activation</dd></div>}
+      {rule.description && <div className="sm:col-span-2"><dt className="text-muted">Description</dt><dd>{rule.description}</dd></div>}
     </dl>
     <div>
       <p className="text-sm font-semibold">{logic}</p>
@@ -256,10 +293,14 @@ export function RulePreview({ proposal, mailbox, profile }: { proposal: Proposal
       </p>}
     </div>
     {!hasMailbox && <details>
-      <summary className="cursor-pointer text-xs font-semibold text-accent">Advanced rule details</summary>
-      <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-white p-3 text-xs">{JSON.stringify(proposal, null, 2)}</pre>
+      <summary className="cursor-pointer text-xs font-semibold text-accent">Rule data (JSON)</summary>
+      <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-white p-3 text-xs">{JSON.stringify(rule, null, 2)}</pre>
     </details>}
   </div>;
+}
+
+function RuleActionBadge({ action }: { action: string }) {
+  return <span className={stateBadge(ruleActionTone(action))}>{policyActionLabels[action] ?? action}</span>;
 }
 
 export function PolicyExpiry({ expiresAt, status }: Pick<PolicyRule, "expiresAt" | "status">) {
@@ -275,7 +316,9 @@ export function RuleComposer({ scope, onSaved }: {
 }) {
   const token = useRuleCredential(scope);
   const localAdmin = useLocalAdminPreview();
-  return (token || (scope === "PLATFORM" && localAdmin)) && <ConnectedComposer key={token}
+  const production = useProductionSession();
+  const permitted = production?.role === (scope === "PLATFORM" ? "platform_admin" : "merchant");
+  return (token || permitted || (scope === "PLATFORM" && localAdmin)) && <ConnectedComposer key={token}
     scope={scope} token={token} localAdmin={localAdmin} onSaved={onSaved} />;
 }
 
@@ -325,6 +368,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
   const id = useId();
   const mailboxBlock = scope === "MERCHANT" ? parseMailboxBlock(instruction) : null;
   const unchangedSummary = editText.reconstructed && instruction.trim() === editText.text;
+  const needsProducts = profile?.products.length === 0;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -344,7 +388,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
 
   async function interpret(event: FormEvent) {
     event.preventDefault();
-    if (request.current || !instruction.trim() || unchangedSummary || (scope === "MERCHANT" && !profile)) return;
+    if (request.current || !instruction.trim() || unchangedSummary || (scope === "MERCHANT" && (!profile || needsProducts))) return;
     const controller = new AbortController();
     request.current = controller;
     setPending("interpret");
@@ -445,7 +489,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
   return <section className={panel} aria-labelledby={`${id}-title`}>
     <div>
       <h2 id={`${id}-title`} className="text-lg font-semibold">{scope === "MERCHANT" ? "AI Rule" : "AI rule composer"}</h2>
-      <p className="mt-1 text-sm text-muted">Describe the rule in Thai or English, then review the proposal before saving.</p>
+      <p className="mt-1 text-sm text-muted">Describe what to check and what action to take in Thai or English. Review the draft before saving.</p>
     </div>
     {scope === "MERCHANT" && !profile && !profileError && <p role="status" className="text-sm text-muted">Loading available rule fields…</p>}
     {profileError && <div className="space-y-2">
@@ -456,6 +500,10 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       <summary className="cursor-pointer font-semibold text-ink">{profile.businessName} business profile</summary>
       <ProfileDetails profile={profile} />
     </details>}
+    {needsProducts && <p className="text-sm text-muted">
+      Add a product to the merchant profile to draft a rule.{" "}
+      {adminMerchantId && <Link className="font-semibold text-accent hover:underline" href={merchantDetailsHref(adminMerchantId)}>Edit merchant details</Link>}
+    </p>}
     {edit && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-paper p-3 text-sm">
       <p>New version of <strong>{edit.proposal.name}</strong></p>
       <button type="button" className={outlineButton} disabled={pending !== null} onClick={onCancel}>{saved ? "Done" : "Cancel edit"}</button>
@@ -470,16 +518,22 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       <p id={`${id}-instruction-help`} className="text-xs text-muted">
         {editText.reconstructed && <span className="mb-1 block">This text describes the saved conditions. Change it to generate a preview, or use Rule fields to edit the conditions directly.</span>}
         {exactEmailEdit && <span className="mb-1 block">Re-enter the email address and duration to generate a new version.</span>}
-        {scope === "MERCHANT" ? <>For a temporary exact-address block, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out IP addresses, card details, and credentials.
-          <span className="mt-1 block">For a custom Jev condition, check the transaction field and meaning in the preview before saving.</span></>
+        {scope === "MERCHANT" ? <>Use bare domains for domain rules. Temporary exact-email blocks stay in PayGuard, for example <code>{mailboxExample}</code>. Leave out IP addresses, card details, and credentials.</>
           : "Use policy conditions and domains. Leave out customer identities and card details."}
       </p>
       <button type="submit" className={ready ? outlineButton : primaryButton}
-        disabled={!instruction.trim() || unchangedSummary || pending !== null || (scope === "MERCHANT" && !profile)}>
-        {pending === "interpret" ? "Generating preview…" : "Generate preview"}
+        disabled={!instruction.trim() || unchangedSummary || pending !== null || (scope === "MERCHANT" && (!profile || needsProducts))}>
+        <Sparkles className="size-4 shrink-0" aria-hidden="true" />
+        {pending === "interpret" ? "Drafting rule…" : "Draft rule"}
       </button>
     </form>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+    {draft?.source && <div role="status">
+      <span className={stateBadge(draft.source === "openai" ? "info" : draft.source === "local_fallback" ? "warning" : "neutral")}>
+        {{ openai: draft.model ? `OpenAI · ${draft.model}` : "OpenAI", local: "Processed in PayGuard",
+          local_fallback: "PayGuard fallback", manual: "Manual preview" }[draft.source]}
+      </span>
+    </div>}
     {suggestedField && canUseBuilder && profile && <div className="space-y-2 rounded-lg bg-paper p-3 text-sm">
       {draft?.message && <p role="status">{draft.message}</p>}
       <button className={outlineButton} type="button" disabled={pending !== null}
@@ -497,7 +551,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
           onPreview={proposal => {
             setSaved(null);
             setError("");
-            setDraft({ status: "READY", proposal, validation: { valid: true } });
+            setDraft({ status: "READY", source: "manual", proposal, validation: { valid: true } });
           }} />
       </div>
     </details>}
@@ -506,7 +560,7 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
       {messages.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
         {messages.map((message, index) => <li key={index}>{message}</li>)}
       </ul>}
-      {draft.proposal && <RulePreview proposal={draft.proposal} mailbox={mailboxBlock?.mailbox} profile={profile} />}
+      {draft.proposal && <RulePreview proposal={draft.proposal} definition={draft.definition} mailbox={mailboxBlock?.mailbox} profile={profile} />}
       {ready && !saved && <>
         {scope === "PLATFORM" && runs.length > 0 && <label className="block text-sm font-semibold">Simulation run for replay (optional)
           <select className="control mt-1 max-w-md" value={runId} onChange={event => setRunId(event.currentTarget.value)} disabled={pending !== null}>
@@ -516,12 +570,17 @@ function ConnectedComposer({ scope, token, localAdmin = false, adminMerchantId, 
         </label>}
         {scope === "PLATFORM" && runError && <p className="text-sm text-muted">Simulation runs could not be loaded. {runError}</p>}
         <button type="button" className={primaryButton} disabled={pending !== null} onClick={() => void save()}>
-          {pending === "save" ? "Saving…" : "Save Rule"}
+          <Save className="size-4 shrink-0" aria-hidden="true" />
+          {pending === "save" ? "Saving…" : scope === "PLATFORM" ? "Save draft" : "Save rule"}
         </button>
       </>}
     </div>}
-    {saved && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-      <p className="font-semibold">Rule saved · {statusLabels[saved.status]}</p>
+    {saved && <div role="status" className={`rounded-lg border p-3 text-sm ${saved.status === "PENDING_APPROVAL"
+      ? "border-amber-200 bg-amber-50 text-amber-950" : "border-sky-200 bg-sky-50 text-sky-950"}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-semibold">Rule saved</p>
+        <span className={stateBadge(statusTone[saved.status])}>{statusLabels[saved.status]}</span>
+      </div>
       {reason && <p className="mt-1">{reason}</p>}
       {"expiresAt" in saved.rule && <PolicyExpiry expiresAt={saved.rule.expiresAt} status={saved.rule.status} />}
       {preview && ("evaluated" in preview ? <PolicySample preview={preview} />
@@ -647,9 +706,15 @@ function ConnectedPolicyRules({ token, adminMerchantId, profile, refreshKey, onE
     }
   }
 
+  const activeCount = rules.filter(rule => rule.status === "ACTIVE" || rule.activeVersion).length;
   return <section className={panel} aria-labelledby="merchant-policy-list">
     <div className="flex items-center justify-between gap-2">
-      <h2 id="merchant-policy-list" className="text-lg font-semibold">Saved rules</h2>
+      <div>
+        <h2 id="merchant-policy-list" className="text-lg font-semibold">Saved rules</h2>
+        {!loading && rules.length > 0 && <p className="mt-1 text-sm text-muted">
+          {activeCount} active {activeCount === 1 ? "policy" : "policies"}
+        </p>}
+      </div>
       <button type="button" className={outlineButton} disabled={loading || legacyLoading || !!busy}
         onClick={() => setRevision(value => value + 1)}>Refresh rules</button>
     </div>
@@ -663,36 +728,49 @@ function ConnectedPolicyRules({ token, adminMerchantId, profile, refreshKey, onE
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold wrap-anywhere">{rule.proposal.name}</p>
-            <p className="mt-1 text-xs text-muted">{statusLabels[rule.status]} · Version {rule.version} · {policyActionLabels[rule.proposal.action]}
-              {rule.proposal.conditions.rules.some(condition => condition.operator === "semantic_match") && ` · ${jevConditionLabel}`}
-              {rule.activeVersion && rule.activeVersion !== rule.version ? ` · Version ${rule.activeVersion} remains active` : ""}
-            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <span className={stateBadge(statusTone[rule.status])}>{statusLabels[rule.status]}</span>
+              <RuleActionBadge action={rule.proposal.action} />
+              <span className="text-xs text-muted">Version {rule.version}</span>
+              {rule.proposal.conditions.rules.some(condition => condition.operator === "semantic_match") &&
+                <span className={stateBadge("info")}>{jevConditionLabel}</span>}
+              {rule.activeVersion && rule.activeVersion !== rule.version &&
+                <span className="text-xs text-muted">Version {rule.activeVersion} remains active</span>}
+            </div>
             <PolicyExpiry expiresAt={rule.expiresAt} status={rule.status} />
             {rule.preview && <PolicySample preview={rule.preview} />}
+            {rule.status === "PENDING_APPROVAL" && Boolean(rule.preview?.conflictRuleIds?.length) &&
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-sm text-amber-950">
+                Multiple policies can match after activation. Block takes priority over Review, then Challenge.
+              </p>}
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" className={outlineButton} disabled={Boolean(busy)} onClick={() => {
               onEdit(rule);
               document.getElementById("merchant-policy-editor")?.focus();
-            }}>Edit</button>
-            <button type="button" className={outlineButton} disabled={Boolean(busy)} onClick={() => void change(rule, "simulate")}>Test rule</button>
+            }}><Pencil className="size-4 shrink-0" aria-hidden="true" />Edit</button>
+            <button type="button" className={outlineButton} disabled={Boolean(busy)} onClick={() => void change(rule, "simulate")}>
+              <FlaskConical className="size-4 shrink-0" aria-hidden="true" />Test rule
+            </button>
             <button type="button" className={outlineButton} disabled={Boolean(busy)} onClick={() => {
               if (history?.rule.id === rule.id) setHistory(null);
               else void change(rule, "history");
-            }}>{history?.rule.id === rule.id ? "Hide versions" : "Versions"}</button>
-            {(rule.status === "ACTIVE" || rule.activeVersion) && <button type="button" className={outlineButton} disabled={Boolean(busy)}
-              onClick={() => void change(rule, "disable")}>Disable</button>}
-            {rule.status === "PENDING_APPROVAL" && <button type="button" className={outlineButton} disabled={Boolean(busy)}
-              onClick={() => void change(rule, "activate")}>Activate</button>}
-            <button type="button" className={outlineButton} disabled={Boolean(busy) || confirmDelete === rule.id}
-              onClick={() => setConfirmDelete(rule.id)}>Delete</button>
+            }}><History className="size-4 shrink-0" aria-hidden="true" />{history?.rule.id === rule.id ? "Hide versions" : "Versions"}</button>
+            {rule.status === "PENDING_APPROVAL" && <button type="button" className={actionButton.positive} disabled={Boolean(busy)}
+              onClick={() => void change(rule, "activate")}><Play className="size-4 shrink-0" aria-hidden="true" />Activate</button>}
+            {(rule.status === "ACTIVE" || rule.activeVersion) && <button type="button" className={actionButton.warning} disabled={Boolean(busy)}
+              onClick={() => void change(rule, "disable")}><Pause className="size-4 shrink-0" aria-hidden="true" />Disable</button>}
+            <button type="button" className={actionButton.dangerOutline} disabled={Boolean(busy) || confirmDelete === rule.id}
+              onClick={() => setConfirmDelete(rule.id)}><Trash2 className="size-4 shrink-0" aria-hidden="true" />Delete</button>
           </div>
         </div>
         {confirmDelete === rule.id && <div className="space-y-2 rounded-md border border-red-200 bg-red-50 p-3" aria-label="Confirm rule deletion">
           <p className="text-sm text-red-900">Delete <strong>{rule.proposal.name}</strong> from future decisions? Saved transactions retain their rule versions.</p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="rounded-md bg-red-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-55"
-              disabled={Boolean(busy)} onClick={() => void change(rule, "delete")}>Confirm deletion</button>
+            <button type="button" className={actionButton.danger}
+              disabled={Boolean(busy)} onClick={() => void change(rule, "delete")}>
+              <Trash2 className="size-4 shrink-0" aria-hidden="true" />Confirm deletion
+            </button>
             <button type="button" className={outlineButton} disabled={Boolean(busy)} onClick={() => setConfirmDelete("")}>Cancel</button>
           </div>
         </div>}
@@ -711,8 +789,10 @@ function ConnectedPolicyRules({ token, adminMerchantId, profile, refreshKey, onE
                 <PolicyExpiry expiresAt={version.expiresAt} status={version.status} />
                 <div className="mt-2"><RulePreview proposal={version.proposal} profile={profile} /></div>
               </details>
-              {version.version !== rule.version && <button type="button" className={outlineButton}
-                disabled={Boolean(busy)} onClick={() => void change(rule, "rollback", version.version)}>Restore version {version.version}</button>}
+              {version.version !== rule.version && <button type="button" className={actionButton.warning}
+                disabled={Boolean(busy)} onClick={() => void change(rule, "rollback", version.version)}>
+                <RotateCcw className="size-4 shrink-0" aria-hidden="true" />Restore version {version.version}
+              </button>}
             </div>
           </li>)}
         </ul>}
@@ -724,13 +804,14 @@ function ConnectedPolicyRules({ token, adminMerchantId, profile, refreshKey, onE
 }
 
 function PolicySample({ preview }: { preview: PolicyPreview }) {
+  const overlap = preview.conflictRuleIds?.length ?? 0;
   return <div className="mt-1 text-xs text-muted">
     <p>
       {preview.matched} of {preview.evaluated} matched · {preview.missing} with missing signals
       {!!preview.requiresJev && ` · ${preview.requiresJev} require Jev at transaction time`}
-      {!!preview.conflictRuleIds?.length && ` · Conflicts with ${preview.conflictRuleIds.length} active policies`}
+      {overlap > 0 && ` · Potential overlap with ${overlap} other ${overlap === 1 ? "policy" : "policies"} at preview`}
     </p>
-    {preview.approvalReason && <p className="mt-1">{preview.approvalReason}</p>}
+    {!overlap && preview.approvalReason && <p className="mt-1">{preview.approvalReason}</p>}
   </div>;
 }
 
@@ -754,12 +835,13 @@ export function AdminMerchantPolicyWorkspace({ merchantId, token }: { merchantId
 
 export function MerchantRulesWorkspace() {
   const token = useRuleCredential("MERCHANT");
+  const production = useProductionSession();
   return <main className="mx-auto max-w-[1050px] space-y-5 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <header>
       <h1 className="text-[30px] font-semibold tracking-tight sm:text-[36px]">Merchant AI Rules</h1>
     </header>
     <RuleAccess scope="MERCHANT" />
-    {token && <MerchantPolicyWorkspace key={token} token={token} />}
+    {(token || production?.role === "merchant") && <MerchantPolicyWorkspace key={token} token={token} />}
     <div className="flex flex-wrap gap-4 text-sm font-semibold text-accent">
       <Link href="/settings/merchants?view=transactions" className="hover:underline">Open transactions</Link>
     </div>
@@ -768,11 +850,12 @@ export function MerchantRulesWorkspace() {
 
 export function SettingsWorkspace({ children }: { children: ReactNode }) {
   const merchant = useWorkspaceView() === "merchant";
+  const production = useProductionSession();
   const token = useRuleCredential("MERCHANT");
   if (!merchant) return children;
   return <div className="mt-6 space-y-4">
     <RuleAccess scope="MERCHANT" />
-    {token && <MerchantRiskProtection key={token} token={token} />}
+    {(token || production?.role === "merchant") && <MerchantRiskProtection key={token} token={token} />}
   </div>;
 }
 

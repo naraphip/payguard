@@ -1,5 +1,6 @@
 import type { MerchantSetup } from "./settings/merchant-setup/contracts";
 import type { CustomSignalDefinition } from "./settings/merchants/custom-signal-setup";
+import { payguardFetch, productionBrowser } from "./production-auth";
 
 export type DemoMerchant = {
   id: string;
@@ -150,13 +151,14 @@ export function setMerchantDemoToken(value: string, role: DemoDirectory["role"] 
 
 export async function merchantDemoRequest<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  const bearer = token.trim();
+  const production = productionBrowser();
+  const bearer = production ? "" : token.trim();
   if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
   if (init?.body) headers.set("Content-Type", "application/json");
-  const base = bearer ? "/api/v1/booking/demo/merchants" : "/api/merchant-preview";
-  const response = await fetch(`${base}${path}`, { ...init, headers, cache: "no-store" });
+  const base = production || bearer ? "/api/v1/booking/demo/merchants" : "/api/merchant-preview";
+  const response = await payguardFetch(`${base}${path}`, { ...init, headers, cache: "no-store" });
   const result = await response.json().catch(() => null);
-  if (!bearer && response.status === 404 && result?.code === "MERCHANT_PREVIEW_DISABLED") {
+  if (!production && !bearer && response.status === 404 && result?.code === "MERCHANT_PREVIEW_DISABLED") {
     throw new LocalMerchantPreviewDisabled();
   }
   if (!response.ok || result === null) {
