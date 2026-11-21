@@ -73,6 +73,7 @@ type bookingBaseline struct {
 
 type bookingAssessment struct {
 	EventID        string           `json:"eventId"`
+	AssessedAt     *time.Time       `json:"assessedAt,omitempty"`
 	ProfileVersion string           `json:"profileVersion"`
 	RuleVersion    string           `json:"ruleVersion"`
 	Baseline       bookingBaseline  `json:"baseline"`
@@ -211,6 +212,8 @@ func (r repository) assessBooking(ctx context.Context, cache *redis.Client, merc
 			return err
 		}
 		computed := evaluateBooking(booking, version, profile.Candidate, velocity, mode)
+		assessedAt := time.Now().UTC().Truncate(time.Microsecond)
+		computed.AssessedAt = &assessedAt
 		if baselineID != nil {
 			computed.Baseline = baselineSummary(baselineID, *sampleCount)
 		}
