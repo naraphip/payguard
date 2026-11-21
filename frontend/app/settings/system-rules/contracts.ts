@@ -53,6 +53,32 @@ export type Signal = {
   stages: Stage[];
 };
 
+export const signalDetails: Partial<Record<string, { unit?: string; source: string }>> = {
+  account_age_days: {
+    unit: "days",
+    source: "Enter Account age in days in Mock Checkout or a merchant test in Simulation Lab. A blank value leaves this signal missing. Batch simulation generates ages from the run seed.",
+  },
+  device_orders: {
+    unit: "orders",
+    source: "Batch simulation counts orders linked to the same synthetic device in the trailing 60 seconds. Single-transaction tests have no device history.",
+  },
+  ip_orders: {
+    unit: "orders",
+    source: "Batch simulation counts orders linked to the same synthetic IP in the trailing 60 seconds. Single-transaction tests have no IP history.",
+  },
+  payment_token_orders: {
+    unit: "orders",
+    source: "At pre-payment and payment, batch simulation counts orders linked to the same synthetic token in the trailing 60 seconds. Single-transaction tests leave this signal missing.",
+  },
+  payment_token_missing: {
+    source: "At pre-payment and payment, batch simulation checks whether usable payment-token evidence is missing. Single-transaction tests leave this signal unavailable.",
+  },
+  shared_device_or_token_orders: {
+    unit: "orders",
+    source: "Batch simulation uses the higher available order count for the synthetic device or payment token in the trailing 60 seconds. Single-transaction tests leave this signal missing.",
+  },
+};
+
 export type PreviewRun = {
   id: string;
   seed: number;

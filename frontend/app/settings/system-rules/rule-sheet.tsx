@@ -2,13 +2,13 @@
 
 import type { RuleTransport } from "./contracts";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpRight, CircleAlert, FlaskConical, LoaderCircle, LockKeyhole, Plus, Trash2, X } from "lucide-react";
 import {
   actions, fieldControl, formatDate, operators, outlineButton, primaryButton,
-  globalRuleTransport, stages,
+  globalRuleTransport, signalDetails, stages,
 } from "./contracts";
 import type { Action, Condition, Operator, Preview, PreviewRun, Rule, RuleInput, Signal, Stage } from "./contracts";
 
@@ -65,6 +65,7 @@ type Props = {
 };
 
 export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, request = globalRuleTransport, canEdit = true }: Props) {
+  const signalHelpId = useId();
   const readOnly = !!rule && (!canEdit || rule.status === "ACTIVE");
   const dialog = useRef<HTMLDialogElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
@@ -212,10 +213,14 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
           <section aria-labelledby="current-conditions" className="space-y-2">
             <h3 id="current-conditions" className="text-sm font-semibold">Conditions</h3>
             <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200">
-              {rule.conditions.map((condition, index) => <li className="px-3.5 py-2.5 text-sm text-slate-700" key={index}>
-                <span className="font-medium text-slate-900">{signals.find(signal => signal.id === condition.signal)?.label ?? condition.signal}</span>
-                {" "}{operators[condition.operator]}{" "}{String(condition.value)}
-              </li>)}
+              {rule.conditions.map((condition, index) => {
+                const details = signalDetails[condition.signal];
+                return <li className="px-3.5 py-2.5 text-sm text-slate-700" key={index}>
+                  <span className="font-medium text-slate-900">{signals.find(signal => signal.id === condition.signal)?.label ?? condition.signal}</span>
+                  {" "}{operators[condition.operator]}{" "}{String(condition.value)}{details?.unit && ` ${details.unit}`}
+                  {details && <p className="mt-1 text-xs leading-relaxed text-slate-600">{details.source}</p>}
+                </li>;
+              })}
             </ul>
           </section>
           <p className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
@@ -244,7 +249,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 id="new-conditions" className="text-sm font-semibold">Conditions</h3>
-                <p className="mt-1 text-xs text-slate-600">All conditions must match.</p>
+                <p className="mt-1 text-xs text-slate-600">Each condition compares the transaction’s signal with the value you set. All conditions must match.</p>
               </div>
               <button type="button" className={`${outlineButton} h-8 text-xs`} disabled={form.conditions.length >= 5 || !available.length}
                 onClick={() => change({ ...form, conditions: [...form.conditions, defaultCondition(available[0])] })}>
@@ -253,10 +258,13 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
             </div>
             {form.conditions.map((condition, index) => {
               const signal = available.find(item => item.id === condition.signal);
+              const details = signalDetails[condition.signal];
+              const helpId = details ? `${signalHelpId}-${index}` : undefined;
+              const valueLabel = signal?.type === "boolean" ? "Expected value" : details?.unit ? `Threshold (${details.unit})` : "Threshold";
               return <fieldset key={index} className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <legend className="px-1 text-xs font-medium text-slate-600">Condition {index + 1}</legend>
                 <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2">
-                  <Field label="Signal"><select required className={fieldControl} value={condition.signal}
+                  <Field label="Signal"><select required className={fieldControl} value={condition.signal} aria-describedby={helpId}
                     onChange={event => changeCondition(index, defaultCondition(available.find(item => item.id === event.target.value)))}>
                     <option value="" disabled>Choose a signal</option>
                     {available.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -273,7 +281,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
                     {Object.entries(operators).filter(([key]) => signal?.type !== "boolean" || key === "eq" || key === "ne")
                       .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select></Field>
-                  <Field label="Value">
+                  <Field label={valueLabel}>
                     {signal?.type === "boolean"
                       ? <select className={fieldControl} value={String(condition.value)}
                         onChange={event => changeCondition(index, { ...condition, value: event.target.value === "true" })}>
@@ -284,6 +292,7 @@ export function RuleSheet({ rule, signals, runs, onClose, onSaved, onDeleted, re
                         onChange={event => changeCondition(index, { ...condition, value: event.target.valueAsNumber })} />}
                   </Field>
                 </div>
+                {details && <p id={helpId} className="mt-2 text-xs leading-relaxed text-slate-600">{details.source}</p>}
               </fieldset>;
             })}
           </section>
