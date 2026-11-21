@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,12 +14,15 @@ func (s mockMerchantService) registerRules(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+platform, s.ruleHandler(app.readTenantRules))
 	mux.HandleFunc("POST "+platform, s.ruleHandler(app.createTenantRule))
 	mux.HandleFunc("PUT "+platform+"/{id}", s.ruleHandler(app.updateTenantRule))
+	mux.HandleFunc("DELETE "+platform+"/{id}", s.ruleHandler(app.deleteTenantRule))
 	mux.HandleFunc("POST "+platform+"/preview", s.ruleHandler(app.previewTenantRules))
 
 	jev := merchantDemoPath + "/{merchantId}/jev/rules"
 	mux.HandleFunc("GET "+jev, s.ruleHandler(app.readMockJevRules))
 	mux.HandleFunc("POST "+jev, s.ruleHandler(app.publishMockJevRule))
 	mux.HandleFunc("POST "+jev+"/preview", s.ruleHandler(app.previewMockJevRule))
+	mux.HandleFunc("PUT "+jev+"/{id}", s.ruleHandler(app.reviseMockJevRule))
+	mux.HandleFunc("DELETE "+jev+"/{id}", s.ruleHandler(app.reviseMockJevRule))
 }
 
 func (s mockMerchantService) ruleHandler(handle func(app, http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
@@ -43,12 +47,20 @@ func (s mockMerchantService) ruleHandler(handle func(app, http.ResponseWriter, *
 }
 
 func decodeMockJevRule(w http.ResponseWriter, r *http.Request, definition *jevRuleDefinition) bool {
-	if !decodeJevRule(w, r, definition) {
+	if !decodeBookingRiskJSON(w, r, definition) {
+		return false
+	}
+	return validateMockJevRule(w, definition)
+}
+
+func validateMockJevRule(w http.ResponseWriter, definition *jevRuleDefinition) bool {
+	if err := definition.validate(); err != nil {
+		problem(w, http.StatusUnprocessableEntity, err.Error())
 		return false
 	}
 	for _, condition := range definition.Conditions {
 		if condition.Signal != bookingAmount {
-			problem(w, http.StatusUnprocessableEntity, "Merchant mock transactions support amountMinor conditions only.")
+			problem(w, http.StatusUnprocessableEntity, "Merchant Jev review rules support amountMinor conditions.")
 			return false
 		}
 	}
@@ -72,6 +84,52 @@ func (a app) publishMockJevRule(w http.ResponseWriter, r *http.Request, merchant
 	snapshot, err := a.repo.publishJevRule(r.Context(), merchantID, definition)
 	if err != nil {
 		bookingRiskUnavailable(w, err)
+		return
+	}
+	respond(w, http.StatusOK, snapshot)
+}
+
+func (a app) reviseMockJevRule(w http.ResponseWriter, r *http.Request, merchantID string) {
+	id := r.PathValue("id")
+	if !strings.HasPrefix(id, jevRuleIDPrefix) || len(id) > 128 {
+		problem(w, http.StatusNotFound, "Jev rule not found.")
+		return
+	}
+	var revision struct {
+		ExpectedVersion string `json:"expectedVersion"`
+	}
+	var definition *jevRuleDefinition
+	if r.Method == http.MethodPut {
+		var edit struct {
+			ExpectedVersion string             `json:"expectedVersion"`
+			Definition      *jevRuleDefinition `json:"definition"`
+		}
+		if !decodeBookingRiskJSON(w, r, &edit) {
+			return
+		}
+		if edit.Definition == nil {
+			problem(w, http.StatusUnprocessableEntity, "Include a Jev rule definition.")
+			return
+		}
+		if !validateMockJevRule(w, edit.Definition) {
+			return
+		}
+		revision.ExpectedVersion = edit.ExpectedVersion
+		definition = edit.Definition
+	} else if !decodeBookingRiskJSON(w, r, &revision) {
+		return
+	}
+	if strings.TrimSpace(revision.ExpectedVersion) == "" {
+		problem(w, http.StatusUnprocessableEntity, "Include the current Jev ruleset version.")
+		return
+	}
+	snapshot, err := a.repo.reviseMerchantJevRule(r.Context(), merchantID, id, revision.ExpectedVersion, definition)
+	if err != nil {
+		if errors.Is(err, errJevRulesVersion) || errors.Is(err, errJevRuleExists) {
+			problem(w, http.StatusConflict, err.Error())
+		} else {
+			demoWriteError(w, err)
+		}
 		return
 	}
 	respond(w, http.StatusOK, snapshot)

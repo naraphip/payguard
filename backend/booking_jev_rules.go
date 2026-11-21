@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -27,6 +29,9 @@ CREATE TABLE IF NOT EXISTS booking_jev_rules (
   PRIMARY KEY (merchant_id, revision),
   UNIQUE (merchant_id, rule_id)
 );
+ALTER TABLE booking_jev_rules
+  ADD COLUMN IF NOT EXISTS target_rule_id text,
+  ADD COLUMN IF NOT EXISTS deleted boolean NOT NULL DEFAULT false;
 `
 
 const (
@@ -58,6 +63,11 @@ type jevRulesSnapshot struct {
 	Version string             `json:"version"`
 	Rules   []publishedJevRule `json:"rules"`
 }
+
+var (
+	errJevRulesVersion = errors.New("The Jev rules changed. Refresh the ruleset and try again.")
+	errJevRuleExists   = errors.New("An active Jev rule already has this definition.")
+)
 
 type jevRulePreview struct {
 	Evaluated int `json:"evaluated"`
@@ -180,19 +190,37 @@ type jevRuleReader interface {
 func readJevRules(ctx context.Context, db jevRuleReader, merchant string) (jevRulesSnapshot, error) {
 	snapshot := jevRulesSnapshot{Version: bookingRuleVersion, Rules: []publishedJevRule{}}
 	rows, err := db.Query(ctx, `
-		SELECT revision, rule_id, definition FROM booking_jev_rules
+		SELECT revision, rule_id, definition, target_rule_id, deleted FROM booking_jev_rules
 		WHERE merchant_id = $1 ORDER BY revision`, merchant)
 	if err != nil {
 		return snapshot, err
 	}
 	defer rows.Close()
+	active := map[string]publishedJevRule{}
+	var order []string
 	var revision int64
 	for rows.Next() {
 		var rule publishedJevRule
-		if err := rows.Scan(&revision, &rule.ID, &rule.jevRuleDefinition); err != nil {
+		var targetID *string
+		var deleted bool
+		if err := rows.Scan(&revision, &rule.ID, &rule.jevRuleDefinition, &targetID, &deleted); err != nil {
 			return snapshot, err
 		}
-		snapshot.Rules = append(snapshot.Rules, rule)
+		if targetID == nil {
+			order = append(order, rule.ID)
+		} else {
+			rule.ID = *targetID
+		}
+		if deleted {
+			delete(active, rule.ID)
+		} else {
+			active[rule.ID] = rule
+		}
+	}
+	for _, id := range order {
+		if rule, ok := active[id]; ok {
+			snapshot.Rules = append(snapshot.Rules, rule)
+		}
 	}
 	if revision > 1 {
 		snapshot.Version = fmt.Sprintf("booking-rules-v%d", revision)
@@ -201,24 +229,93 @@ func readJevRules(ctx context.Context, db jevRuleReader, merchant string) (jevRu
 }
 
 func (r repository) publishJevRule(ctx context.Context, merchant string, definition jevRuleDefinition) (jevRulesSnapshot, error) {
-	raw, err := json.Marshal(definition)
-	if err != nil {
-		return jevRulesSnapshot{}, err
-	}
-	digest := sha256.Sum256(raw)
-	id := jevRuleIDPrefix + hex.EncodeToString(digest[:])
 	var snapshot jevRulesSnapshot
-	err = pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		// Serialize appends for this merchant so every revision identifies an immutable prefix.
 		if err := lockBookingMerchant(ctx, tx, merchant); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `
-			INSERT INTO booking_jev_rules (merchant_id, revision, rule_id, definition)
-			SELECT $1, COALESCE(MAX(revision), 1) + 1, $2, $3::jsonb
-			FROM booking_jev_rules WHERE merchant_id = $1
-			ON CONFLICT (merchant_id, rule_id) DO NOTHING`, merchant, id, raw)
+		current, err := readJevRules(ctx, tx, merchant)
 		if err != nil {
+			return err
+		}
+		if slices.ContainsFunc(current.Rules, func(rule publishedJevRule) bool {
+			return reflect.DeepEqual(rule.jevRuleDefinition, definition)
+		}) {
+			snapshot = current
+			return nil
+		}
+		if err := appendJevRule(ctx, tx, merchant, "", definition, false); err != nil {
+			return err
+		}
+		snapshot, err = readJevRules(ctx, tx, merchant)
+		return err
+	})
+	return snapshot, err
+}
+
+func appendJevRule(ctx context.Context, tx pgx.Tx, merchant, targetID string, definition jevRuleDefinition, deleted bool) error {
+	raw, err := json.Marshal(definition)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(raw)
+	id := jevRuleIDPrefix + hex.EncodeToString(digest[:])
+	_, err = tx.Exec(ctx, `
+		WITH next AS (
+			SELECT COALESCE(MAX(revision), 1) + 1 AS revision
+			FROM booking_jev_rules WHERE merchant_id = $1
+		)
+		INSERT INTO booking_jev_rules (merchant_id, revision, rule_id, definition, target_rule_id, deleted)
+		SELECT $1, next.revision,
+			CASE WHEN $4::text <> '' THEN 'jev-change-v' || next.revision
+				WHEN EXISTS (SELECT 1 FROM booking_jev_rules WHERE merchant_id = $1 AND rule_id = $2)
+				THEN $2 || '-v' || next.revision
+				ELSE $2 END,
+			$3::jsonb, NULLIF($4::text, ''), $5
+		FROM next`, merchant, id, raw, targetID, deleted)
+	return err
+}
+
+func (r repository) reviseMerchantJevRule(ctx context.Context, merchant, targetID, expectedVersion string, definition *jevRuleDefinition) (jevRulesSnapshot, error) {
+	var snapshot jevRulesSnapshot
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if err := lockMockMerchant(ctx, tx, merchant); err != nil {
+			return err
+		}
+		if err := lockBookingMerchant(ctx, tx, merchant); err != nil {
+			return err
+		}
+		current, err := readJevRules(ctx, tx, merchant)
+		if err != nil {
+			return err
+		}
+		if current.Version != expectedVersion {
+			return errJevRulesVersion
+		}
+		index := slices.IndexFunc(current.Rules, func(rule publishedJevRule) bool { return rule.ID == targetID })
+		if index < 0 {
+			return pgx.ErrNoRows
+		}
+		revision := current.Rules[index].jevRuleDefinition
+		event := "MERCHANT_JEV_RULE_REMOVED"
+		if definition != nil {
+			if reflect.DeepEqual(revision, *definition) {
+				snapshot = current
+				return nil
+			}
+			if slices.ContainsFunc(current.Rules, func(rule publishedJevRule) bool {
+				return rule.ID != targetID && reflect.DeepEqual(rule.jevRuleDefinition, *definition)
+			}) {
+				return errJevRuleExists
+			}
+			revision = *definition
+			event = "MERCHANT_JEV_RULE_UPDATED"
+		}
+		if err := appendJevRule(ctx, tx, merchant, targetID, revision, definition == nil); err != nil {
+			return err
+		}
+		if err := auditMerchant(ctx, tx, merchant, event); err != nil {
 			return err
 		}
 		snapshot, err = readJevRules(ctx, tx, merchant)

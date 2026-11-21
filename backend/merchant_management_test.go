@@ -112,7 +112,13 @@ func TestMerchantManagementPostgres(t *testing.T) {
 		t.Fatalf("expected an active merchant policy, got %s", savedPolicy.Rule.Status)
 	}
 	request(t, http.MethodPost, policyPath, admin, map[string]any{"proposal": policy}, http.StatusForbidden, nil)
-	request(t, http.MethodPost, firstPath+"/policies", admin, map[string]any{"proposal": policy}, http.StatusMethodNotAllowed, nil)
+	var adminSaved struct {
+		Rule merchantPolicyRule `json:"rule"`
+	}
+	request(t, http.MethodPost, firstPath+"/policies", admin, map[string]any{"proposal": policy}, http.StatusCreated, &adminSaved)
+	if adminSaved.Rule.ID != savedPolicy.Rule.ID || adminSaved.Rule.Version != savedPolicy.Rule.Version {
+		t.Fatalf("Platform Admin resaving the same policy should reuse the existing revision: %+v", adminSaved.Rule)
+	}
 
 	createTransaction := func(path string, scenario mockScenario, id string, amount int64, domain string) mockTransaction {
 		t.Helper()

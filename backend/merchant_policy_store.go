@@ -16,6 +16,7 @@ const merchantPolicySchema = `
 ALTER TABLE merchant_demo_merchants ADD COLUMN IF NOT EXISTS policy_integration jsonb;
 ALTER TABLE merchant_demo_transactions ADD COLUMN IF NOT EXISTS customer_email_domain text NOT NULL DEFAULT '';
 ALTER TABLE merchant_demo_transactions ADD COLUMN IF NOT EXISTS policy_decision jsonb;
+ALTER TABLE merchant_demo_transactions ADD COLUMN IF NOT EXISTS custom_signals jsonb;
 CREATE TABLE IF NOT EXISTS merchant_policy_rule_versions (
 	merchant_id uuid NOT NULL REFERENCES merchant_demo_merchants(id),
 	rule_id uuid NOT NULL,
@@ -39,9 +40,10 @@ var (
 )
 
 type merchantPolicyIntegration struct {
-	Products    []string `json:"products"`
-	EmailDomain bool     `json:"emailDomain"`
-	AmountMinor bool     `json:"amountMinor,omitempty"`
+	Products     []string                 `json:"products"`
+	CustomFields []customSignalDefinition `json:"customFields,omitempty"`
+	EmailDomain  bool                     `json:"emailDomain"`
+	AmountMinor  bool                     `json:"amountMinor,omitempty"`
 }
 
 func (integration merchantPolicyIntegration) valid() bool {
@@ -83,7 +85,10 @@ func (s mockMerchantService) merchantPolicyProfile(ctx context.Context, merchant
 }
 
 func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merchant string) (merchantPolicyProfile, []merchantPolicyEvidence, error) {
-	profile := merchantPolicyProfile{MerchantID: merchant, Products: []string{}, Stages: []string{}, Signals: []string{policyProduct}}
+	profile := merchantPolicyProfile{
+		MerchantID: merchant, Products: []string{}, Stages: []string{}, Signals: []string{policyProduct},
+		ScoringProfileVersion: merchantRuleProfileVersion,
+	}
 	var setup *merchantSetup
 	var integration *merchantPolicyIntegration
 	if err := db.QueryRow(ctx, `SELECT name,setup,policy_integration FROM merchant_demo_merchants
@@ -102,7 +107,7 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	}
 	declaredAmount, declaredDomain := hasAmount, hasDomain
 	observedAmount, observedDomain := map[string]bool{}, map[string]bool{}
-	rows, err := db.Query(ctx, `SELECT product, amount_minor, customer_email_domain, customer_mailbox_ref FROM merchant_demo_transactions
+	rows, err := db.Query(ctx, `SELECT product, amount_minor, customer_email_domain, customer_mailbox_ref, custom_signals FROM merchant_demo_transactions
 		WHERE merchant_id=$1::text::uuid ORDER BY created_at DESC,id DESC LIMIT 200`, merchant)
 	if err != nil {
 		return profile, nil, err
@@ -111,7 +116,7 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	var evidence []merchantPolicyEvidence
 	for rows.Next() {
 		var item merchantPolicyEvidence
-		if err := rows.Scan(&item.product, &item.amount, &item.domain, &item.mailboxRef); err != nil {
+		if err := rows.Scan(&item.product, &item.amount, &item.domain, &item.mailboxRef, &item.custom); err != nil {
 			return profile, nil, err
 		}
 		item.stage = merchantPolicyStage(item.product)
@@ -140,7 +145,6 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	slices.Sort(profile.Stages)
 	if hasAmount {
 		profile.Signals = append(profile.Signals, policyAmount)
-		profile.ScoringProfileVersion = merchantScenarioProfileVersion
 	}
 	if hasDomain {
 		profile.Signals = append(profile.Signals, policyDomain)
@@ -162,6 +166,14 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 			}
 		}
 		profile.FieldRegistry = append(profile.FieldRegistry, entry)
+	}
+	if integration != nil {
+		for _, f := range integration.CustomFields {
+			profile.Signals = append(profile.Signals, f.Key)
+			profile.FieldRegistry = append(profile.FieldRegistry, merchantCapability{Name: f.Key, Label: f.Label,
+				policyField: policyField{DataType: f.Type, Operators: customSignalOperators(f.Type), DataSource: "merchant integration", Privacy: "non-identifying metadata", MissingValuePolicy: "no_match"},
+				Products:    profile.Products, Stages: profile.Stages})
+		}
 	}
 	return profile, evidence, nil
 }
@@ -216,7 +228,7 @@ func readMerchantPolicies(ctx context.Context, db mockMerchantQueryer, merchant 
 		if err != nil {
 			return nil, err
 		}
-		if !effective || rule.Status == "ACTIVE" {
+		if rule.ChangeReason != "delete" && (!effective || rule.Status == "ACTIVE") {
 			rules = append(rules, rule)
 		}
 	}
@@ -254,6 +266,7 @@ func merchantPoliciesCouldConflict(candidate, active merchantPolicyProposal) boo
 }
 
 type merchantPolicyMutation struct {
+	Actor           string
 	Kind            string
 	ID              string
 	ExpectedVersion int
@@ -276,6 +289,9 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 			if err != nil {
 				return err
 			}
+			if current.ChangeReason == "delete" {
+				return pgx.ErrNoRows
+			}
 			if current.Version != request.ExpectedVersion {
 				return errPolicyVersion
 			}
@@ -283,7 +299,7 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 		proposal := request.Proposal
 		var rollback *int
 		switch request.Kind {
-		case "activate", "disable":
+		case "activate", "disable", "delete":
 			if request.Kind == "activate" && current.Status == "ACTIVE" || request.Kind == "disable" && current.Status == "DISABLED" {
 				result = current
 				if current.Status == "ACTIVE" {
@@ -307,7 +323,7 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 		if err != nil {
 			return err
 		}
-		if request.Kind == "disable" {
+		if request.Kind == "disable" || request.Kind == "delete" {
 			status = "DISABLED"
 		} else {
 			profile, evidence, err := readMerchantPolicyContext(ctx, tx, merchant)
@@ -359,10 +375,14 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 				status = "PENDING_APPROVAL"
 			}
 		}
+		actor := request.Actor
+		if actor == "" {
+			actor = merchant
+		}
 		result, err = scanMerchantPolicy(tx.QueryRow(ctx, `
 			INSERT INTO merchant_policy_rule_versions(merchant_id,rule_id,version,status,proposal,preview,created_by,change_reason,rollback_version)
-			VALUES($1::text::uuid, COALESCE(NULLIF($2,'')::uuid,gen_random_uuid()),$3,$4,$5,$6,$1::text,$7,$8)
-			RETURNING `+merchantPolicyColumns, merchant, request.ID, current.Version+1, status, proposal, preview, request.Kind, rollback))
+			VALUES($1::text::uuid, COALESCE(NULLIF($2,'')::uuid,gen_random_uuid()),$3,$4,$5,$6,$9,$7,$8)
+			RETURNING `+merchantPolicyColumns, merchant, request.ID, current.Version+1, status, proposal, preview, request.Kind, rollback, actor))
 		if status == "ACTIVE" {
 			result.ActiveVersion = result.Version
 		}

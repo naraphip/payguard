@@ -158,7 +158,9 @@ type merchantMetrics struct {
 }
 
 const merchantTransactionAction = `COALESCE(t.policy_decision #>> '{finalDecision,action}', CASE WHEN t.outcome='LOW_RISK' THEN 'ALLOW' ELSE t.outcome END)`
-const merchantTransactionReview = `CASE WHEN t.disposition IS NOT NULL THEN 'RESOLVED' WHEN t.outcome='LOW_RISK' THEN 'NONE' ELSE 'NEEDS_DECISION' END`
+const merchantTransactionReview = `CASE WHEN t.disposition IS NOT NULL THEN 'RESOLVED'
+	WHEN t.outcome='LOW_RISK' OR (t.scenario_id IS NULL AND (` + merchantTransactionAction + `) IN ('BLOCK','CHALLENGE')) THEN 'NONE'
+	ELSE 'NEEDS_DECISION' END`
 
 func (s mockMerchantService) managementMerchantID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if _, ok := s.authorize(w, r, false); !ok {
@@ -249,7 +251,7 @@ func (s mockMerchantService) managedTransactionPage(w http.ResponseWriter, r *ht
 	to, toErr := merchantFilterDate(values.Get("to"))
 	outcome, review, search := values.Get("outcome"), values.Get("reviewState"), strings.ToLower(strings.TrimSpace(values.Get("q")))
 	if err != nil || fromErr != nil || toErr != nil || from != nil && to != nil && from.After(*to) || len(search) > 36 ||
-		!slices.Contains([]string{"", "LOW_RISK", "ALLOW", "BLOCK", "CHALLENGE", "REVIEW", "UNRESOLVED"}, outcome) ||
+		!slices.Contains([]string{"", "LOW_RISK", "HIGH_RISK", "ALLOW", "BLOCK", "CHALLENGE", "REVIEW", "UNRESOLVED"}, outcome) ||
 		!slices.Contains([]string{"", "NONE", "NEEDS_DECISION", "RESOLVED"}, review) {
 		problem(w, http.StatusBadRequest, "Use valid transaction filters, pagination, and UTC dates.")
 		return
@@ -270,7 +272,7 @@ func (s mockMerchantService) managedTransactionPage(w http.ResponseWriter, r *ht
 		return
 	}
 	filter := ` AND ($2='' OR strpos(t.id::text,$2)=1)
-		AND ($3='' OR ` + merchantTransactionAction + `=$3 OR ($3='LOW_RISK' AND t.outcome='LOW_RISK'))
+		AND ($3='' OR ` + merchantTransactionAction + `=$3 OR ((t.scenario_id IS NULL OR $3='LOW_RISK') AND t.outcome=$3))
 		AND ($4='' OR ` + merchantTransactionReview + `=$4)
 		AND ($5::timestamptz IS NULL OR t.created_at>=$5) AND ($6::timestamptz IS NULL OR t.created_at<$6)`
 	args := []any{id, search, outcome, review, from, to}
@@ -348,7 +350,7 @@ func (s mockMerchantService) managedMerchantAudit(w http.ResponseWriter, r *http
 				NULL::int prior,NULL::int version,created_at AS occurred_at,'' AS reason
 				FROM merchant_demo_audit WHERE merchant_id=$1::text::uuid
 			UNION ALL
-			SELECT rule_id::text||':'||version,'POLICY_'||upper(change_reason),'merchant',rule_id::text,
+			SELECT rule_id::text||':'||version,'POLICY_'||upper(change_reason),CASE WHEN created_by='platform-admin' THEN 'platform-admin' ELSE 'merchant' END,rule_id::text,
 				NULLIF(version-1,0),version,created_at,COALESCE(preview->>'approvalReason','')
 				FROM merchant_policy_rule_versions WHERE merchant_id=$1::text::uuid
 			UNION ALL

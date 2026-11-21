@@ -73,9 +73,9 @@ func (j merchantJev) withConfiguration(config jevAIConfiguration) merchantJev {
 }
 
 type merchantJevState struct {
-	AmountMinor          int64 `json:"booking_amount_minor"`
-	ReviewThresholdMinor int64 `json:"review_threshold_minor"`
-	ReviewRuleMatched    bool  `json:"configured_review_rule_matched"`
+	AmountMinor          int64  `json:"booking_amount_minor"`
+	ReviewThresholdMinor *int64 `json:"review_threshold_minor,omitempty"`
+	ReviewRuleMatched    bool   `json:"configured_review_rule_matched"`
 }
 
 type merchantJevChoice struct {
@@ -105,7 +105,7 @@ func evaluateMerchantJev(ctx context.Context, input mockTransactionInput, scenar
 
 	state := merchantJevState{
 		AmountMinor:          *input.AmountMinor,
-		ReviewThresholdMinor: scenario.ThresholdMinor,
+		ReviewThresholdMinor: &scenario.ThresholdMinor,
 		ReviewRuleMatched:    result.Outcome == "REVIEW",
 	}
 	response, status, reason := jev.requestDecision(ctx, state)
@@ -122,6 +122,62 @@ func evaluateMerchantJev(ctx context.Context, input mockTransactionInput, scenar
 		result.Reason = "Live Jev recommended review based on the booking evidence."
 	}
 	return result
+}
+
+func evaluateJevWithoutScenario(ctx context.Context, input mockTransactionInput, rules jevRulesSnapshot, baseReview bool, jev merchantJev) mockTransaction {
+	result := mockTransaction{
+		ID: input.ID, Source: input.Source, Product: input.Product, AmountMinor: input.AmountMinor,
+		Outcome: "LOW_RISK", ReviewState: "NONE", RuleHits: []string{},
+		JevStatus: "MOCKED", JevVersion: "mock-jev-v1", simulateTimeout: input.SimulateTimeout,
+	}
+	result.applyMerchantJevRules(rules)
+	reviewRuleMatched := result.Outcome == "REVIEW"
+	switch {
+	case input.SimulateTimeout:
+		result.JevStatus, result.JevReason = "TIMEOUT", "Mock Jev timed out before returning a decision."
+	case input.AmountMinor == nil:
+		result.JevStatus, result.JevReason = "NOT_RUN", "Jev requires the transaction amount to assess risk."
+		if jev.live {
+			result.JevVersion = jev.model
+		}
+	case jev.live:
+		assessLiveWithoutScenario(ctx, &result, baseReview || reviewRuleMatched, jev)
+	default:
+		result.JevAnswer = "LOW_RISK"
+		result.JevReason = "Mock Jev found no review signal in the supplied evidence."
+		if baseReview || reviewRuleMatched {
+			result.JevAnswer = "REVIEW"
+			result.JevReason = "Mock Jev received a matching review signal."
+		}
+	}
+	if reviewRuleMatched {
+		return result
+	}
+	result.Reason = result.JevReason
+	switch result.JevAnswer {
+	case "REVIEW":
+		result.Outcome, result.ReviewState = "REVIEW", "NEEDS_DECISION"
+	case "":
+		result.Outcome, result.ReviewState = "UNRESOLVED", "NEEDS_DECISION"
+	}
+	return result
+}
+
+func assessLiveWithoutScenario(ctx context.Context, result *mockTransaction, reviewRuleMatched bool, jev merchantJev) {
+	result.JevVersion = jev.model
+	response, resultStatus, reason := jev.requestDecision(ctx, merchantJevState{
+		AmountMinor: *result.AmountMinor, ReviewRuleMatched: reviewRuleMatched,
+	})
+	result.JevStatus, result.JevReason = resultStatus, reason
+	if resultStatus == "LIVE" {
+		choice := response.Answers[merchantJevQuestion]
+		result.JevVersion, result.JevDecisionID = response.Model, response.ID
+		result.JevAnswer, result.JevConfidence = choice.Choice, choice.Confidence
+		result.JevReason = "Live Jev assessed the transaction as low risk."
+		if choice.Choice == "REVIEW" {
+			result.JevReason = "Live Jev recommended review based on the transaction evidence."
+		}
+	}
 }
 
 func (j merchantJev) requestDecision(ctx context.Context, state merchantJevState) (merchantJevResponse, string, string) {
@@ -175,9 +231,22 @@ func (j merchantJev) requestDecisionOnce(ctx context.Context, state merchantJevS
 			},
 		},
 	}
+	if state.ReviewThresholdMinor == nil {
+		riskQuestion := payload.Questions[merchantJevQuestion]
+		riskQuestion.Instructions = "Assess this synthetic transaction using only the observed amount and the configured review rule result. Apply no assumed review threshold."
+		riskQuestion.Criteria = map[string]string{
+			"LOW_RISK": "The supplied evidence shows no elevated risk and no configured review rule matched.",
+			"REVIEW":   "The supplied evidence shows elevated risk or a configured review rule matched.",
+		}
+		payload.Questions[merchantJevQuestion] = riskQuestion
+	}
 	if instructions := jevAdvisoryRubrics[j.rubric]; instructions != "" {
 		riskQuestion := payload.Questions[merchantJevQuestion]
-		riskQuestion.Instructions = instructions
+		if state.ReviewThresholdMinor == nil {
+			riskQuestion.Instructions += " " + instructions
+		} else {
+			riskQuestion.Instructions = instructions
+		}
 		payload.Questions[merchantJevQuestion] = riskQuestion
 	}
 	body, err := json.Marshal(payload)

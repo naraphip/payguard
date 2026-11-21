@@ -79,7 +79,7 @@ func TestMockJevOutcomesAndScenarioPinning(t *testing.T) {
 				t.Fatalf("unexpected mock decision: %#v", result)
 			}
 			if result.ScenarioID != test.scenario.ID || result.ScenarioVersion != test.scenario.ScenarioVersion ||
-				result.RuleVersion != test.scenario.RuleVersion || result.ThresholdMinor != test.scenario.ThresholdMinor ||
+				result.RuleVersion != test.scenario.RuleVersion || !sameBookingAmount(result.ThresholdMinor, &test.scenario.ThresholdMinor) ||
 				!sameBookingAmount(result.AmountMinor, test.amount) || result.Product != "hotel_room" {
 				t.Fatalf("missing pinned evidence: %#v", result)
 			}

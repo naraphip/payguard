@@ -392,7 +392,11 @@ type activePlatformRule struct {
 }
 
 func (r repository) activePlatformRules(ctx context.Context) ([]activePlatformRule, error) {
-	rows, err := r.db.Query(ctx, `SELECT rule_id,version,rule_input FROM (
+	return readActivePlatformRules(ctx, r.db)
+}
+
+func readActivePlatformRules(ctx context.Context, db mockMerchantQueryer) ([]activePlatformRule, error) {
+	rows, err := db.Query(ctx, `SELECT rule_id,version,rule_input FROM (
 		SELECT DISTINCT ON (rule_id) rule_id,version,action,rule_input FROM platform_rule_revisions
 		WHERE action IN ('APPROVED','ROLLED_BACK','DISABLED') ORDER BY rule_id,version DESC
 	) latest WHERE action <> 'DISABLED' ORDER BY rule_id`)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -70,25 +71,27 @@ type mockScenario struct {
 }
 
 type mockTransactionInput struct {
-	ID                    string `json:"id"`
-	ScenarioID            string `json:"scenarioId"`
-	Source                string `json:"source"`
-	Product               string `json:"product,omitempty"`
-	AmountMinor           *int64 `json:"amountMinor"`
-	SimulateTimeout       bool   `json:"simulateTimeout"`
-	CustomerEmailDomain   string `json:"customerEmailDomain,omitempty"`
-	CustomerMailboxDigest string `json:"customerMailboxDigest,omitempty"`
+	ID                    string                     `json:"id"`
+	ScenarioID            string                     `json:"scenarioId,omitempty"`
+	Source                string                     `json:"source"`
+	Product               string                     `json:"product,omitempty"`
+	AmountMinor           *int64                     `json:"amountMinor"`
+	SimulateTimeout       bool                       `json:"simulateTimeout"`
+	CustomerEmailDomain   string                     `json:"customerEmailDomain,omitempty"`
+	CustomerMailboxDigest string                     `json:"customerMailboxDigest,omitempty"`
+	AccountAgeDays        *int64                     `json:"accountAgeDays,omitempty"`
+	CustomSignals         map[string]json.RawMessage `json:"customSignals,omitempty"`
 }
 
 type mockTransaction struct {
 	ID                      string     `json:"id"`
 	MerchantID              string     `json:"merchantId"`
-	ScenarioID              string     `json:"scenarioId"`
-	ScenarioName            string     `json:"scenarioName"`
-	ScenarioVersion         int        `json:"scenarioVersion"`
+	ScenarioID              string     `json:"scenarioId,omitempty"`
+	ScenarioName            string     `json:"scenarioName,omitempty"`
+	ScenarioVersion         int        `json:"scenarioVersion,omitempty"`
 	RuleVersion             string     `json:"ruleVersion"`
 	JevRuleVersion          string     `json:"jevRuleVersion,omitempty"`
-	ThresholdMinor          int64      `json:"thresholdMinor"`
+	ThresholdMinor          *int64     `json:"thresholdMinor,omitempty"`
 	Source                  string     `json:"source"`
 	Product                 string     `json:"product,omitempty"`
 	AmountMinor             *int64     `json:"amountMinor"`
@@ -103,11 +106,14 @@ type mockTransaction struct {
 	DecidedBy               *string    `json:"decidedBy,omitempty"`
 	DecidedAt               *time.Time `json:"decidedAt,omitempty"`
 	JevAnswer               string     `json:"jevAnswer,omitempty"`
+	JevReason               string     `json:"jevReason,omitempty"`
 	JevDecisionID           string     `json:"jevDecisionId,omitempty"`
 	JevConfidence           *float64   `json:"jevConfidence,omitempty"`
 	JevConfigurationVersion int64      `json:"jevConfigurationVersion,omitempty"`
 	simulateTimeout         bool
 	customerMailboxRef      string
+	AccountAgeDays          *int64                     `json:"accountAgeDays,omitempty"`
+	CustomSignals           map[string]json.RawMessage `json:"customSignals,omitempty"`
 	CustomerEmailDomain     string                     `json:"-"`
 	PolicyDecision          *transactionPolicyDecision `json:"policyDecision,omitempty"`
 }
@@ -120,6 +126,7 @@ func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string
 	mux.HandleFunc("GET "+merchantDemoPath, service.listMerchants)
 	mux.HandleFunc("POST "+merchantDemoPath, service.createMerchant)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}", service.managedMerchantDetails)
+	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/test-context", service.merchantTestContext)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/policies", service.managedMerchantPolicies)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/policies/{id}", service.managedMerchantPolicyHistory)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/audit", service.managedMerchantAudit)
@@ -186,7 +193,10 @@ func demoPathID(w http.ResponseWriter, r *http.Request, name string) (string, bo
 }
 
 func demoWriteError(w http.ResponseWriter, err error) {
+	var invalid merchantPolicyValidationError
 	switch {
+	case errors.As(err, &invalid):
+		problem(w, http.StatusUnprocessableEntity, invalid.Error())
 	case errors.Is(err, pgx.ErrNoRows):
 		problem(w, http.StatusNotFound, "Merchant, scenario, or transaction not found.")
 	case errors.Is(err, errMerchantCreateReplay), errors.Is(err, errDemoNameInUse), errors.Is(err, errDemoReplayConflict), errors.Is(err, errDemoDecisionConflict):
@@ -228,6 +238,10 @@ func readMockMerchantInput(w http.ResponseWriter, r *http.Request) (mockMerchant
 		}
 	}
 	if input.PolicyIntegration != nil {
+		if err := validateCustomDefinitions(input.PolicyIntegration.CustomFields); err != nil {
+			problem(w, http.StatusUnprocessableEntity, err.Error())
+			return mockMerchantInput{}, false
+		}
 		if !input.PolicyIntegration.valid() {
 			problem(w, http.StatusUnprocessableEntity, "Choose distinct supported catalogue products.")
 			return mockMerchantInput{}, false
@@ -384,10 +398,12 @@ func validDemoAmount(amount *int64) bool {
 }
 
 func validMockTransaction(input mockTransactionInput) bool {
-	return validID.MatchString(input.ID) && validID.MatchString(input.ScenarioID) &&
+	return validID.MatchString(input.ID) && (input.ScenarioID == "" || validID.MatchString(input.ScenarioID)) &&
 		(input.Source == "checkout" || input.Source == "simulation") &&
 		(validBookingProduct(input.Product) || (input.Source == "simulation" && input.Product == "payment_gateway")) &&
-		validDemoAmount(input.AmountMinor)
+		validDemoAmount(input.AmountMinor) &&
+		(input.AccountAgeDays == nil || (*input.AccountAgeDays >= 0 && *input.AccountAgeDays <= 36500)) &&
+		(input.ScenarioID == "" || input.AccountAgeDays == nil)
 }
 
 func (s mockMerchantService) listTransactions(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +439,7 @@ func (s mockMerchantService) createTransaction(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !validMockTransaction(input) {
-		problem(w, http.StatusUnprocessableEntity, "Enter valid transaction and scenario IDs, source, product, and optional amount in minor units.")
+		problem(w, http.StatusUnprocessableEntity, "Enter a valid transaction ID, source, product, and optional evidence.")
 		return
 	}
 	if input.CustomerMailboxDigest != "" && !validMailboxDigest(input.CustomerMailboxDigest) {

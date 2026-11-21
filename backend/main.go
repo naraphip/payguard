@@ -110,6 +110,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/simulation/checkout/charges", checkout.create)
 	mux.HandleFunc("GET /api/v1/system/rules", a.readRules)
 	mux.HandleFunc("POST /api/v1/system/rules", platformRuleWrite(a.repo, adminToken, a.createRule))
+	mux.HandleFunc("DELETE /api/v1/system/rules/{id}", platformRuleWrite(a.repo, adminToken, a.deleteRule))
 	mux.HandleFunc("PUT /api/v1/system/rules/{id}", platformRuleWrite(a.repo, adminToken, a.updateRule))
 	mux.HandleFunc("POST /api/v1/system/rules/preview", platformRuleWrite(a.repo, adminToken, a.previewRules))
 	srv := &http.Server{

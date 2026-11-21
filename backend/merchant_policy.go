@@ -64,7 +64,8 @@ type policyField struct {
 }
 
 type merchantCapability struct {
-	Name string `json:"fieldName"`
+	Name  string `json:"fieldName"`
+	Label string `json:"label,omitempty"`
 	policyField
 	Products []string `json:"supportedProductTypes"`
 	Stages   []string `json:"availableStages"`
@@ -169,6 +170,14 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 	for i := range p.Conditions.Rules {
 		condition := &p.Conditions.Rules[i]
 		field, ok := merchantPolicyFields[condition.Field]
+		if !ok && customSignalKey.MatchString(condition.Field) {
+			for _, entry := range profile.FieldRegistry {
+				if entry.Name == condition.Field {
+					field, ok = entry.policyField, true
+					break
+				}
+			}
+		}
 		if !ok || !slices.Contains(profile.Signals, condition.Field) {
 			return fmt.Errorf("Required signal unavailable: %s.", condition.Field)
 		}
@@ -184,6 +193,12 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 					return fmt.Errorf("Required signal unavailable: %s for %s.", condition.Field, product)
 				}
 			}
+		}
+		if customSignalKey.MatchString(condition.Field) {
+			if !validCustomValue(field.DataType, condition.Value) {
+				return fmt.Errorf("Enter a valid %s value without sensitive data for %s.", field.DataType, condition.Field)
+			}
+			continue
 		}
 		switch field.DataType {
 		case "number":
@@ -242,6 +257,7 @@ type merchantPolicyEvidence struct {
 	domain     string
 	mailboxRef string
 	amount     *int64
+	custom     map[string]json.RawMessage
 }
 
 func (p merchantPolicyProposal) evaluate(evidence merchantPolicyEvidence) (matched, missing bool) {
@@ -262,6 +278,9 @@ func (p merchantPolicyProposal) evaluate(evidence merchantPolicyEvidence) (match
 }
 
 func (condition merchantPolicyCondition) evaluate(evidence merchantPolicyEvidence) (bool, bool) {
+	if customSignalKey.MatchString(condition.Field) {
+		return evaluateCustomCondition(condition, evidence.custom)
+	}
 	switch condition.Field {
 	case policyProduct, policyDomain, policyMailbox:
 		var actual string
@@ -286,23 +305,27 @@ func (condition merchantPolicyCondition) evaluate(evidence merchantPolicyEvidenc
 		if err != nil {
 			return false, false
 		}
-		actual := *evidence.amount
-		switch condition.Operator {
-		case "eq":
-			return actual == expected, false
-		case "ne":
-			return actual != expected, false
-		case "gt":
-			return actual > expected, false
-		case "gte":
-			return actual >= expected, false
-		case "lt":
-			return actual < expected, false
-		case "lte":
-			return actual <= expected, false
-		}
+		return compareRuleNumber(*evidence.amount, condition.Operator, expected), false
 	}
 	return false, false
+}
+
+func compareRuleNumber(actual int64, operator string, expected int64) bool {
+	switch operator {
+	case "eq":
+		return actual == expected
+	case "ne":
+		return actual != expected
+	case "gt":
+		return actual > expected
+	case "gte":
+		return actual >= expected
+	case "lt":
+		return actual < expected
+	case "lte":
+		return actual <= expected
+	}
+	return false
 }
 
 type policyDecisionPart struct {
@@ -320,10 +343,11 @@ type policyFinal struct {
 }
 
 type transactionPolicyDecision struct {
-	Platform              policyDecisionPart `json:"platformDecision"`
-	Merchant              policyDecisionPart `json:"merchantPolicyDecision"`
-	Final                 policyFinal        `json:"finalDecision"`
-	ScoringProfileVersion string             `json:"scoringProfileVersion,omitempty"`
+	Platform              policyDecisionPart  `json:"platformDecision"`
+	Merchant              policyDecisionPart  `json:"merchantPolicyDecision"`
+	Jev                   *policyDecisionPart `json:"jevDecision,omitempty"`
+	Final                 policyFinal         `json:"finalDecision"`
+	ScoringProfileVersion string              `json:"scoringProfileVersion,omitempty"`
 }
 
 func policyActionRank(action string) int {

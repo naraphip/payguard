@@ -90,6 +90,7 @@ func registerRuleComposer(mux *http.ServeMux, a app, adminToken string) {
 		composer.model = provider.model
 	}
 	mux.HandleFunc("POST "+composerPath+"/interpret", composer.interpret)
+	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/policy-interpret", composer.interpret)
 	mux.HandleFunc("POST "+composerPath+"/platform/save", composer.savePlatform)
 }
 
@@ -152,6 +153,8 @@ Signal catalog: ` + string(catalog)
 func composerMerchantPrompt(profile merchantPolicyProfile) string {
 	type productSignal struct {
 		Field     string   `json:"field"`
+		Type      string   `json:"type"`
+		Label     string   `json:"label,omitempty"`
 		Operators []string `json:"operators"`
 		Products  []string `json:"products"`
 		Stages    []string `json:"stages"`
@@ -161,7 +164,7 @@ func composerMerchantPrompt(profile merchantPolicyProfile) string {
 		if field.Name == policyMailbox {
 			continue
 		}
-		fields = append(fields, productSignal{field.Name, field.Operators, field.Products, field.Stages})
+		fields = append(fields, productSignal{field.Name, field.DataType, field.Label, field.Operators, field.Products, field.Stages})
 	}
 	signals := slices.DeleteFunc(slices.Clone(profile.Signals), func(signal string) bool { return signal == policyMailbox })
 	capabilities, _ := json.Marshal(struct {
@@ -171,7 +174,7 @@ func composerMerchantPrompt(profile merchantPolicyProfile) string {
 		Fields   []productSignal `json:"supportedFieldsByProduct"`
 	}{profile.Products, profile.Stages, signals, fields})
 	return commonComposerPrompt + `
-Draft a MERCHANT policy using only the provided products, stages, and observed signals. Include 1 to 5 conditions in one AND or OR group. Actions: BLOCK, REVIEW, CHALLENGE. product.type supports eq with a selected product ID. customer.email_domain supports eq with an exact normalized bare host name, without a username, @, wildcard, or subdomain matching. Input such as *@example.com or @example.com means an exact match for example.com. order.amount_minor requires a nonnegative integer and supports eq, ne, gt, gte, lt, lte. If THB or baht is explicit, convert baht to satang exactly; if the amount unit is unspecified, ask. Travel products flight_ticket and hotel_room use BOOKING. Store products physical and digital use CHECKOUT. payment_gateway uses CHECKOUT in scenario simulation only; it is not available for mock checkout. For an unambiguous named product, use its corresponding stage. Never broaden to other products. If the operator explicitly requests all travel or all store products, select only matching listed products. Clearly explain unsupported products, stages, fields or operators and ask for an available alternative. Capabilities: ` + string(capabilities)
+Draft a MERCHANT policy using only the provided products, stages, and observed signals. Include 1 to 5 conditions in one AND or OR group. Actions: BLOCK, REVIEW, CHALLENGE. product.type supports eq with a selected product ID. customer.email_domain supports eq with an exact normalized bare host name, without a username, @, wildcard, or subdomain matching. Input such as *@example.com or @example.com means an exact match for example.com. order.amount_minor requires a nonnegative integer and supports eq, ne, gt, gte, lt, lte. If THB or baht is explicit, convert baht to satang exactly; if the amount unit is unspecified, ask. Travel products flight_ticket and hotel_room use BOOKING. Store products physical and digital use CHECKOUT. payment_gateway uses CHECKOUT in scenario simulation only; it is not available for mock checkout. For an unambiguous named product, use its corresponding stage. Never broaden to other products. If the operator explicitly requests all travel or all store products, select only matching listed products. Clearly explain unsupported products, stages, fields or operators and ask for an available alternative. Registered custom fields use the listed type and operators. Text contains is a case-insensitive literal substring. Country values are uppercase ISO alpha-2 codes. Boolean and whole-number values must use JSON booleans and numbers. Capabilities: ` + string(capabilities)
 }
 
 func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
@@ -187,11 +190,23 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusUnprocessableEntity, "Choose MERCHANT or PLATFORM rule scope.")
 		return
 	}
-	actor, ok := s.access.authorize(w, r, input.Scope == composerPlatform)
+	managed := r.PathValue("merchantId") != ""
+	actor, ok := s.access.authorize(w, r, managed || input.Scope == composerPlatform)
 	if !ok {
 		return
 	}
-	if input.Scope == composerMerchant && actor.Admin {
+	if managed {
+		if input.Scope != composerMerchant {
+			problem(w, http.StatusUnprocessableEntity, "Choose MERCHANT scope for this merchant.")
+			return
+		}
+		target, ok := demoPathID(w, r, "merchantId")
+		if !ok {
+			return
+		}
+		actor.MerchantID = target
+	}
+	if input.Scope == composerMerchant && actor.Admin && !managed {
 		problem(w, http.StatusForbidden, "A merchant bearer token is required to compose a Merchant Policy.")
 		return
 	}

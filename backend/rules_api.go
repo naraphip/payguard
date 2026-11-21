@@ -118,6 +118,66 @@ func (a app) updateTenantRule(w http.ResponseWriter, r *http.Request, tenant str
 	}
 }
 
+func (a app) deleteRule(w http.ResponseWriter, r *http.Request) {
+	a.deleteTenantRule(w, r, merchantID)
+}
+
+func (a app) deleteTenantRule(w http.ResponseWriter, r *http.Request, tenant string) {
+	id := r.PathValue("id")
+	for _, rule := range builtinRules {
+		if rule.ID == id {
+			problem(w, http.StatusForbidden, "Built-in safeguards cannot be deleted.")
+			return
+		}
+	}
+	var input struct {
+		Version int64 `json:"version"`
+	}
+	if !decodeRuleRequest(w, r, &input) {
+		return
+	}
+	if input.Version < 1 {
+		problem(w, http.StatusUnprocessableEntity, "Expected a positive draft version.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	var protected = errors.New("This draft has an approval history. Manage its published versions in Platform rule approval.")
+	err := pgx.BeginFunc(ctx, a.repo.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "payguard-platform-revision:"+id); err != nil {
+			return err
+		}
+		var version int64
+		if err := tx.QueryRow(ctx, `SELECT version FROM system_rule_drafts WHERE tenant_id=$1 AND rule_id=$2 FOR UPDATE`, tenant, id).Scan(&version); err != nil {
+			return err
+		}
+		if version != input.Version {
+			return errStaleRule
+		}
+		if tenant == merchantID {
+			var governed bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM platform_rule_revisions WHERE rule_id=$1)`, id).Scan(&governed); err != nil {
+				return err
+			}
+			if governed {
+				return protected
+			}
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM system_rule_drafts WHERE tenant_id=$1 AND rule_id=$2`, tenant, id)
+		return err
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		problem(w, http.StatusNotFound, "Rule draft not found.")
+	case errors.Is(err, errStaleRule), errors.Is(err, protected):
+		problem(w, http.StatusConflict, err.Error())
+	case err != nil:
+		unavailable(w, err)
+	default:
+		respond(w, http.StatusOK, map[string]bool{"deleted": true})
+	}
+}
+
 func (a app) previewRules(w http.ResponseWriter, r *http.Request) {
 	a.previewTenantRules(w, r, merchantID)
 }

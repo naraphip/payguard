@@ -18,12 +18,25 @@ func (s mockMerchantService) registerMerchantPolicies(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+merchantPolicyPath+"/rules/{id}", s.policyHistory)
 	mux.HandleFunc("POST "+merchantPolicyPath+"/rules", s.policyMutate)
 	mux.HandleFunc("PUT "+merchantPolicyPath+"/rules/{id}", s.policyMutate)
+	mux.HandleFunc("DELETE "+merchantPolicyPath+"/rules/{id}", s.policyMutate)
+	adminPath := merchantDemoPath + "/{merchantId}"
+	mux.HandleFunc("GET "+adminPath+"/policy-profile", s.policyProfile)
+	mux.HandleFunc("POST "+adminPath+"/policies", s.policyMutate)
+	mux.HandleFunc("PUT "+adminPath+"/policies/{id}", s.policyMutate)
+	mux.HandleFunc("DELETE "+adminPath+"/policies/{id}", s.policyMutate)
 	for _, operation := range []string{"activate", "disable", "rollback", "simulate"} {
+		mux.HandleFunc("POST "+adminPath+"/policies/{id}/"+operation, s.policyMutate)
 		mux.HandleFunc("POST "+merchantPolicyPath+"/rules/{id}/"+operation, s.policyMutate)
 	}
 }
 
 func (s mockMerchantService) policyActor(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if r.PathValue("merchantId") != "" {
+		if _, ok := s.authorize(w, r, true); !ok {
+			return "", false
+		}
+		return demoPathID(w, r, "merchantId")
+	}
 	actor, ok := s.authorize(w, r, false)
 	if ok && (actor.Admin || actor.MerchantID == "") {
 		problem(w, http.StatusForbidden, "A credential belonging to the merchant is required.")
@@ -152,7 +165,9 @@ func (s mockMerchantService) policyMutate(w http.ResponseWriter, r *http.Request
 		if _, valid := demoPathID(w, r, "id"); !valid {
 			return
 		}
-		if r.Method == http.MethodPut {
+		if r.Method == http.MethodDelete {
+			operation = "delete"
+		} else if r.Method == http.MethodPut {
 			operation = "edit"
 		} else {
 			operation = r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
@@ -184,8 +199,12 @@ func (s mockMerchantService) policyMutate(w http.ResponseWriter, r *http.Request
 		problem(w, http.StatusUnprocessableEntity, "Select an older rule version to restore.")
 		return
 	}
+	actor := merchant
+	if r.PathValue("merchantId") != "" {
+		actor = platformMaker
+	}
 	rule, err := s.repo.mutateMerchantPolicy(r.Context(), merchant, merchantPolicyMutation{
-		Kind: operation, ID: id, ExpectedVersion: input.ExpectedVersion, RollbackVersion: input.Version, Proposal: input.Proposal,
+		Actor: actor, Kind: operation, ID: id, ExpectedVersion: input.ExpectedVersion, RollbackVersion: input.Version, Proposal: input.Proposal,
 	})
 	if err != nil {
 		merchantPolicyError(w, err)

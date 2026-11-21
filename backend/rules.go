@@ -204,9 +204,15 @@ func (condition ruleCondition) matches(actual any) bool {
 
 // Match all conditions and track whether all required signals were observed independently of the match.
 func (input ruleInput) matchSignals(e event, features []feature) (matched, eligible bool) {
+	return input.matchSignalValues(func(signal string) (any, bool) {
+		return signalValue(signal, e, features)
+	})
+}
+
+func (input ruleInput) matchSignalValues(valueOf func(string) (any, bool)) (matched, eligible bool) {
 	matched = true
 	for _, condition := range input.Conditions {
-		value, found := signalValue(condition.Signal, e, features)
+		value, found := valueOf(condition.Signal)
 		if !found {
 			return false, false
 		}
