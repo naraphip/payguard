@@ -8,12 +8,15 @@ import type { FormEvent, ReactNode } from "react";
 import { getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, setMerchantDemoToken } from "../../merchant-demo";
 import type { DemoDirectory, DemoMerchant, DemoScenario } from "../../merchant-demo";
 import { MerchantTransactions } from "./transactions";
+import { isBusinessModel } from "../merchant-setup/contracts";
+import type { BusinessModel, MerchantSetup } from "../merchant-setup/contracts";
 
 const action = "rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60";
 const secondary = "rounded-lg border border-line px-3 py-2 text-sm font-semibold hover:bg-paper disabled:opacity-60";
 const input = "control mt-1 min-w-0";
 const card = "min-w-0 rounded-xl border border-line bg-white p-4 sm:p-5";
 const count = new Intl.NumberFormat("en-US");
+const modelLabels = { ota: "Online travel agency (OTA)", ecommerce: "E-commerce" };
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "The merchant request failed. Try again.";
@@ -109,6 +112,13 @@ export function MerchantDirectory() {
     setError("");
   }
 
+  function removeMerchant(merchantId: string) {
+    setDirectory(current => current && ({
+      ...current, merchants: current.merchants.filter(merchant => merchant.id !== merchantId),
+    }));
+    selectMerchant(current => current === merchantId ? "" : current);
+  }
+
   const selected = directory?.merchants.find(({ id }) => id === selectedId) ?? directory?.merchants[0];
   const admin = directory?.role === "admin";
 
@@ -195,7 +205,7 @@ export function MerchantDirectory() {
                 <button key={id} type="button" aria-pressed={view === id} className={view === id ? action : secondary} onClick={() => setView(id)}>{label}</button>
               ))}
             </nav>
-            {view === "workspace" && <MerchantWorkspace key={`workspace-${selected.id}`} token={token} merchant={selected} admin={admin} onSave={upsert} />}
+            {view === "workspace" && <MerchantWorkspace key={`workspace-${selected.id}`} token={token} merchant={selected} admin={admin} onSave={upsert} onDelete={removeMerchant} />}
             {(view === "workspace" || view === "transactions") && <MerchantTransactions key={`transactions-${selected.id}`} token={token} merchant={selected} />}
             {view === "jev" && <JevRulesPanel key={`jev-${selected.id}`} merchant={{ id: selected.id, name: selected.name, token, canEdit: admin }} />}
             {view === "platform" && <SystemRulesDashboard key={`platform-${selected.id}`} request={requestPlatformRules} merchantName={selected.name} canEdit={admin} />}
@@ -206,26 +216,36 @@ export function MerchantDirectory() {
   );
 }
 
-function MerchantNameForm({ token, merchant, onSave }: {
+function MerchantNameForm({ token, merchant, onSave, onDelete }: {
   token: string;
   merchant?: DemoMerchant;
   onSave: (merchant: DemoMerchant, newToken?: string) => void;
+  onDelete?: (merchantId: string) => void;
 }) {
   const [name, setName] = useState(merchant?.name ?? "");
+  const [businessModel, setBusinessModel] = useState<BusinessModel | "">(merchant?.setup?.businessModel ?? "");
+  const [includesAmount, setIncludesAmount] = useState(merchant?.setup?.availableSignals.includes("amountMinor") ?? false);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const isUnchanged = name.trim() === merchant?.name && businessModel === merchant.setup?.businessModel &&
+    includesAmount === (merchant.setup?.availableSignals.includes("amountMinor") ?? false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !businessModel || confirmDelete) return;
     setSaving(true);
     setError("");
     setSaved(false);
+    const setup: MerchantSetup = {
+      schemaVersion: 1, businessModel, stage: "booking", availableSignals: includesAmount ? ["occurredAt", "amountMinor"] : ["occurredAt"],
+    };
     try {
       const result = await merchantDemoRequest<{ merchant: DemoMerchant; token?: string }>(merchant ? `/${merchant.id}` : "", token, {
         method: merchant ? "PUT" : "POST",
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), setup }),
       });
       onSave(result.merchant, result.token);
       setName(result.merchant.name);
@@ -237,35 +257,95 @@ function MerchantNameForm({ token, merchant, onSave }: {
     }
   }
 
+  async function deleteMerchant() {
+    if (!merchant || !onDelete || deleting) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await merchantDemoRequest<{ deleted: boolean }>(`/${merchant.id}`, token, { method: "DELETE" });
+      onDelete(merchant.id);
+    } catch (failure) {
+      setError(errorMessage(failure));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
-    <form onSubmit={submit} className={`${card} space-y-3`}>
+    <form onSubmit={submit} className={`${card} space-y-4`}>
       <h2 className="text-lg font-semibold">{merchant ? "Merchant details" : "New merchant"}</h2>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-0 flex-[1_1_16rem]">
-          <Field label="Merchant name">
-            <input className={input} value={name} onChange={(event) => { setName(event.target.value); setSaved(false); }} maxLength={80} required />
-          </Field>
-        </div>
-        <button className={action} disabled={saving || !name.trim() || name.trim() === merchant?.name}>{saving ? "Saving…" : "Save merchant"}</button>
+      <fieldset disabled={saving || deleting || confirmDelete} className="grid gap-4 sm:grid-cols-2">
+        <legend className="sr-only">Merchant name and setup</legend>
+        <Field label="Merchant name">
+          <input className={input} value={name} onChange={event => { setName(event.target.value); setSaved(false); }} maxLength={80} required />
+        </Field>
+        <Field label="Business model">
+          <select className={input} value={businessModel} required onChange={event => {
+            const value = event.target.value;
+            setBusinessModel(isBusinessModel(value) ? value : "");
+            setSaved(false);
+          }}>
+            <option value="">Choose a business model</option>
+            <option value="ota">{modelLabels.ota}</option>
+            <option value="ecommerce">{modelLabels.ecommerce}</option>
+          </select>
+        </Field>
+        <Field label="Journey stage">
+          <select className={input} defaultValue="booking"><option value="booking">Booking</option></select>
+        </Field>
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm font-medium">Available signals</legend>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked disabled />Booking timestamp (required)</label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={includesAmount} onChange={event => { setIncludesAmount(event.target.checked); setSaved(false); }} />
+            Booking amount
+          </label>
+        </fieldset>
+      </fieldset>
+      {merchant && !merchant.setup && <p className="text-sm text-slate-600">Setup incomplete. Choose a business model to finish this merchant’s setup.</p>}
+      <div className="flex flex-wrap items-center gap-3">
+        <button className={action} disabled={saving || deleting || confirmDelete || !name.trim() || !businessModel || isUnchanged}>
+          {saving ? "Saving…" : "Save merchant"}
+        </button>
+        {merchant && onDelete && !confirmDelete && <button type="button" className="text-sm font-semibold text-red-700 hover:underline" disabled={saving} onClick={() => {
+          setConfirmDelete(true);
+          setSaved(false);
+          setError("");
+        }}>Delete merchant</button>}
       </div>
+      {confirmDelete && merchant && <section className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-3" aria-label="Confirm merchant deletion">
+        <p className="text-sm text-red-900">Delete <strong>{merchant.name}</strong>? It will be removed from Merchants and the test pickers. Saved transaction history is retained.</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={deleting} onClick={() => void deleteMerchant()}>
+            {deleting ? "Deleting…" : "Confirm deletion"}
+          </button>
+          <button type="button" className={secondary} disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</button>
+        </div>
+      </section>}
       {saved && <p role="status" className="text-sm text-emerald-700">Merchant saved.</p>}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     </form>
   );
 }
 
-function MerchantWorkspace({ merchant, token, admin, onSave }: {
+function MerchantWorkspace({ merchant, token, admin, onSave, onDelete }: {
   merchant: DemoMerchant;
   token: string;
   admin: boolean;
   onSave: (merchant: DemoMerchant) => void;
+  onDelete: (merchantId: string) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const scenario = merchant.scenarios.find(({ id }) => id === editing);
 
   return (
     <>
-      {admin ? <MerchantNameForm token={token} merchant={merchant} onSave={onSave} /> : <h2 className="text-xl font-semibold">{merchant.name}</h2>}
+      {admin ? <MerchantNameForm token={token} merchant={merchant} onSave={onSave} onDelete={onDelete} /> : <section className={card}>
+        <h2 className="text-xl font-semibold">{merchant.name}</h2>
+        {merchant.setup ? <p className="mt-2 text-sm text-slate-600">
+          {modelLabels[merchant.setup.businessModel]} · Booking · {merchant.setup.availableSignals.includes("amountMinor") ? "Timestamp and amount" : "Timestamp"}
+        </p> : <p className="mt-2 text-sm text-slate-600">Setup incomplete.</p>}
+      </section>}
       <section className={`${card} space-y-4`} aria-labelledby="merchant-scenarios">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 id="merchant-scenarios" className="text-lg font-semibold">Scenarios and rules</h2>

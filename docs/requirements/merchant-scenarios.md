@@ -22,7 +22,9 @@ The preview uses a structured form with one booking amount threshold per scenari
 
 | Area | Requirement |
 | --- | --- |
-| Merchant directory and access | Only administrators can list all merchants, create or edit merchant records, and view rules across merchants. Require a display name and assign a stable merchant identifier. Saving changes to one merchant leaves other merchant records intact. Merchants and their configuration remain available after reloading or reopening the app. |
+| Merchant directory and access | Only administrators can list all merchants, create, edit, or delete merchant records, and view rules across merchants. Require a display name and assign a stable merchant identifier. Saving changes to one merchant leaves other merchant records intact. Merchants and their configuration remain available after reloading or reopening the app. |
+| Merchant setup | Store the merchant’s business model, assessment stage, and declared signals on the merchant record. The preview supports OTA or e-commerce, Booking, a required booking timestamp, and optional booking amount availability. Older name-only merchants remain usable and show **Setup incomplete** until their details are saved. |
+| Merchant removal | Require explicit administrator confirmation. Remove the merchant from the directory and test pickers, and deactivate its credential and normal workspace access. Retain the merchant’s historical records. |
 | Merchant risk scenarios | A merchant can have multiple independently named, selectable scenarios. Save each scenario under its merchant with its own stable identifier and versions. Capture business model, assessment stage, available signals, and a description or examples of the behavior the merchant wants to detect. A merchant risk scenario guides rule generation. A Simulation Lab fixture such as **Normal**, **Mixed**, or **Fraud** selects the synthetic test data. |
 | Rule generation | Use AI to generate a draft from the saved scenario. Explain which scenario inputs each generated rule uses and show when there is insufficient information to propose a rule. Surface unknown or unavailable signals and unsupported stage or operator combinations. The draft requires human review and validation against supported signals and operations before it can be used. |
 | Rule configuration | Give each scenario its own versioned rule set. Show its generated rules and allow authorized users to edit their conditions and actions within the supported rule model. Validate changes before the rules can be used. Associate every usable rule-set version with its merchant and scenario revision. |
@@ -56,7 +58,7 @@ These examples use the same illustrative booking amount of **50,000 minor units*
 
 ## Acceptance criteria
 
-1. Create merchants A and B. Reload the list, then rename A. A retains its identifier and B retains its previous details.
+1. Create merchants A and B with distinct setup values. Reload the list, then change A’s name and setup. A retains its identifier and returns the updated setup after reload. B retains its previous details.
 2. Save different scenarios for A and B. Generate and configure rules for A, then open B. B displays its own scenario and rules only.
 3. Attempt to generate or save a rule using an unknown signal or a signal unavailable at the selected stage. The app identifies the invalid input and the rule cannot be selected for testing.
 4. Configure rule sets for A and B that produce different decisions or matches for a supported test input. Run the equivalent input through Jev for each merchant in **Mock Checkout** and **Simulation Lab**. Both tools show Jev’s outcome, reasons, and rule hits for the selected merchant, along with the rule-set version actually used.
@@ -69,6 +71,7 @@ These examples use the same illustrative booking amount of **50,000 minor units*
 11. Simulate a Jev timeout or failure for A in both test tools. The result identifies A and its selected scenario, reports Jev’s failure and the unresolved outcome, and indicates manual review. The case remains scoped to A, and a subsequent analyst disposition leaves the original Jev result intact.
 12. Define two independently named scenarios for A with different rules for the same supported input. Generate an AI draft for each, review and validate it, and designate a rule-set version for testing. Run both scenarios in Mock Checkout and Simulation Lab. Each tool identifies the selected scenario and uses its designated version. The scenarios produce the expected different decisions or rule hits.
 13. For each tool, submit a new test and verify the mock Jev contract is invoked for the selected scenario. Replay that submission with the same idempotency key and verify the saved outcome and versions are returned without another invocation. A different new submission invokes the contract again.
+14. Cancel deletion of a test merchant and verify it remains available. Then confirm deletion and verify it disappears from the directory and both test pickers after reload, its issued token no longer works, and another merchant is unaffected. Verify historical records remain stored.
 
 ## Open decisions
 

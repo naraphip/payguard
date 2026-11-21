@@ -33,7 +33,7 @@ func (s mockMerchantService) ruleHandler(adminOnly bool, handle func(app, http.R
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 		if err := s.repo.db.QueryRow(ctx, `
-			SELECT id::text FROM merchant_demo_merchants WHERE id=$1::text::uuid
+			SELECT id::text FROM merchant_demo_merchants WHERE id=$1::text::uuid AND deleted_at IS NULL
 		`, merchantID).Scan(&merchantID); err != nil {
 			demoWriteError(w, err)
 			return

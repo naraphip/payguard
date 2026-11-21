@@ -4,8 +4,52 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestReadMockMerchantInput(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		json  string
+		valid bool
+		setup *merchantSetup
+	}{
+		{
+			name:  "legacy name only",
+			json:  `{"name":"  Demo  "}`,
+			valid: true,
+		},
+		{
+			name: "setup signal order canonicalized",
+			json: `{"name":"Demo","setup":{"schemaVersion":1,"businessModel":"ota","stage":"booking",
+				"availableSignals":["amountMinor","occurredAt"]}}`,
+			valid: true,
+			setup: &merchantSetup{SchemaVersion: 1, BusinessModel: "ota", Stage: "booking",
+				AvailableSignals: []string{"occurredAt", "amountMinor"}},
+		},
+		{
+			name: "booking timestamp required",
+			json: `{"name":"Demo","setup":{"schemaVersion":1,"businessModel":"ecommerce","stage":"booking",
+				"availableSignals":["amountMinor"]}}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, merchantDemoPath, strings.NewReader(test.json))
+			input, valid := readMockMerchantInput(w, r)
+			if valid != test.valid {
+				t.Fatalf("valid=%t, want %t: %s", valid, test.valid, w.Body.String())
+			}
+			if valid && (input.Name != "Demo" || !reflect.DeepEqual(input.Setup, test.setup)) {
+				t.Fatalf("unexpected decoded input: %#v", input)
+			}
+			if !valid && w.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("unexpected failure status: %d", w.Code)
+			}
+		})
+	}
+}
 
 func TestMockJevOutcomesAndScenarioPinning(t *testing.T) {
 	zero, amount := int64(0), int64(50000)

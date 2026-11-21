@@ -11,7 +11,7 @@ function allowed(method: string, path: string[]) {
   const [merchant, collection, record, action] = path;
   if (path.length === 0) return method === "GET" || method === "POST";
   if (!uuid.test(merchant)) return false;
-  if (path.length === 1) return method === "PUT";
+  if (path.length === 1) return method === "PUT" || method === "DELETE";
   if (path.length === 2) {
     return (method === "POST" && collection === "scenarios")
       || (collection === "transactions" && (method === "GET" || method === "POST"));
@@ -69,3 +69,4 @@ async function proxy(request: NextRequest, { params }: RouteContext) {
 export const GET = proxy;
 export const POST = proxy;
 export const PUT = proxy;
+export const DELETE = proxy;

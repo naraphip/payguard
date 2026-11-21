@@ -90,6 +90,7 @@ func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string
 	mux.HandleFunc("GET "+merchantDemoPath, service.listMerchants)
 	mux.HandleFunc("POST "+merchantDemoPath, service.createMerchant)
 	mux.HandleFunc("PUT "+merchantDemoPath+"/{merchantId}", service.updateMerchant)
+	mux.HandleFunc("DELETE "+merchantDemoPath+"/{merchantId}", service.deleteMerchant)
 	mux.HandleFunc("POST "+merchantDemoPath+"/{merchantId}/scenarios", service.saveScenario)
 	mux.HandleFunc("PUT "+merchantDemoPath+"/{merchantId}/scenarios/{scenarioId}", service.saveScenario)
 	mux.HandleFunc("GET "+merchantDemoPath+"/{merchantId}/transactions", service.listTransactions)
@@ -110,7 +111,9 @@ func (s mockMerchantService) authorize(w http.ResponseWriter, r *http.Request, a
 				return mockMerchantActor{Admin: true}, true
 			}
 			var merchantID string
-			err := s.repo.db.QueryRow(r.Context(), `SELECT id::text FROM merchant_demo_merchants WHERE token_hash=$1`, hash[:]).Scan(&merchantID)
+			err := s.repo.db.QueryRow(r.Context(), `
+				SELECT id::text FROM merchant_demo_merchants WHERE token_hash=$1 AND deleted_at IS NULL
+			`, hash[:]).Scan(&merchantID)
 			switch {
 			case err == nil:
 				if adminOnly {
@@ -228,6 +231,21 @@ func (s mockMerchantService) updateMerchant(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	respond(w, http.StatusOK, map[string]any{"merchant": merchant})
+}
+
+func (s mockMerchantService) deleteMerchant(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorize(w, r, true); !ok {
+		return
+	}
+	id, ok := demoPathID(w, r, "merchantId")
+	if !ok {
+		return
+	}
+	if err := s.repo.deleteMockMerchant(r.Context(), id); err != nil {
+		demoWriteError(w, err)
+		return
+	}
+	respond(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
 func (s mockMerchantService) saveScenario(w http.ResponseWriter, r *http.Request) {

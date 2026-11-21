@@ -66,7 +66,7 @@ For the host-run Next preview on loopback, set the Next server’s `PAYGUARD_LOC
 
 For the standard token flow, leave the Next preview variable unset. Open `/settings/merchants` and enter the administrator or merchant credential as the **Demo access token**. Use this flow for the merchant-scoped access check.
 
-1. Select **Create merchant**, enter a merchant name, and save it. In the standard token flow, copy the merchant access token when it appears. The directory shows it once, at creation. The automatic preview opens the new merchant workspace directly.
+1. Select **Create merchant** and enter a merchant name. Choose **OTA** or **E-commerce**, confirm the **Booking** stage and required booking timestamp, and select booking amount if the merchant provides it. Save the merchant. In the standard token flow, copy the merchant access token when it appears. The directory shows it once, at creation. The automatic preview opens the new merchant workspace directly. An older merchant without setup details appears as **Setup incomplete** until the details are saved.
 2. Select **Add scenario**. Create **Everyday bookings** with a review threshold of **100000** minor units, select **Generate rule preview**, and select **Save scenario and rules**. Repeat for **High-value bookings** with a threshold of **50000**. Editing a scenario and saving a new threshold creates a new revision.
 3. In **Mock Checkout**, select the merchant and **Everyday bookings**, set the booking amount to **50000** minor units, and submit. Expect **Low risk**. Repeat with **High-value bookings** and expect **Review**. Confirm that the result identifies the scenario, rule revision, and checkout source. In the standard token flow, use **Connect merchant directory** before selecting a merchant.
 4. In **Simulation Lab**, use **Merchant scenario simulation** and repeat the same selections and amount. Confirm the same outcomes and versions, with Simulation Lab recorded as the source. The existing batch simulation remains available on the same page.
@@ -81,6 +81,12 @@ Open **Jev Rules** or **Platform Rules** from the selected merchant’s workspac
 - In **Platform Rules**, inspect the read-only built-ins or create a test draft. To preview a draft, use a compatible saved Simulation Lab batch run for that merchant. The single-booking scenario simulator supplies mock Jev evidence only and cannot provide the batch evidence required for Platform draft preview.
 
 The standalone rule and Risk Operations routes remain available with the automatic preview disabled.
+
+### Update or delete a merchant
+
+Select the merchant in **Merchants** to edit its name or setup. The saved setup describes the merchant and its declared signals. Scenario rules remain separately configured under **Scenarios and rules**. The browser-local setup route at `/settings/merchant-setup` redirects to **Merchants** in the automatic preview. Outside that preview, the standalone setup and booking profile flows are still available.
+
+To remove an unused demo merchant, open its details, select **Delete merchant**, and confirm. The merchant disappears from **Merchants** and from both test pickers. Its issued token can no longer open the workspace. Stored scenarios and transactions remain in the database and are unavailable through the ordinary workspace.
 
 This path uses synthetic transactions, one structured threshold rule per scenario, and mocked Jev responses. The local review records a disposition without taking a payment action.
 

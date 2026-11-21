@@ -9,7 +9,6 @@ const destinations = [
   { href: "/", label: "Simulation Lab", Icon: FlaskConical },
   { href: "/settings/mock-checkout", label: "Mock checkout", Icon: ShoppingBag },
   { href: "/settings/merchants", label: "Merchants", Icon: Building2 },
-  { href: "/settings/merchant-setup", label: "Merchant setup", Icon: Building2 },
   { href: "/settings/booking-assessment", label: "Booking assessment", Icon: ClipboardCheck },
 ];
 

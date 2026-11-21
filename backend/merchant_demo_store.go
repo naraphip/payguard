@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS merchant_demo_merchants (
   name text NOT NULL,
   token_hash bytea NOT NULL UNIQUE CHECK (octet_length(token_hash) = 32)
 );
-ALTER TABLE merchant_demo_merchants ADD COLUMN IF NOT EXISTS setup jsonb;
+ALTER TABLE merchant_demo_merchants
+  ADD COLUMN IF NOT EXISTS setup jsonb,
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 CREATE TABLE IF NOT EXISTS merchant_demo_scenarios (
   merchant_id uuid NOT NULL REFERENCES merchant_demo_merchants(id),
   id uuid NOT NULL,
@@ -68,7 +70,7 @@ LEFT JOIN LATERAL (
 	WHERE merchant_id=m.id
 	ORDER BY id, revision DESC
 ) s ON true
-WHERE (NULLIF($1::text, '') IS NULL OR m.id=NULLIF($1::text, '')::uuid)
+WHERE m.deleted_at IS NULL AND (NULLIF($1::text, '') IS NULL OR m.id=NULLIF($1::text, '')::uuid)
 ORDER BY lower(m.name), m.id, lower(s.name), s.id`
 
 func scanMockMerchants(ctx context.Context, db mockMerchantQueryer, merchantID string) ([]mockMerchant, error) {
@@ -129,7 +131,7 @@ func (r repository) updateMockMerchant(ctx context.Context, merchantID string, i
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		result, err := tx.Exec(ctx, `
 			UPDATE merchant_demo_merchants SET name=$2, setup=COALESCE(NULLIF($3::jsonb, 'null'::jsonb), setup)
-			WHERE id=$1::text::uuid`, merchantID, input.Name, input.Setup)
+			WHERE id=$1::text::uuid AND deleted_at IS NULL`, merchantID, input.Name, input.Setup)
 		if err != nil {
 			return err
 		}
@@ -146,9 +148,24 @@ func (r repository) updateMockMerchant(ctx context.Context, merchantID string, i
 	return merchant, err
 }
 
+func (r repository) deleteMockMerchant(ctx context.Context, merchantID string) error {
+	result, err := r.db.Exec(ctx, `
+		UPDATE merchant_demo_merchants SET deleted_at=COALESCE(deleted_at, clock_timestamp())
+		WHERE id=$1::text::uuid`, merchantID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 func lockMockMerchant(ctx context.Context, tx pgx.Tx, merchantID string) error {
 	var id string
-	return tx.QueryRow(ctx, `SELECT id::text FROM merchant_demo_merchants WHERE id=$1::text::uuid FOR UPDATE`, merchantID).Scan(&id)
+	return tx.QueryRow(ctx, `
+		SELECT id::text FROM merchant_demo_merchants WHERE id=$1::text::uuid AND deleted_at IS NULL FOR UPDATE
+	`, merchantID).Scan(&id)
 }
 
 func mockRuleVersion(revision int) string {
@@ -215,6 +232,7 @@ SELECT t.id::text, t.merchant_id::text, t.scenario_id::text, s.name, t.scenario_
 	s.threshold_minor, t.source, t.product, t.amount_minor, t.outcome, t.reason, t.rule_hits, t.jev_status,
 	t.jev_version, t.jev_rule_version, t.created_at, t.disposition, t.decided_by, t.decided_at
 FROM merchant_demo_transactions t
+JOIN merchant_demo_merchants m ON m.id=t.merchant_id AND m.deleted_at IS NULL
 JOIN merchant_demo_scenarios s ON s.merchant_id=t.merchant_id AND s.id=t.scenario_id AND s.revision=t.scenario_revision
 WHERE t.merchant_id=$1::text::uuid`
 
@@ -245,7 +263,9 @@ func readMockTransaction(ctx context.Context, db mockMerchantQueryer, merchantID
 
 func (r repository) listMockTransactions(ctx context.Context, merchantID string) ([]mockTransaction, error) {
 	var exists bool
-	if err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM merchant_demo_merchants WHERE id=$1::text::uuid)`, merchantID).Scan(&exists); err != nil {
+	if err := r.db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM merchant_demo_merchants WHERE id=$1::text::uuid AND deleted_at IS NULL)
+	`, merchantID).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if !exists {

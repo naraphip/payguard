@@ -12,6 +12,8 @@ The opt-in loopback preview opens the Merchants workspace and scenario pickers a
 
 The selected merchant has **Jev Rules** and **Platform Rules** tabs. Demo administrators manage that merchant’s rules, and authorized merchant users can view their own. Published amount-based Jev rules apply to Mock Checkout and the single-booking merchant scenario simulation, with the supplemental ruleset version pinned in the result. Platform built-ins remain read-only, and Platform drafts are for testing. A Platform draft preview requires a compatible saved Simulation Lab run for the selected merchant.
 
+Merchant creation and editing now save the original setup fields on the merchant record. The demo supports OTA or e-commerce, the Booking stage, the required booking timestamp, and optional booking amount availability. Existing name-only records appear as **Setup incomplete**, and the legacy name-only API remains compatible. The former standalone setup page opens **Merchants** in the automatic preview, and its separate navigation entry is removed. A confirmed **Delete merchant** removes the merchant from the directory and test pickers and deactivates its access. Stored history is retained and excluded from normal access.
+
 - Live API checks verified the administrator directory and merchant-scoped access. In both Mock Checkout and Simulation Lab, an amount of 50,000 minor units returned **Low risk** at a threshold of 100,000 and **Review** at a threshold of 50,000.
 - Live API checks verified missing amount versus zero, timeout and review resolution, replay pinned to an earlier revision, and cross-merchant denial.
 - Go tests, race tests, and vet passed. The isolated frontend production build, TypeScript checks, and existing booking smoke checks also passed.
@@ -19,6 +21,7 @@ The selected merchant has **Jev Rules** and **Platform Rules** tabs. Demo admini
 - A fresh Chrome session verified the automatic loopback path. It created a merchant and scenario, followed a deep link to checkout, and reopened its saved transaction after refreshing the ledger. The browser trace and storage contained no authorization header, administrator token, or issued merchant token.
 - Independent Chrome checks verified that the three old operations and rule URLs open their merchant workspace views without login. Two merchants started with the same scenario threshold and both returned **Low risk**. After publishing a Jev rule for merchant A, A returned **Review** and B remained **Low risk**. A Platform draft stayed scoped to its merchant and persisted on reload. Previously saved transactions retained their results.
 - Live API checks verified removal of the issued token from automatic-preview responses, rejection of unauthenticated direct API access and disallowed origins and hosts, and isolated create and edit operations for Platform drafts. New checkout and scenario simulation results pinned the selected merchant’s supplemental Jev revision, and replay returned the original result.
+- Integrated verification of merchant setup persistence, the legacy setup redirect, and deletion is pending.
 
 ## PG-11 through PG-19 local evaluation
 

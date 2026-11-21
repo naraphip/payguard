@@ -1,3 +1,5 @@
+import type { MerchantSetup } from "./settings/merchant-setup/contracts";
+
 export type DemoScenario = {
   id: string;
   name: string;
@@ -9,6 +11,7 @@ export type DemoScenario = {
 export type DemoMerchant = {
   id: string;
   name: string;
+  setup?: MerchantSetup;
   scenarios: DemoScenario[];
 };
 
