@@ -1,4 +1,4 @@
-# test 1
+# PayGuard
 
 - [Project brief](project.md)
 - [Current work](current-work.md)
@@ -6,6 +6,7 @@
 - [Requirements](requirements/index.md)
 - [UI designs](ui/index.md)
 - [Decisions](decisions/index.md)
+- [Simulation Lab runbook](simulation-runbook.md)
 - [Delivery workflow](workflow.md)
 
 Open this `docs/` folder as an Obsidian vault and start here. Use relative Markdown links so the same notes work in Obsidian and in source control.
