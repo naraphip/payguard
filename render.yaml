@@ -51,6 +51,7 @@ services:
   - type: keyvalue
     name: payguard-redis
     plan: free
+    ipAllowList: []
 
 databases:
   - name: payguard-postgres
