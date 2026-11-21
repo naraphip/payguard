@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Activity, ArrowRight, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, SlidersHorizontal, TabletSmartphone } from "lucide-react";
 import { Network } from "./network";
+import { PayGuardLogo } from "./payguard-logo";
 import type { Config, Decision, Product, Report, Run, Scenario } from "./types";
 
 const defaults: Config = {
@@ -231,8 +232,7 @@ export default function Home() {
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex min-h-16 max-w-[1440px] items-center justify-between px-4 sm:px-8">
           <div className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center rounded-lg bg-ink text-white"><ShieldCheck size={21} aria-hidden /></span>
-            <span className="font-semibold tracking-tight">PayGuard</span>
+            <PayGuardLogo />
             <span className="hidden border-l border-line pl-3 text-sm text-muted sm:inline">Simulation Lab</span>
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">

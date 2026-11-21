@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ChevronRight, CircleAlert, FilePenLine, FlaskConical, Layers3, LoaderCircle, Plus, Search, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { PayGuardLogo } from "../../payguard-logo";
 import { RuleSheet } from "./rule-sheet";
 import { actions, outlineButton, primaryButton, ruleRequest, rulesEndpoint, stages } from "./contracts";
 import type { Rule, RuleCatalogue } from "./contracts";
@@ -93,11 +94,8 @@ export function SystemRulesDashboard() {
 
   return <div className="min-h-screen bg-[#f8fafc] text-slate-900 md:grid md:grid-cols-[218px_minmax(0,1fr)]">
     <aside className="border-b border-slate-200 bg-white md:sticky md:top-0 md:h-dvh md:border-r md:border-b-0">
-      <div className="flex items-center gap-3 px-4 pt-4 pb-3 md:border-b md:border-slate-100 md:px-5 md:py-4">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm">
-          <ShieldCheck className="size-[21px]" aria-hidden="true" />
-        </span>
-        <span className="text-[15px] font-bold tracking-tight">PayGuard</span>
+      <div className="px-4 pt-4 pb-3 md:border-b md:border-slate-100 md:px-5 md:py-4">
+        <PayGuardLogo />
       </div>
       <div className="px-4 pb-3 md:px-3 md:py-5">
         <Navigation />
