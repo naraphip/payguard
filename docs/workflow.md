@@ -2,6 +2,8 @@
 
 ## Intake from team documents
 
+For PayGuard, review new or changed materials in the [team Drive folder](https://drive.google.com/drive/folders/1lKpQdDOkrqpF61vxN_wNN2HHo9NQjNnH) and reconcile them with the [local task list](payguard-tasks.md) and its linked live action plan. Preserve recorded test evidence and flag material conflicts for the team. Follow the task list's completion and sync procedure after verification.
+
 Run intake when the user asks to deliver work from `docs/`. Start at [Home](home.md) and [Current work](current-work.md), then read the relevant documents and follow their source links. Search the entire docs tree for related notes, including files the team has added without linking from an index. If the user supplies a commit range, review the docs diff for that range and open the affected notes in context. For a broad request, use the previous reviewed revision or listed sources in Current work if available. When there is no baseline, review the relevant docs tree and check existing implementation before selecting work. Include local docs changes when they are part of the requested input.
 
 Distinguish accepted decisions and requirements from proposals, open questions, and superseded decisions. Use explicit status and supersession links to resolve precedence. Preserve source documents and cite them with relative links in derived notes. If sources disagree on a decision that changes what gets built, record the conflict and ask about that decision while continuing independent work. If several unrelated items are ready, use the team's stated priorities. If no priority is recorded, pick a small independent item and record the selection.

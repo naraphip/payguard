@@ -8,6 +8,7 @@
 - [Decisions](decisions/index.md)
 - [Simulation Lab runbook](simulation-runbook.md)
 - [Delivery workflow](workflow.md)
+- [PayGuard task list](payguard-tasks.md)
 
 Open this `docs/` folder as an Obsidian vault and start here. Use relative Markdown links so the same notes work in Obsidian and in source control.
 
