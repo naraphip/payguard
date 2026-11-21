@@ -28,7 +28,7 @@ Sources include the [PayGuard requirements folder](https://drive.google.com/driv
 | PG-20 | PRE-PROD GATE | — | Risk/QA | Real labels, shadow cycle, recall/fpr precision signoff | 10–19 | Recall>=98% only if demonstrated; conversion loss measured | Blocked |
 | PG-21 | PRE-PROD GATE | — | Security | PDPA/PCI, retention, cross-border provider assessment | 11,17 | Approved security/legal review | Blocked |
 
-PG-01 is the first demo item in the live plan. It assumes a Go starter. The local backend and frontend have no application files, so locate the starter source or establish the implementation baseline before building. Use synthetic data for the demo.
+The local Go and Next.js Simulation Lab provides a base for the demo. Start with PG-01 and see the [implementation task breakdown](payguard-task-breakdown.md) for reusable code, dependencies, and acceptance checks. Use synthetic data for the demo.
 
 ## Decisions
 
