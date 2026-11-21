@@ -1,5 +1,12 @@
 # Current work
 
+## GitHub progress monitoring in Notion
+
+Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4de98381dcac67fb442ef0c35b) under the monitoring plan. The local integration token authenticated and returned HTTP 200 for the plan page. See the [monitoring requirements](requirements/notion-progress.md) for repository configuration and rollout checks.
+
+- Pending verification of the workflow and of integration write access to the activity database.
+- Activation remains pending until the repository secret and variable are configured, the workflow is on the default branch, and manual and scheduled runs are verified.
+
 ## PG-01 booking intake
 
 Implemented the versioned booking intake on the local branch. The [runbook](simulation-runbook.md#booking-event-intake) documents the demo bearer token configuration, event contract, and replay responses.

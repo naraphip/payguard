@@ -1,0 +1,31 @@
+name: Notion progress sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '3-59/10 * * * *'
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: notion-progress
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sync GitHub activity to Notion
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+        run: python3 scripts/sync_notion_progress.py
