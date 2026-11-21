@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var baselineMinSamples int
+	if raw := os.Getenv("PAYGUARD_DEMO_BASELINE_MIN_SAMPLES"); raw != "" {
+		baselineMinSamples, err = strconv.Atoi(raw)
+		if err != nil || baselineMinSamples < 1 {
+			log.Fatal("PAYGUARD_DEMO_BASELINE_MIN_SAMPLES must be a positive integer")
+		}
+	}
 	ctx := context.Background()
 	db, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://payguard:payguard@127.0.0.1:55432/payguard?sslmode=disable"))
 	if err != nil {
@@ -56,10 +64,11 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("POST /api/v1/booking/events", bookingHandler{a.repo, bookingAuth}.create)
-	bookingRisk := bookingRiskHandler{repo: a.repo, auth: bookingAuth, redis: cache}
+	bookingRisk := bookingRiskHandler{repo: a.repo, auth: bookingAuth, redis: cache, baselineMinSamples: baselineMinSamples}
 	mux.HandleFunc("POST /api/v1/booking/profiles/proposal", bookingRisk.proposeProfile)
 	mux.HandleFunc("POST /api/v1/booking/profiles/approve", bookingRisk.approveProfile)
 	mux.HandleFunc("POST /api/v1/booking/events/{id}/assessment", bookingRisk.assessEvent)
+	mux.HandleFunc("POST /api/v1/booking/events/{id}/outcomes", bookingRisk.importOutcome)
 	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
 	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)

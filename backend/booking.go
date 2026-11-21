@@ -151,11 +151,32 @@ func (h bookingHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (r repository) saveBooking(ctx context.Context, merchant, key string, input bookingInput) (bookingEvent, bool, error) {
+	var saved bookingEvent
+	var created bool
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if err := lockBookingMerchant(ctx, tx, merchant); err != nil {
+			return err
+		}
+		var err error
+		saved, created, err = insertOrReplayBooking(ctx, tx, merchant, key, input)
+		return err
+	})
+	return saved, created, err
+}
+
+// Serialize booking acceptance with baseline publication for this merchant.
+func lockBookingMerchant(ctx context.Context, tx pgx.Tx, merchant string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(19761010, hashtext($1))`, merchant)
+	return err
+}
+
+func insertOrReplayBooking(ctx context.Context, tx pgx.Tx, merchant, key string, input bookingInput) (bookingEvent, bool, error) {
 	saved := bookingEvent{MerchantID: merchant, bookingInput: input}
 	saved.OccurredAt = input.OccurredAt.UTC()
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO booking_events (merchant_id, event_id, idempotency_key, schema_version, stage, occurred_at, amount_minor, product, sdk_status)
-		VALUES ($1, $2::text::uuid, $3, $4, $5, $6, $7, $8, $9)
+	err := tx.QueryRow(ctx, `
+		INSERT INTO booking_events (merchant_id, event_id, idempotency_key, schema_version, stage, occurred_at, amount_minor, product, sdk_status, received_at, baseline_id)
+		VALUES ($1, $2::text::uuid, $3, $4, $5, $6, $7, $8, $9, clock_timestamp(),
+			(SELECT id FROM booking_baselines WHERE merchant_id = $1 ORDER BY id DESC LIMIT 1))
 		ON CONFLICT DO NOTHING
 		RETURNING received_at`,
 		merchant, input.EventID, key, input.SchemaVersion, input.Stage, input.OccurredAt, input.AmountMinor, input.Product, input.SDKStatus).Scan(&saved.ReceivedAt)
@@ -169,7 +190,7 @@ func (r repository) saveBooking(ctx context.Context, merchant, key string, input
 
 	// Use a new statement so a competing insert that won the unique constraint
 	// is visible. Matching both identifiers rules out changing the key on replay.
-	err = r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT schema_version, stage, occurred_at, amount_minor, received_at, product, sdk_status
 		FROM booking_events
 		WHERE merchant_id = $1 AND event_id = $2::text::uuid AND idempotency_key = $3`,

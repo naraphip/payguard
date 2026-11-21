@@ -103,9 +103,10 @@ func proposeBookingProfile(setup merchantSetup) (bookingProfile, error) {
 }
 
 type bookingRiskHandler struct {
-	repo  repository
-	auth  bookingAuth
-	redis *redis.Client
+	repo               repository
+	auth               bookingAuth
+	redis              *redis.Client
+	baselineMinSamples int
 }
 
 func decodeBookingRiskJSON(w http.ResponseWriter, r *http.Request, value any) bool {

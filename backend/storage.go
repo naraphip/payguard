@@ -45,9 +45,19 @@ CREATE TABLE IF NOT EXISTS booking_events (
   PRIMARY KEY (merchant_id, event_id),
   UNIQUE (merchant_id, idempotency_key)
 );
+CREATE TABLE IF NOT EXISTS booking_baselines (
+  merchant_id text NOT NULL,
+  id bigint NOT NULL CHECK (id > 0),
+  sample_count integer NOT NULL CHECK (sample_count > 0),
+  sample_event_ids uuid[] NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (sample_count = cardinality(sample_event_ids)),
+  PRIMARY KEY (merchant_id, id)
+);
 ALTER TABLE booking_events
   ADD COLUMN IF NOT EXISTS product text NOT NULL DEFAULT '' CHECK (product IN ('', 'flight_ticket', 'hotel_room', 'physical', 'digital')),
-  ADD COLUMN IF NOT EXISTS sdk_status text NOT NULL DEFAULT '' CHECK (sdk_status IN ('', 'observed', 'unavailable'));
+  ADD COLUMN IF NOT EXISTS sdk_status text NOT NULL DEFAULT '' CHECK (sdk_status IN ('', 'observed', 'unavailable')),
+  ADD COLUMN IF NOT EXISTS baseline_id bigint;
 CREATE INDEX IF NOT EXISTS booking_event_velocity_idx ON booking_events (merchant_id, occurred_at, received_at);
 CREATE TABLE IF NOT EXISTS booking_profiles (
   merchant_id text NOT NULL,
@@ -71,6 +81,25 @@ CREATE TABLE IF NOT EXISTS booking_assessments (
   FOREIGN KEY (merchant_id, event_id) REFERENCES booking_events (merchant_id, event_id),
   FOREIGN KEY (merchant_id, profile_version) REFERENCES booking_profiles (merchant_id, version)
 );
+CREATE TABLE IF NOT EXISTS booking_outcomes (
+  merchant_id text NOT NULL,
+  outcome_id uuid NOT NULL,
+  event_id uuid NOT NULL,
+  source text NOT NULL CHECK (source IN ('verified_demo', 'analyst', 'chargeback')),
+  source_reference text NOT NULL,
+  label text NOT NULL CHECK (label IN ('normal', 'fraud', 'inconclusive')),
+  occurred_at timestamptz NOT NULL,
+  received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  eligible boolean NOT NULL,
+  baseline_id bigint,
+  baseline_sample_count integer NOT NULL CHECK (baseline_sample_count >= 0),
+  PRIMARY KEY (merchant_id, outcome_id),
+  UNIQUE (merchant_id, source, source_reference),
+  FOREIGN KEY (merchant_id, event_id) REFERENCES booking_events (merchant_id, event_id),
+  FOREIGN KEY (merchant_id, baseline_id) REFERENCES booking_baselines (merchant_id, id)
+);
+CREATE INDEX IF NOT EXISTS booking_outcome_event_idx ON booking_outcomes (merchant_id, event_id);
+CREATE INDEX IF NOT EXISTS booking_outcome_eligible_idx ON booking_outcomes (merchant_id, event_id) WHERE eligible;
 `
 
 type redisVelocity struct {

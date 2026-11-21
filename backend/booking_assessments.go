@@ -66,8 +66,9 @@ type bookingFeature struct {
 }
 
 type bookingBaseline struct {
-	State   string  `json:"state"`
-	Version *string `json:"version"`
+	State       string  `json:"state"`
+	Version     *string `json:"version"`
+	SampleCount *int    `json:"sampleCount,omitempty"`
 }
 
 type bookingAssessment struct {
@@ -168,11 +169,14 @@ func (r repository) assessBooking(ctx context.Context, cache *redis.Client, merc
 	var created bool
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		// Serialize first assessments of the same booking before pinning the profile.
+		var baselineID *int64
+		var sampleCount *int
 		err := tx.QueryRow(ctx, `
-			SELECT stage, occurred_at, amount_minor, received_at
-			FROM booking_events
-			WHERE merchant_id = $1 AND event_id = $2::text::uuid
-			FOR UPDATE`, merchant, eventID).Scan(&booking.Stage, &booking.OccurredAt, &booking.AmountMinor, &booking.ReceivedAt)
+			SELECT e.stage, e.occurred_at, e.amount_minor, e.received_at, b.id, b.sample_count
+			FROM booking_events e
+			LEFT JOIN booking_baselines b ON e.merchant_id = b.merchant_id AND e.baseline_id = b.id
+			WHERE e.merchant_id = $1 AND e.event_id = $2::text::uuid
+			FOR UPDATE OF e`, merchant, eventID).Scan(&booking.Stage, &booking.OccurredAt, &booking.AmountMinor, &booking.ReceivedAt, &baselineID, &sampleCount)
 		if err != nil {
 			return err
 		}
@@ -207,6 +211,9 @@ func (r repository) assessBooking(ctx context.Context, cache *redis.Client, merc
 			return err
 		}
 		computed := evaluateBooking(booking, version, profile.Candidate, velocity, mode)
+		if baselineID != nil {
+			computed.Baseline = baselineSummary(baselineID, *sampleCount)
+		}
 		raw, err := json.Marshal(computed)
 		if err != nil {
 			return err
