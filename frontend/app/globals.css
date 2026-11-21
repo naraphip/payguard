@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #17243a;
+  --color-muted: #51617a;
+  --color-line: #dce3ee;
+  --color-paper: #f5f7fb;
+  --color-accent: #354fd2;
+  --color-soft: #edf0ff;
+  --font-sans: "Geist", "Inter", system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.control {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  background-color: white;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.graph {
+  background-color: #f8fafd;
+  background-image: radial-gradient(#dbe2f1 0.8px, transparent 0.8px);
+  background-size: 16px 16px;
+}
