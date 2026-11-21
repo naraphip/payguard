@@ -28,14 +28,16 @@ function errorMessage(cause: unknown) {
   return cause instanceof Error ? cause.message : "The operations API is unavailable.";
 }
 
-export function OperationsWorkspace() {
+type WorkspaceSection = "queue" | "rules";
+
+export function OperationsWorkspace({ initialSection = "queue" }: { initialSection?: WorkspaceSection }) {
   const [token, setToken] = useState("");
   const [queue, setQueue] = useState<Queue | null>(null);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [activeFilters, setActiveFilters] = useState<Filters>(emptyFilters);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState("");
-  const [section, setSection] = useState<"queue" | "rules">("queue");
+  const [section, setSection] = useState<WorkspaceSection>(initialSection);
   const [shadowReport, setShadowReport] = useState<ShadowReport | null>(null);
   const [preferences, setPreferences] = useState<DashboardPreferences>(defaultPreferences);
   const [preferenceStatus, setPreferenceStatus] = useState("");
@@ -70,7 +72,7 @@ export function OperationsWorkspace() {
     setQueue(null);
     setQueueLoading(false);
     setQueueError("");
-    setSection("queue");
+    setSection(initialSection);
     setShadowReport(null);
     setPreferences(defaultPreferences);
     setPreferenceStatus("");

@@ -12,7 +12,7 @@ Requires Docker with Docker Compose. From the repository root, build and start t
 docker compose up --build -d --wait
 ```
 
-Open [Simulation Lab](http://127.0.0.1:3000). Choose a product in **Travel** or **Online store**, then select **Run simulation** in the inline **Trip summary** or **Your cart**. An eligible first order can proceed to [Omise Sandbox checkout](docs/simulation-runbook.md#omise-sandbox-checkout). **Simulation results** below the checkout contains the event evidence and **Score run**. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
+Open the [Dashboard](http://127.0.0.1:3000/dashboard) and select **Simulation Lab** in the sidebar, or open the [lab directly](http://127.0.0.1:3000/simulation-lab). Choose a product in **Travel** or **Online store**, then select **Run simulation** in the inline **Trip summary** or **Your cart**. An eligible first order can proceed to [Omise Sandbox checkout](docs/simulation-runbook.md#omise-sandbox-checkout). **Simulation results** below the checkout contains the event evidence and **Score run**. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
 
 ### Run the application directly on the host
 
@@ -39,7 +39,7 @@ For Go 1.26+ and Node.js 24+ development on the host, start only PostgreSQL and 
    npm run dev
    ```
 
-4. Open [Simulation Lab](http://127.0.0.1:3000) and run the same storefront flow.
+4. Open [Simulation Lab](http://127.0.0.1:3000/simulation-lab) and run the same storefront flow.
 
 Go listens on port 8081, PostgreSQL on 55432, and Redis on 56379. The default bindings use loopback. `docker compose down` stops the data stores and preserves the PostgreSQL volume.
 
