@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Activity, ArrowRight, Building2, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, SlidersHorizontal, TabletSmartphone } from "lucide-react";
+import { Activity, ArrowRight, Building2, CreditCard, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, SlidersHorizontal, TabletSmartphone } from "lucide-react";
 import { Network } from "./network";
 import { PayGuardLogo } from "./payguard-logo";
-import type { Config, Decision, Product, Report, Run, Scenario } from "./types";
+import type { Config, Decision, SimulationProduct, Report, Run, Scenario } from "./types";
 
 const defaults: Config = {
   seed: 42, product: "flight_ticket", scenario: "mixed", accounts: 12, rate: 30,
@@ -20,6 +20,7 @@ const products = {
   hotel_room: { label: "Hotel room", detail: "Singapore city stay", icon: Hotel },
   physical: { label: "Physical goods", detail: "Premium headphones", icon: Package },
   digital: { label: "Digital goods", detail: "Digital gift card", icon: TabletSmartphone },
+  payment_gateway: { label: "Gateway payment", detail: "Synthetic payment authorization", icon: CreditCard },
 };
 
 const controls = [
@@ -156,14 +157,15 @@ export default function Home() {
   const [reportError, setReportError] = useState("");
   const lastRequest = useRef<{ id: string; config: Config } | null>(null);
   const ota = config.product === "flight_ticket" || config.product === "hotel_room";
-  const choices: Product[] = ota ? ["flight_ticket", "hotel_room"] : ["physical", "digital"];
+  const gateway = config.product === "payment_gateway";
+  const choices: SimulationProduct[] = ota ? ["flight_ticket", "hotel_room"] : gateway ? ["payment_gateway"] : ["physical", "digital"];
   const selected = run?.decisions.find(d => d.event.id === selectedID);
 
   function update<K extends keyof Config>(key: K, value: Config[K]) {
     setConfig(current => ({ ...current, [key]: value }));
   }
 
-  function product(value: Product) {
+  function product(value: SimulationProduct) {
     setConfig(current => ({
       ...current,
       product: value,
@@ -262,9 +264,9 @@ export default function Home() {
             <fieldset disabled={busy} className="min-w-0 space-y-5 p-4 sm:p-5">
               <legend className="sr-only">Simulation setup</legend>
               <h2 className="font-semibold">Simulation setup</h2>
-              <div className="grid grid-cols-2 gap-1 rounded-lg bg-paper p-1" role="group" aria-label="Storefront">
-                {[{ label: "OTA", active: ota, icon: Plane, value: "flight_ticket" }, { label: "E-commerce", active: !ota, icon: ShoppingBag, value: "physical" }].map(({ label, active, icon: Icon, value }) => (
-                  <button key={label} type="button" onClick={() => product(value as Product)} aria-pressed={active} className={`flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs font-semibold ${active ? "bg-white text-accent shadow-xs" : "text-muted hover:text-ink"}`}>
+              <div className="grid grid-cols-3 gap-1 rounded-lg bg-paper p-1" role="group" aria-label="Storefront">
+                {[{ label: "OTA", active: ota, icon: Plane, value: "flight_ticket" }, { label: "E-commerce", active: !ota && !gateway, icon: ShoppingBag, value: "physical" }, { label: "Gateway", active: gateway, icon: CreditCard, value: "payment_gateway" }].map(({ label, active, icon: Icon, value }) => (
+                  <button key={label} type="button" onClick={() => product(value as SimulationProduct)} aria-pressed={active} className={`flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs font-semibold ${active ? "bg-white text-accent shadow-xs" : "text-muted hover:text-ink"}`}>
                     <Icon size={15} aria-hidden />{label}
                   </button>
                 ))}
@@ -284,10 +286,10 @@ export default function Home() {
 
               <div className="grid grid-cols-2 gap-3">
                 {ota ? <Field label="Booking date"><input className="control min-w-0" type="date" required value={config.date} onChange={e => update("date", e.target.value)} /></Field>
-                  : <Field label="Delivery"><select className="control" value={config.delivery} onChange={e => update("delivery", e.target.value)}>
+                  : !gateway && <Field label="Delivery"><select className="control" value={config.delivery} onChange={e => update("delivery", e.target.value)}>
                     {config.product === "digital" ? <option value="instant">Instant email</option> : <><option value="standard">Standard</option><option value="express">Express</option></>}
                   </select></Field>}
-                <Field label={ota ? "Party / rooms" : "Cart quantity"}><input className="control" type="number" min={1} max={20} required value={config.quantity || ""} onChange={e => update("quantity", e.target.valueAsNumber)} /></Field>
+                <Field label={ota ? "Party / rooms" : gateway ? "Payment quantity" : "Cart quantity"}><input className="control" type="number" min={1} max={20} required value={config.quantity || ""} onChange={e => update("quantity", e.target.valueAsNumber)} /></Field>
               </div>
 
               <section className="space-y-3 border-t border-line pt-4" aria-labelledby="contact">
