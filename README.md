@@ -14,7 +14,9 @@ Requires Docker with Docker Compose. From the repository root, build and start t
 docker compose up --build -d --wait
 ```
 
-Open the [Dashboard](http://127.0.0.1:3000/dashboard) and select **Simulation Lab** in the sidebar, or open the [lab directly](http://127.0.0.1:3000/simulation-lab). Choose a product in **Travel** or **Online store**, then select **Run simulation** in the inline **Trip summary** or **Your cart**. An eligible first order can proceed to [Omise Sandbox checkout](docs/simulation-runbook.md#omise-sandbox-checkout). **Simulation results** below the checkout contains the event evidence and **Score run**. Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
+Open **Testing → Simulation Lab**, choose a batch product, and select **Run batch simulation** in the inline summary. Under **Batch simulation results**, select an event to inspect the recorded decision and any earlier events with shared signals. Eligible first orders in **Travel** and **Online store** can proceed to Omise Sandbox checkout. [Simulation Lab](http://127.0.0.1:3000/simulation-lab) · [Batch evidence walkthrough](docs/simulation-runbook.md#verify-batch-decision-evidence) · [Omise Sandbox checkout](docs/simulation-runbook.md#omise-sandbox-checkout)
+
+Use `docker compose logs -f` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the Compose volume.
 
 ### Run the application directly on the host
 

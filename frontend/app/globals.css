@@ -29,9 +29,3 @@ body {
   font-size: 0.875rem;
   font-weight: 400;
 }
-
-.graph {
-  background-color: #f8fafd;
-  background-image: radial-gradient(#dbe2f1 0.8px, transparent 0.8px);
-  background-size: 16px 16px;
-}

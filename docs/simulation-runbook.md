@@ -186,7 +186,7 @@ For the standalone operations walkthrough, leave `PAYGUARD_LOCAL_MERCHANT_PREVIE
 4. In an assessed transaction, select **Generate dossier** and wait for the cited evidence. Use **Export masked JSON** to save the bounded set of assessment fields and recorded versions. Use **Dashboard settings** to choose which KPIs appear and save the active filters for this demo actor.
 5. Reconnect with the merchant token and open **Rule workspace**. Set a holdout interval containing labeled fixture bookings, select a data cutoff after the applicable outcomes were recorded, and run a shadow report. Inspect sample exclusions, confusion matrices, recall, false-positive rate, and pinned version tuples. A missing denominator displays as undefined.
 6. In **Change approvals**, propose a velocity threshold from a report with at least one scored booking, or make a profile, rubric, or product-list proposal. Use a same-tenant analyst credential to approve or reject it. Check the audit actors, status, active revision, and expiry. A rollback copies an earlier approved candidate into a fresh proposal.
-7. In Simulation Lab, enter the optional demo merchant token and run an OTA, e-commerce, or gateway fixture. Inspect linked entities and the platform, merchant-policy, and final action fields. Repeat a normal fixture with legitimate shared Wi-Fi to verify that shared IP alone does not trigger a block.
+7. In Simulation Lab, enter the optional demo merchant token and run an OTA, e-commerce, or gateway fixture. Inspect the platform action, batch policy action, and final action. Follow the [batch evidence checks](#verify-batch-decision-evidence) to inspect events with shared signals.
 
 ### Operations and governance API
 
@@ -236,6 +236,15 @@ curl -fsS http://127.0.0.1:8081/api/v1/simulation/runs/498ab33a-c10d-45f9-8db9-7
 
 The example produces 24 decisions, skips 12 duplicate PSP retries, and reports 12 payment samples. For shared Wi-Fi regression, set traffic to Normal and keep Shared legitimate Wi-Fi enabled. For missing-token and timeout regression, use the corresponding controls in Traffic signals and edge cases. The former displays `payment_token` in missing evidence at payment stages, and the latter adds unscored samples in Offline QA.
 
+### Verify batch decision evidence
+
+For the saved shared gateway run on the port 3001 local preview, open the link below and start at step 2. The page reads the saved snapshot over GET. Select **Score run** to read the saved QA report. [Open the saved gateway run](http://127.0.0.1:3001/simulation-lab?run=f3f70c97-ad98-4d74-95bd-e04462c1b137#batch-results)
+
+1. Open **Testing → Simulation Lab** and go to **Batch simulation**. Choose **Gateway**, then set **Mixed traffic**, seed `42`, **Accounts** to `12`, and **Orders/min** to `30`. Enable **Rotate ring IPs**, **Shared legitimate Wi-Fi**, **Share ring devices**, **Share ring payment tokens**, and **Duplicate PSP retry**. Leave the other edge cases off. Select **Run batch simulation**.
+2. In **Event decisions**, choose an Approved event and then a Review event. Confirm the selected event identifier, engine action, mock Jev evidence and rule hits in **Decision evidence** match the row you chose. Use the keyboard to open an event and activate **Back to selected event** to return to its row.
+3. Open `order-2a-010-02`. The saved gateway fixture has engine action `ALLOW`, platform as its final action source, and 60-second order counts of one account, one device, five IP, and one payment-token order. **Shared signals in this run** shows four earlier accounts on the same IP. Select the source event `order-2a-009-02` and confirm that its identifier and saved evidence appear. Open the first event to check the empty state for shared signals.
+4. Repeat with **Mock Jev timeout** enabled. Check that **Review** includes events with the recorded engine action `UNSUCCESSFUL`. Select **Score run** to see the affected payment samples in the unscored count.
+
 ### Verify checkout contact and merchant policy
 
 1. Select **Travel → Bangkok to Singapore**. In **Simulation settings**, select **Normal traffic**, set **Accounts** to `1`, and leave **Omit payment token** and **Mock Jev timeout** off.
@@ -248,7 +257,7 @@ The example produces 24 decisions, skips 12 duplicate PSP retries, and reports 1
 The Omise test payment flow applies to the shared synthetic demo in **Travel** and **Online store**. Merchant-scoped scenarios and **Gateway** use simulated payments.
 
 1. Configure the [test-mode keys](#local-keys-and-omise-sandbox-preparation) and start the app. Confirm `GET /api/v1/simulation/checkout/config` reports checkout available before opening the lab.
-2. Choose a product in **Travel** or **Online store** and set the quantity. For a simple eligible run, open **Simulation settings**, select **Normal traffic**, and set **Accounts** to `1`. Leave merchant blocking, **Omit payment token**, and **Mock Jev timeout** off. Select **Run simulation** in the inline **Trip summary** or **Your cart**.
+2. Choose a product in **Travel** or **Online store** and set the quantity. For a simple eligible run, open **Simulation settings**, select **Normal traffic**, and set **Accounts** to `1`. Leave merchant blocking, **Omit payment token**, and **Mock Jev timeout** off. Select **Run batch simulation** in the inline **Trip summary** or **Your cart**.
 3. Choose **Pay in test mode** in the same panel. The first order must have final action `ALLOW` at `PRE_PAYMENT` for Travel or `PAYMENT` for Online store. If the checkout settings changed, run the simulation again before paying. Fill the Omise-hosted form with an official test card. [Omise.js hosted form](https://docs.omise.co/omise-js), [Official test cards](https://docs.omise.co/api-testing)
 4. Review the payment status in the inline summary. If the status is pending or unknown, check the Test dashboard for the provider's outcome. The existing attempt remains associated with the saved run.
 

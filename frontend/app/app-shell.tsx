@@ -6,7 +6,7 @@ import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "rea
 import type { ReactNode } from "react";
 import {
   Bell, Building2, ChevronDown, ChevronRight,
-  ClipboardList, FlaskConical, LayoutDashboard, Menu, Network, PanelLeftClose, PanelLeftOpen, Settings,
+  ClipboardList, FlaskConical, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Settings,
   ShieldCheck, ShoppingBag, SlidersHorizontal, Sparkles, Store, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -36,7 +36,6 @@ const groups: { label: string; items: Destination[] }[] = [
     items: [
       { href: "/settings/operations#transactions", label: "Transactions", Icon: ClipboardList },
       { href: "/settings/operations", label: "Risk Operations", Icon: ShieldCheck, standalone: true },
-      { href: "/simulation-lab#fraud-network", label: "Fraud Network", Icon: Network },
     ],
   },
   {

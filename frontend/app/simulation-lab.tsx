@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { Activity, ArrowRight, ChevronDown, FlaskConical, GitFork, ListChecks, LoaderCircle, Play, ReceiptText, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import type { FormEvent, ReactNode, Ref } from "react";
+import { Activity, ArrowRight, ArrowUp, ChevronDown, FlaskConical, GitFork, ListChecks, LoaderCircle, Play, ReceiptText, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import { Network } from "./network";
 import { DemoScenarioSimulation } from "./demo-scenario-runner";
+import type { MerchantTransactionStatus } from "./merchant-demo";
+import { TransactionStatusBadge } from "./merchant-transaction-status";
 import { CartProduct, catalog, defaultPrices, Storefront, thb, travelProduct } from "./storefront";
 import { TestPayment } from "./test-payment";
 import type { CheckoutConfig } from "./test-payment";
 import "./storefront.css";
-import type { Config, Decision, Report, Run, Scenario, SimulationProduct } from "./types";
+import type { Config, Decision, EntityKind, Report, Run, Scenario, SimulationProduct } from "./types";
 
 const defaults: Config = {
   seed: 42, product: "flight_ticket", scenario: "mixed", accounts: 12, rate: 30,
@@ -25,21 +27,63 @@ const controls = [
   ["missingToken", "Omit payment token"], ["jevTimeout", "Mock Jev timeout"],
 ] as const;
 
-const actionStyle: Record<string, string> = {
-  ALLOW: "bg-emerald-50 text-emerald-800",
-  REVIEW: "bg-amber-50 text-amber-900",
-  CHALLENGE: "bg-indigo-50 text-indigo-800",
-  BLOCK: "bg-red-50 text-red-800",
-  UNSUCCESSFUL: "bg-slate-100 text-slate-800",
+const evidenceLabels: Record<string, string> = {
+  ALLOW: "Allow",
+  REVIEW: "Review",
+  CHALLENGE: "Challenge",
+  BLOCK: "Block",
+  UNSUCCESSFUL: "Unsuccessful",
+  PASS: "Pass",
+  NOT_APPLICABLE: "Not applied",
+  PLATFORM: "Platform rules",
+  MERCHANT_POLICY: "Batch test policy",
+  JEV_TIMEOUT: "Simulated Jev timeout",
+  MOCK: "Simulated response",
+  TIMEOUT: "Simulated timeout",
+  LOW: "Low risk",
+  MEDIUM: "Medium risk",
+  HIGH: "High risk",
+  INSUFFICIENT_EVIDENCE: "Insufficient evidence",
+  UNAVAILABLE: "Unavailable",
+  BOOKING: "Booking",
+  PRE_PAYMENT: "Pre-payment",
+  CHECKOUT: "Checkout",
+  PAYMENT: "Payment",
+  payment_token: "Payment token",
+};
+
+const signalLabels: Record<EntityKind, string> = {
+  account: "Account",
+  device: "Device",
+  ip: "IP address",
+  token: "Payment token",
 };
 
 const panel = "shop-panel";
 const outline = "inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-paper disabled:opacity-65";
 const endpoint = "/api/v1/simulation/runs";
-const display = (value: string) => value.replaceAll("_", " ");
+const runIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const contactDomainPattern = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[Tt][Ee][Ss][Tt]$/;
 const emptyContact = { name: "", email: "", phone: "" };
 type Contact = typeof emptyContact;
+type CompletedRun = { snapshot: Run; scope: string; readOnly: boolean };
+type RunRequest = { id: string; config: Config };
+
+function runAccess(scope: string) {
+  return scope
+    ? { url: "/api/v1/booking/network/runs", headers: { Authorization: `Bearer ${scope}` } }
+    : { url: endpoint, headers: undefined };
+}
+
+function simulationStatus(action: string): MerchantTransactionStatus {
+  if (action === "ALLOW") return "APPROVED";
+  if (action === "BLOCK") return "REJECTED";
+  return "REVIEW";
+}
+
+function evidenceLabel(value?: string) {
+  return value ? evidenceLabels[value] ?? value.replaceAll("_", " ") : "Not recorded";
+}
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -69,39 +113,60 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="grid gap-1.5 text-xs font-semibold">{label}{children}</label>;
 }
 
-function Badge({ action }: { action: string }) {
-  return <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${actionStyle[action] ?? "bg-paper"}`}>{display(action)}</span>;
-}
-
-function Summary({ run }: { run: Run | null }) {
-  const count = (action: string) => run?.decisions.filter(d => d.action === action).length ?? 0;
+function Summary({ run }: { run: Run }) {
+  const counts = { APPROVED: 0, REJECTED: 0, REVIEW: 0 };
+  let unsuccessful = 0;
+  for (const decision of run.decisions) {
+    counts[simulationStatus(decision.action)]++;
+    if (decision.action === "UNSUCCESSFUL") unsuccessful++;
+  }
   const cards = [
-    { label: "Events evaluated", value: run?.decisions.length ?? 0, icon: Activity, color: "bg-soft text-accent" },
-    { label: "Allowed", value: count("ALLOW"), icon: ShieldCheck, color: "bg-emerald-50 text-emerald-800" },
-    { label: "Review or challenge", value: count("REVIEW") + count("CHALLENGE"), icon: ListChecks, color: "bg-amber-50 text-amber-800" },
-    { label: "Retries deduplicated", value: run?.duplicates ?? 0, icon: GitFork, color: "bg-violet-50 text-violet-800" },
+    { label: "Events evaluated", value: run.decisions.length, icon: Activity, color: "bg-soft text-accent" },
+    { label: "Approved", value: counts.APPROVED, icon: ShieldCheck, color: "bg-emerald-50 text-emerald-800" },
+    { label: "Rejected", value: counts.REJECTED, icon: X, color: "bg-red-50 text-red-800" },
+    { label: "Review", value: counts.REVIEW, icon: ListChecks, color: "bg-amber-50 text-amber-800", detail: unsuccessful ? `${unsuccessful} unsuccessful` : undefined },
+    { label: "Retries deduplicated", value: run.duplicates, icon: GitFork, color: "bg-violet-50 text-violet-800" },
   ];
-  return <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-    {cards.map(({ label, value, icon: Icon, color }) => (
+  return <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+    {cards.map(({ label, value, icon: Icon, color, detail }) => (
       <div className={`${panel} flex items-start gap-3 p-3 sm:p-4`} key={label}>
         <span className={`rounded-lg p-2 ${color}`}><Icon size={17} aria-hidden /></span>
-        <div><p className="text-xs font-medium text-muted">{label}</p><p className="mt-0.5 text-2xl font-semibold tabular-nums">{run ? value : "—"}</p></div>
+        <div>
+          <p className="text-xs font-medium text-muted">{label}</p>
+          <p className="mt-0.5 text-2xl font-semibold tabular-nums">{value}</p>
+          {detail && <p className="text-xs text-muted">{detail}</p>}
+        </div>
       </div>
     ))}
   </div>;
 }
 
-function Evidence({ decision, run, contact }: { decision: Decision; run: Run; contact?: Contact }) {
+function Evidence({ decision, run, contact, headingRef, onSelectEvent, onBackToEvent }: {
+  decision: Decision;
+  run: Run;
+  contact?: Contact;
+  headingRef: Ref<HTMLHeadingElement>;
+  onSelectEvent: (id: string) => void;
+  onBackToEvent: () => void;
+}) {
   const d = decision;
+  const missing = d.missing?.map(evidenceLabel).join(", ") || (d.missing ? "None" : "Not recorded");
   return (
-    <section className="border-t border-line p-4 sm:p-5" aria-labelledby="evidence">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 id="evidence" className="font-semibold">Decision evidence</h3>
+    <section id="decision-evidence" className="border-t border-line p-4 sm:p-5" aria-labelledby="evidence">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 id="evidence" ref={headingRef} tabIndex={-1} aria-describedby="selected-event" className="scroll-mt-24 font-semibold">Decision evidence</h3>
+          <p id="selected-event" className="mt-1 text-xs text-muted"><span className="font-mono wrap-anywhere">{d.event.id}</span> · {evidenceLabel(d.event.stage)}</p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-xs text-muted">{d.event.id}</span>
-          <Badge action={d.action} />
+          <TransactionStatusBadge status={simulationStatus(d.action)} />
+          <button type="button" className={outline} onClick={onBackToEvent}>
+            <ArrowUp size={14} aria-hidden /> Back to selected event
+          </button>
         </div>
       </div>
+      {d.action === "CHALLENGE" && <p className="mb-4 text-sm text-muted">The decision requested additional verification.</p>}
+      {d.action === "UNSUCCESSFUL" && <p className="mb-4 text-sm text-muted">The simulation ended before Jev returned a decision.</p>}
       {contact && <div className="mb-4 rounded-lg border border-line p-3">
         <h4 className="text-sm font-semibold">Checkout contact</h4>
         <dl className="mt-2 grid gap-3 text-xs sm:grid-cols-3">
@@ -114,23 +179,32 @@ function Evidence({ decision, run, contact }: { decision: Decision; run: Run; co
       </div>}
       <dl className="mb-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
         {[
-          ["Platform action", d.platformDecision],
-          ["Batch test policy", d.merchantPolicyDecision],
-          ["Event email domain", d.event.domain],
-          ["Final action source", d.actionSource],
-          ["Jev status", d.jevStatus],
-          ["Jev risk level", d.jevAnswer],
-          ["Missing signals", d.missing.join(", ") || "None"],
+          ["Final action", evidenceLabel(d.action)],
+          ["Decided by", evidenceLabel(d.actionSource)],
+          ["Platform action", evidenceLabel(d.platformDecision)],
+          ["Batch test policy", evidenceLabel(d.merchantPolicyDecision)],
+          ["Jev status", evidenceLabel(d.jevStatus)],
+          ["Jev risk level", evidenceLabel(d.jevAnswer)],
+          ["Event email domain", d.event.domain || "Not recorded"],
+          ["Missing signals", missing],
         ].map(([label, value]) => (
           <div className="rounded-lg bg-paper p-3" key={label}>
             <dt className="text-muted">{label}</dt><dd className="mt-1 wrap-anywhere font-semibold">{value}</dd>
           </div>
         ))}
       </dl>
-      <p className="text-sm"><strong>Rule hits</strong> <span className="break-words text-muted">{d.ruleHits.join(", ") || "None"}</span></p>
-      <p className="mt-2 text-xs text-muted"><strong>60-second order counts</strong> {d.features.map(f => `${f.kind} ${f.orders}`).join(" · ")}</p>
-      <h4 className="mb-2 mt-5 text-sm font-semibold">Entity links</h4>
-      <Network selected={d} decisions={run.decisions} />
+      <h4 className="text-sm font-semibold">Matched rules</h4>
+      {d.ruleHits?.length ? <ul className="mt-1 space-y-1 text-xs text-muted">
+        {d.ruleHits.map(rule => <li className="wrap-anywhere" key={rule}><code>{rule}</code></li>)}
+      </ul> : <p className="mt-1 text-xs text-muted">{d.ruleHits ? "No rules matched." : "Rule matches were not recorded."}</p>}
+      <h4 className="mt-4 text-sm font-semibold">60-second order counts</h4>
+      <p className="mt-1 text-xs text-muted">Distinct orders at this stage in the 60 seconds up to this event.</p>
+      {d.features?.length ? <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+        {d.features.map(feature => <div className="flex gap-1.5" key={feature.kind}>
+          <dt className="text-muted">{signalLabels[feature.kind]}</dt><dd className="font-semibold tabular-nums">{feature.orders}</dd>
+        </div>)}
+      </dl> : <p className="mt-2 text-xs text-muted">No order counts were recorded.</p>}
+      <Network selected={d} decisions={run.decisions} onSelectEvent={onSelectEvent} />
     </section>
   );
 }
@@ -154,45 +228,50 @@ function Metrics({ report }: { report: Report }) {
   </>;
 }
 
-export default function Home() {
+export default function Home({ sharedRunId }: { sharedRunId?: string }) {
   const [config, setConfig] = useState(defaults);
   const [contact, setContact] = useState(emptyContact);
   const [contactEmailError, setContactEmailError] = useState(false);
   const [tenantToken, setTenantToken] = useState("");
-  const [run, setRun] = useState<Run | null>(null);
+  const [completedRun, setCompletedRun] = useState<CompletedRun | null>(null);
   const [runContact, setRunContact] = useState<{ orderId: string; contact: Contact } | null>(null);
   const [selectedID, select] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingSavedRun, setLoadingSavedRun] = useState(sharedRunId !== undefined);
+  const [savedRunError, setSavedRunError] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
   const [error, setError] = useState("");
   const [reportError, setReportError] = useState("");
   const [checkout, setCheckout] = useState<CheckoutConfig | null>(null);
   const [checkoutError, setCheckoutError] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
-  const lastRequest = useRef<{ id: string; config: Config } | null>(null);
+  const lastRequest = useRef<{ scope: string; request: RunRequest } | null>(null);
+  const eventsList = useRef<HTMLDivElement>(null);
+  const evidenceHeading = useRef<HTMLHeadingElement>(null);
+  const resultsHeading = useRef<HTMLHeadingElement>(null);
+  const pendingFocus = useRef<"results" | "evidence" | null>(null);
+  const run = completedRun?.snapshot;
   const scoped = tenantToken.trim();
-  const runEndpoint = scoped ? "/api/v1/booking/network/runs" : endpoint;
-  const requestHeaders = scoped ? { Authorization: `Bearer ${scoped}` } : undefined;
   const ota = travelProduct(config.product);
   const cartProduct = config.product === "payment_gateway" ? null : config.product;
   const item = cartProduct ? catalog[cartProduct] : null;
   const prices = checkout?.prices ?? defaultPrices;
   const quantity = Number.isFinite(config.quantity) ? config.quantity : 0;
   const subtotal = cartProduct ? prices[cartProduct] * quantity : 0;
-  const controlsLocked = busy || paymentBusy;
+  const controlsLocked = busy || loadingSavedRun || paymentBusy;
   const selected = run?.decisions.find(d => d.event.id === selectedID);
   const current = checkoutInput(config, contact.email.trim());
   const firstOrderId = run?.decisions[0]?.event.orderId;
   const firstPayment = run?.decisions.find(({ event }) =>
     event.orderId === firstOrderId && (event.stage === "PRE_PAYMENT" || event.stage === "PAYMENT"),
   );
-  const runMatchesCart = Boolean(run && current && sameConfig(run.config, current));
+  const runMatchesCart = Boolean(completedRun && !completedRun.readOnly && current && sameConfig(completedRun.snapshot.config, current));
   const paymentDisabled = checkoutError ? "Test payment settings could not be loaded. Reload to try again."
     : !checkout ? "Loading test payment settings…"
     : !checkout.enabled || !checkout.publicKey?.startsWith("pkey_test_") ? "Omise test payments are not configured."
     : busy ? "Waiting for the risk decision."
-    : !run ? "Run the simulation to check payment eligibility."
+    : !completedRun || completedRun.readOnly ? "Run the simulation to check payment eligibility."
     : !runMatchesCart ? "Checkout changed. Run the simulation again."
     : firstPayment?.action !== "ALLOW" ? "Test payment requires an allowed decision on the first checkout."
     : "";
@@ -204,6 +283,73 @@ export default function Home() {
       .catch(() => { if (!controller.signal.aborted) setCheckoutError(true); });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (hash === "batch-results" || hash === "fraud-network") {
+      document.getElementById(hash)?.scrollIntoView({ block: "start" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (sharedRunId === undefined) return;
+    if (!runIdPattern.test(sharedRunId)) {
+      setSavedRunError("This link does not contain a valid run ID.");
+      setLoadingSavedRun(false);
+      return;
+    }
+    const controller = new AbortController();
+    api<Run>(`${endpoint}/${sharedRunId}`, { signal: controller.signal, cache: "no-store" })
+      .then(snapshot => {
+        if (controller.signal.aborted) return;
+        setCompletedRun({ snapshot, scope: "", readOnly: true });
+        const preferred = snapshot.decisions.find(d => d.action === "REVIEW") ?? snapshot.decisions[0];
+        select(preferred?.event.id ?? "");
+      })
+      .catch((failure: Error) => {
+        if (!controller.signal.aborted) setSavedRunError(failure.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingSavedRun(false);
+      });
+    return () => controller.abort();
+  }, [sharedRunId]);
+
+  useEffect(() => {
+    const list = eventsList.current;
+    const row = list?.querySelector('[aria-pressed="true"]')?.closest("tr");
+    if (list && row) {
+      const bounds = list.getBoundingClientRect();
+      const headerHeight = list.querySelector("thead")?.offsetHeight ?? 0;
+      const rowBounds = row.getBoundingClientRect();
+      if (rowBounds.top < bounds.top + headerHeight) {
+        list.scrollTop += rowBounds.top - bounds.top - headerHeight;
+      } else if (rowBounds.bottom > bounds.bottom) {
+        list.scrollTop += rowBounds.bottom - bounds.bottom;
+      }
+    }
+    const heading = pendingFocus.current === "evidence" ? evidenceHeading.current
+      : pendingFocus.current === "results" ? resultsHeading.current : null;
+    pendingFocus.current = null;
+    if (heading) {
+      heading.focus({ preventScroll: true });
+      heading.scrollIntoView({ block: "start" });
+    }
+  }, [run, selectedID]);
+
+  function selectEvent(id: string) {
+    if (id === selectedID) {
+      evidenceHeading.current?.focus({ preventScroll: true });
+      evidenceHeading.current?.scrollIntoView({ block: "start" });
+      return;
+    }
+    pendingFocus.current = "evidence";
+    select(id);
+  }
+
+  function backToSelectedEvent() {
+    eventsList.current?.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
+  }
 
   function update<K extends keyof Config>(key: K, value: Config[K]) {
     setConfig(current => ({ ...current, [key]: value }));
@@ -230,15 +376,19 @@ export default function Home() {
     }
     setContactEmailError(false);
     setBusy(true);
-    if (!lastRequest.current || JSON.stringify(lastRequest.current.config) !== JSON.stringify(current)) {
-      lastRequest.current = { id: crypto.randomUUID(), config: current };
+    if (!lastRequest.current || lastRequest.current.scope !== scoped || !sameConfig(lastRequest.current.request.config, current)) {
+      lastRequest.current = { scope: scoped, request: { id: crypto.randomUUID(), config: current } };
     }
+    const { scope, request } = lastRequest.current;
+    const { url, headers } = runAccess(scope);
     try {
-      const result = await api<Run>(runEndpoint, {
-        method: "POST", headers: { "Content-Type": "application/json", ...requestHeaders }, body: JSON.stringify(lastRequest.current),
+      const result = await api<Run>(url, {
+        method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(request),
       });
       lastRequest.current = null;
-      setRun(result);
+      pendingFocus.current = "results";
+      setCompletedRun({ snapshot: result, scope, readOnly: false });
+      setSavedRunError("");
       const firstOrderID = result.decisions[0]?.event.orderId;
       const savedContact = firstOrderID && Object.values(submittedContact).some(Boolean)
         ? { orderId: firstOrderID, contact: submittedContact }
@@ -258,11 +408,13 @@ export default function Home() {
   }
 
   async function score() {
-    if (!run) return;
+    if (!completedRun || busy || reportBusy) return;
+    const { snapshot, scope } = completedRun;
+    const { url, headers } = runAccess(scope);
     setReportBusy(true);
     setReportError("");
     try {
-      setReport(await api<Report>(`${runEndpoint}/${run.id}/report`, { headers: requestHeaders }));
+      setReport(await api<Report>(`${url}/${snapshot.id}/report`, { headers, cache: "no-store" }));
     } catch (failure) {
       setReportError((failure as Error).message);
     } finally {
@@ -279,6 +431,7 @@ export default function Home() {
           <nav aria-label="Simulation Lab sections" className="mt-4 flex flex-wrap gap-2">
             <a className={outline} href="#merchant-rules">Test merchant rules</a>
             <a className={outline} href="#batch-simulation">Run a batch simulation</a>
+            {run && <a className={outline} href="#batch-results">Batch results</a>}
           </nav>
         </header>
 
@@ -335,9 +488,11 @@ export default function Home() {
                 <Field label="Demo merchant token (optional)">
                   <input className="control" type="password" autoComplete="off" disabled={reportBusy} value={tenantToken}
                     onChange={event => {
-                      setTenantToken(event.currentTarget.value);
+                      const value = event.currentTarget.value;
+                      setTenantToken(value);
+                      if (value.trim() === scoped) return;
                       lastRequest.current = null;
-                      setRun(null);
+                      setCompletedRun(null);
                       setRunContact(null);
                       select("");
                       setReport(null);
@@ -386,7 +541,8 @@ export default function Home() {
             </div>}
 
             {runMatchesCart && firstPayment && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e8ddef] bg-[#f8f3fb] px-3 py-2">
-              <span className="text-xs font-medium text-[#4e3c60]">{cartProduct ? "First checkout decision" : "First gateway decision"}</span><Badge action={firstPayment.action} />
+              <span className="text-xs font-medium text-[#4e3c60]">{cartProduct ? "First checkout decision" : "First gateway decision"}</span>
+              <TransactionStatusBadge status={simulationStatus(firstPayment.action)} />
             </div>}
             {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
 
@@ -403,36 +559,52 @@ export default function Home() {
           </aside>
         </form>
 
-        <section className="space-y-4" aria-labelledby="results-title">
-          <div>
-            <h2 id="results-title" className="text-2xl font-semibold tracking-tight">Batch simulation results</h2>
-            <p className="mt-1 text-sm text-[#5f516d]">Inspect checkout decisions and score the run against synthetic labels.</p>
+        <section id="batch-results" className="scroll-mt-24 space-y-4" aria-labelledby="results-title">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 id="results-title" ref={resultsHeading} tabIndex={-1} className="scroll-mt-24 text-2xl font-semibold tracking-tight">Batch simulation results</h2>
+              <p className="mt-1 text-sm text-[#5f516d]">Review synthetic events and simulated Jev responses.</p>
+            </div>
+            {completedRun && !completedRun.scope && !completedRun.readOnly && <a className={outline} href={`/simulation-lab?run=${encodeURIComponent(completedRun.snapshot.id)}#batch-results`}>Open saved run</a>}
           </div>
-          <Summary run={run} />
-          <div className="min-w-0 space-y-5" aria-busy={busy}>
+          {run && <Summary run={run} />}
+          <div className="min-w-0 space-y-5" aria-busy={busy || loadingSavedRun}>
             <section id="fraud-network" className={`${panel} scroll-mt-24`} aria-labelledby="events">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-4 sm:p-5">
-                <h2 id="events" className="font-semibold">Event decisions</h2>
+                <div>
+                  <h3 id="events" className="font-semibold">Event decisions</h3>
+                  {run && <p id="event-decisions-help" className="mt-1 text-xs text-muted">Select an event to see what led to its result.</p>}
+                </div>
                 {run && <span className="rounded-md bg-paper px-2 py-1 text-xs tabular-nums text-muted">Seed {run.config.seed}</span>}
               </div>
-              {!run ? <div className="grid min-h-64 place-items-center px-5 py-8 text-center">
-                <div><div className="mx-auto mb-3 grid size-12 place-items-center rounded-xl bg-soft text-accent"><FlaskConical size={23} aria-hidden /></div>
-                  <p className="text-sm font-semibold">Ready for a simulation</p><p className="mt-1 text-sm text-muted">Run the simulation to see decisions and linked evidence.</p>
+              {savedRunError ? <p role="alert" className="p-5 text-sm font-medium text-red-800">{savedRunError}</p> : loadingSavedRun ? <p role="status" className="p-5 text-sm text-muted">Loading saved run…</p>
+              : !run ? <div className="grid min-h-48 place-items-center px-5 py-8 text-center">
+                <div>
+                  <div className="mx-auto mb-3 grid size-12 place-items-center rounded-xl bg-soft text-accent"><FlaskConical size={23} aria-hidden /></div>
+                  <p className="text-sm font-semibold">Ready for a simulation</p>
+                  <a href="#batch-simulation" className="mt-1 inline-block text-sm font-semibold text-accent hover:underline">Set up a batch run</a>
                 </div>
-              </div> : <>
-                <div className="max-h-80 overflow-auto" tabIndex={0} aria-label="Synthetic event decisions">
+              </div> : run.decisions.length === 0 ? <p className="p-5 text-sm text-muted">No events were recorded for this run.</p> : <>
+                <div ref={eventsList} className="max-h-80 overflow-auto" tabIndex={0} role="region" aria-label="Synthetic event decisions" aria-describedby="event-decisions-help">
                   <table className="w-full table-fixed text-left text-sm">
-                    <thead className="sticky top-0 bg-paper text-xs text-muted"><tr><th scope="col" className="w-[41%] px-3 py-2.5 sm:px-4">Event</th><th scope="col" className="w-[27%] pr-1">Stage</th><th scope="col" className="pr-2">Final action</th></tr></thead>
+                    <thead className="sticky top-0 bg-paper text-xs text-muted"><tr><th scope="col" className="w-[41%] px-3 py-2.5 sm:px-4">Event</th><th scope="col" className="w-[23%] pr-1 sm:w-[27%]">Stage</th><th scope="col" className="pr-2">Status</th></tr></thead>
                     <tbody>{run.decisions.map(d => (
                       <tr className={`border-b border-line ${selectedID === d.event.id ? "bg-soft" : "hover:bg-paper"}`} key={d.event.id}>
-                        <td className="px-3 py-2 sm:px-4"><button className="flex items-center gap-1 rounded text-left text-xs font-semibold text-accent" aria-pressed={selectedID === d.event.id} onClick={() => select(d.event.id)}><span className="min-w-0 wrap-anywhere">{d.event.id}</span><ArrowRight size={13} className="hidden shrink-0 sm:block" aria-hidden /></button></td>
-                        <td className="pr-1 text-xs text-muted">{display(d.event.stage)}</td><td className="pr-2"><Badge action={d.action} /></td>
+                        <th scope="row" className="px-3 py-1 sm:px-4">
+                          <button type="button" className="flex min-h-10 items-center gap-1.5 rounded text-left text-xs font-semibold text-accent hover:underline"
+                            aria-pressed={selectedID === d.event.id} aria-controls="decision-evidence" onClick={() => selectEvent(d.event.id)}>
+                            <span className="min-w-0 wrap-anywhere">{d.event.id}</span><ArrowRight size={13} className="hidden shrink-0 sm:block" aria-hidden />
+                          </button>
+                        </th>
+                        <td className="pr-1 text-xs text-muted">{evidenceLabel(d.event.stage)}</td>
+                        <td className="pr-2"><TransactionStatusBadge status={simulationStatus(d.action)} /></td>
                       </tr>
                     ))}</tbody>
                   </table>
                 </div>
-                {selected && <Evidence decision={selected} run={run} contact={runContact?.orderId === selected.event.orderId ? runContact.contact : undefined} />}
-                <p className="border-t border-line px-4 py-3 font-mono text-xs text-muted sm:px-5">{run.generatorVersion} / {run.ruleVersion} / {run.jevVersion}</p>
+                {selected && <Evidence decision={selected} run={run} contact={runContact?.orderId === selected.event.orderId ? runContact.contact : undefined}
+                  headingRef={evidenceHeading} onSelectEvent={selectEvent} onBackToEvent={backToSelectedEvent} />}
+                <p className="wrap-anywhere border-t border-line px-4 py-3 font-mono text-xs text-muted sm:px-5">{run.generatorVersion} / {run.ruleVersion} / {run.jevVersion}</p>
               </>}
             </section>
 

@@ -4,7 +4,7 @@ PayGuard evaluates booking and payment risk for travel and e-commerce merchants.
 
 | Component | Responsibility |
 | --- | --- |
-| Next.js App Router, TypeScript, Tailwind CSS | Storefront selection, scenario controls, event decisions, Cytoscape evidence graph and offline QA UI |
+| Next.js App Router, TypeScript, Tailwind CSS | Storefront selection, scenario controls, event decisions, shared signal evidence and offline QA UI |
 | Go HTTP API | Validation, deterministic generation, event sequencing, platform rules, mock Jev and demo merchant policy |
 | Redis | Per-stage, event-time 60-second velocity by synthetic entity |
 | PostgreSQL | Immutable run snapshots and a QA-only ground truth schema |
