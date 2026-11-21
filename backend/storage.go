@@ -288,5 +288,28 @@ func initialize(ctx context.Context, db *pgxpool.Pool) error {
 	if _, err := tx.Exec(ctx, statements); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS payguard_schema_migrations (
+		version text PRIMARY KEY,
+		applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+	)`); err != nil {
+		return err
+	}
+	const authMigrationVersion = "production-auth-v1"
+	var applied bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM payguard_schema_migrations WHERE version=$1)", authMigrationVersion).Scan(&applied); err != nil {
+		return err
+	}
+	if !applied {
+		const governanceActorMigration = `
+			ALTER TABLE platform_rule_revisions ADD COLUMN IF NOT EXISTS actor_id uuid
+				REFERENCES production_auth_identities(id);
+		`
+		if _, err := tx.Exec(ctx, productionAuthSchema+governanceActorMigration); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO payguard_schema_migrations(version) VALUES($1)", authMigrationVersion); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }

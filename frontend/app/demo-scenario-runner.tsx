@@ -15,6 +15,7 @@ import { TransactionDisposition, TransactionStatusBadge, transactionReviewCause,
 import { merchantDate, merchantDetailsHref } from "./settings/merchants/management-contracts";
 import { merchantFieldLabels, merchantOperatorLabels, policyFieldLabel } from "./settings/structured-rule-builder";
 import { useWorkspaceView } from "./workspace-view";
+import { useProductionSession } from "./production-auth";
 import type { DemoDirectory, DemoTransaction } from "./merchant-demo";
 import type { PolicyField } from "./settings/rule-composer";
 import type { SimulationProduct } from "./types";
@@ -142,6 +143,7 @@ export const invalidDemoAmount = "Enter a whole number from 0 to 9,007,199,254,7
 
 export function useDemoScenario(source: ScenarioSource) {
   const workspace = useWorkspaceView();
+  const production = useProductionSession() !== null;
   const [credential, setCredential] = useState("");
   const [directory, setDirectory] = useState<DemoDirectory | null>(null);
   const [accessToken, setAccessToken] = useState("");
@@ -183,7 +185,7 @@ export function useDemoScenario(source: ScenarioSource) {
 
   const connect = useCallback(async (token?: string) => {
     const automatic = token === undefined;
-    const currentToken = token?.trim() ?? getMerchantDemoToken();
+    const currentToken = production ? "" : token?.trim() ?? getMerchantDemoToken();
     if (!automatic && !currentToken) return;
     const generation = ++connectionGeneration.current;
     contextGeneration.current++;
@@ -199,15 +201,15 @@ export function useDemoScenario(source: ScenarioSource) {
     setContextError("");
 
     try {
-      if (merchantRestricted || getMerchantDemoRole() === "merchant") return;
-      const local = automatic && !currentToken ? await loadLocalMerchantDirectory() : null;
+      if (merchantRestricted || (!production && getMerchantDemoRole() === "merchant")) return;
+      const local = automatic && !production && !currentToken ? await loadLocalMerchantDirectory() : null;
       if (connectionGeneration.current !== generation) return;
-      setRequiresToken(!local);
-      if (!local && !currentToken) return;
+      setRequiresToken(!production && !local);
+      if (!production && !local && !currentToken) return;
       const connected = local ?? await merchantDemoRequest<DemoDirectory>("", currentToken);
       if (connectionGeneration.current !== generation) return;
       if (connected.role !== "admin") {
-        setConnectionError("Use a Platform Admin token to test merchant rules.");
+        setConnectionError(production ? "Platform Admin access is required to test merchant rules." : "Use a Platform Admin token to test merchant rules.");
         return;
       }
       const search = new URLSearchParams(window.location.search);
@@ -220,7 +222,7 @@ export function useDemoScenario(source: ScenarioSource) {
       if (currentToken) setMerchantDemoToken(currentToken, connected.role);
       setCredential("");
       setMerchantId(selected?.id ?? "");
-      if (targetMerchant && !selected) setSelectionError("The linked merchant is unavailable with this token. Choose an accessible merchant.");
+      if (targetMerchant && !selected) setSelectionError("The linked merchant is unavailable. Choose an accessible merchant.");
     } catch (cause) {
       if (connectionGeneration.current === generation) {
         setConnectionError(cause instanceof Error ? cause.message : "The merchant directory is unavailable.");
@@ -228,7 +230,7 @@ export function useDemoScenario(source: ScenarioSource) {
     } finally {
       if (connectionGeneration.current === generation) setConnecting(false);
     }
-  }, [clearAttempt, merchantRestricted]);
+  }, [clearAttempt, merchantRestricted, production]);
 
   useEffect(() => {
     if (!workspace) return;

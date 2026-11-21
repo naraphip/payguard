@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Check, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { actionButton } from "../../action-styles";
 import { merchantDemoRequest, merchantPolicyProducts } from "../../merchant-demo";
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
 import { MerchantDecisionEvidence } from "../../merchant-decision-evidence";
@@ -14,8 +15,7 @@ import { managementError } from "./management-access";
 import { merchantDate, merchantDetailsHref } from "./management-contracts";
 import type { MerchantLedgerPage } from "./management-contracts";
 
-const button = "rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-paper disabled:opacity-60";
-const decisionButton = "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60";
+const button = actionButton.secondary;
 const count = new Intl.NumberFormat("en-US");
 const limit = 20;
 const products: Record<string, string> = merchantPolicyProducts;
@@ -138,7 +138,7 @@ export function MerchantTransactions({ token, merchant, canDecide, initialTransa
         <input className="control mt-1 min-w-0" type="date" value={filters.to} onChange={event => setFilters({ ...filters, to: event.target.value })} />
       </label>
       <div className="flex flex-wrap gap-2">
-        <button className={button} type="submit">Apply filters</button>
+        <button className={actionButton.primary} type="submit">Apply filters</button>
         {filtered && <button className={button} type="button" onClick={() => {
           setFilters(emptyFilters); setApplied(emptyFilters); setPage(1); setFilterError("");
         }}>Clear filters</button>}
@@ -204,11 +204,12 @@ function TransactionDetail({ selected, canDecide, saving, updated, onDecide }: {
     {status === "REVIEW" && <div className="space-y-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
       <p>{transactionReviewCause(selected)} A manual decision is required.</p>
       {canDecide && <div className="flex flex-wrap gap-2">
-        <button className={`${decisionButton} bg-emerald-700 hover:bg-emerald-800`} type="button" disabled={saving}
+        <button className={`${actionButton.positive} min-h-11`} type="button" disabled={saving}
           onClick={() => void onDecide(selected, "cleared")}><Check size={16} aria-hidden="true" />Approve</button>
-        <button className={`${decisionButton} bg-red-700 hover:bg-red-800`} type="button" disabled={saving}
+        <button className={`${actionButton.danger} min-h-11`} type="button" disabled={saving}
           onClick={() => void onDecide(selected, "rejected")}><X size={16} aria-hidden="true" />Reject</button>
       </div>}
+      {saving && <p role="status">Saving decision…</p>}
     </div>}
     <dl className="grid gap-3 text-sm sm:grid-cols-2">
       <div><dt className="font-medium">Merchant ID</dt><dd className="text-muted wrap-anywhere">{selected.merchantId}</dd></div>

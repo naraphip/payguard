@@ -35,7 +35,6 @@ ALTER TABLE merchant_policy_rule_versions ADD COLUMN IF NOT EXISTS instruction t
 `
 
 var (
-	errPolicyConflict  = errors.New("Resolve the conflicting active rule before activating this policy.")
 	errPolicyVersion   = errors.New("This rule changed. Reload its latest version before retrying.")
 	errPolicyRuleLimit = errors.New("This merchant has reached the limit of 50 policy rules.")
 )
@@ -417,13 +416,13 @@ func (r repository) mutateMerchantPolicy(ctx context.Context, merchant string, r
 					preview.ConflictRuleIDs = append(preview.ConflictRuleIDs, prior.ID)
 				}
 			}
-			if len(preview.ConflictRuleIDs) > 0 {
-				if request.Kind == "activate" {
-					return errPolicyConflict
+			if request.Kind != "activate" {
+				switch {
+				case len(preview.ConflictRuleIDs) > 0:
+					preview.ApprovalReason = "This rule may overlap with active rules that take a different action. Review their actions before activating."
+				case proposal.Action == "BLOCK" && broadMerchantBlock(proposal):
+					preview.ApprovalReason = "This block can apply to every transaction in a selected product. Explicit activation is required."
 				}
-				preview.ApprovalReason = "Resolve overlapping active rules with different actions."
-			} else if request.Kind != "activate" && proposal.Action == "BLOCK" && broadMerchantBlock(proposal) {
-				preview.ApprovalReason = "This block can apply to every transaction in a selected product. Explicit activation is required."
 			}
 			if preview.ApprovalReason != "" {
 				status = "PENDING_APPROVAL"

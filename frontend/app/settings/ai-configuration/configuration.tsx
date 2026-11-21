@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { adminRulePath, useLocalAdminPreview } from "../../local-admin-preview";
+import { useProductionSession } from "../../production-auth";
 import { RuleAccess, useRuleCredential } from "../rule-composer";
 import { outlineButton, primaryButton, ruleRequest } from "../system-rules/contracts";
 
@@ -43,13 +44,14 @@ function errorMessage(error: unknown) {
 export function AIConfiguration() {
   const token = useRuleCredential("PLATFORM");
   const local = useLocalAdminPreview();
+  const production = useProductionSession();
   return <main className="mx-auto max-w-[1050px] space-y-5 px-4 pt-7 pb-12 sm:px-7 sm:pt-9 lg:px-10">
     <header>
       <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">AI Configuration</h1>
       <p className="mt-2 text-sm text-muted">Configure and test the platform Jev advisory.</p>
     </header>
     <RuleAccess scope="PLATFORM" />
-    {(token || local) && <ConfigurationForm key={token} token={token} local={local} />}
+    {(token || local || production?.role === "platform_admin") && <ConfigurationForm key={token} token={token} local={local} />}
   </main>;
 }
 

@@ -1,5 +1,31 @@
 # Current work
 
+## Production authentication
+
+The working tree adds OIDC sign-in, server-side sessions, Go-enforced role and merchant scope, and separately attributed Platform Rule approval. Independent standard and race-enabled Go runs each recorded 376 passing tests and subtests, and the legacy-data migration check passed. Readiness still depends on real identity-provider and HTTPS browser acceptance. [Production authentication configuration and release gates](requirements/production-authentication.md)
+
+## Merchant creation and OpenAI rule drafting
+
+The working tree reduces merchant creation to one required field and one submission. Business and integration settings can be added later. Eligible free-text merchant instructions go to OpenAI first when configured. The preview identifies OpenAI, local processing, or fallback. Temporary exact-email commands stay in PayGuard. [Merchant management walkthrough](simulation-runbook.md#merchant-management) · [Rule drafting contract](requirements/ai-rule-management.md)
+
+- Chromium against an isolated Go backend verified that submitting only a merchant name created exactly one record and opened its details directly in the Local Sandbox Preview.
+- The isolated Go API sent synthetic English and Thai prompts about a 50,000 minor-unit threshold directly to OpenAI with `gpt-4.1-mini`. Both returned a `READY` draft with `source: openai`, a `REVIEW` action, and the expected amount. Neither preview saved a rule.
+- The full Go suite passed 380 tests and subtests with zero failures or skips on disposable PostgreSQL. Go vet, twelve Node tests, TypeScript checking, and the frontend production build passed.
+
+## Concurrent Merchant Rules and shared AI Rule preview
+
+Explicit activation can make multiple Merchant Rules effective together, including policies with potential overlap. Each rule retains its own effective version and history. The Platform and Merchant composer previews share the versioned `definition` format. Saves continue to use the validated proposal for each scope. [Rule data and lifecycle](requirements/ai-rule-management.md#shared-rule-preview-data) · [Multi-rule test walkthrough](simulation-runbook.md#test-multiple-active-merchant-rules)
+
+- The isolated PostgreSQL lifecycle test activated overlapping Block, Review and Challenge rules. The transaction recorded all three matched versions. Disabling each stronger rule left the others effective for new transactions, and replay preserved the original result.
+- Integrated verification passed 384 Go tests and subtests on disposable PostgreSQL with zero failures or skips. Go vet, 12 frontend tests, TypeScript checking, and the production build passed.
+- Chromium with a synthetic API fixture verified that explicit activation changed the Merchant active count from one to two and that both composer previews rendered `Rule data (JSON)` with schema version 1.
+
+## Action and status styling
+
+Merchants, merchant creation and transactions, AI Rule, and Platform Rules and approval share a visual hierarchy. Navy identifies the primary action and a neutral outline identifies secondary actions. Green marks Activate, Approve, and Active. Amber marks Disable, Rollback, and Review. Red marks Delete, Reject, and Block. Blue marks Challenge, and neutral badges identify inactive and draft states. Text labels and icons convey meaning alongside color. Keyboard focus uses the existing global indicator.
+
+Chromium verified the updated controls and status badges with synthetic data at 1440 px, 390 px, and 320 px. Mobile pages fit their viewports, and keyboard focus stayed visible. Sampled text contrast was at least 5.36:1. Twelve frontend tests, TypeScript checking, and the production build passed.
+
 ## PayGuard corporate identity
 
 The v4 logo update uses the outlined horizontal logo without the tagline in expanded navigation and the mobile drawer. The collapsed sidebar and light and dark browser icons use the v4 symbol. The public compact logo uses a 954 × 266 viewBox to show the full shield and preserve the source paths. Shared controls use the established navy and pale blue palette, and the interface self-hosts IBM Plex Sans Thai in weights 400 through 700. [Crisp Logo Source Kit v4](../PayGuard_Logo_v4_Crisp_Vector/README.md), [brand palette](../PayGuard_Source/brand-colors.csv)

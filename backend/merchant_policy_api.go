@@ -53,7 +53,7 @@ func merchantPolicyError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &validation):
 		problem(w, http.StatusUnprocessableEntity, validation.Error())
-	case errors.Is(err, errPolicyConflict), errors.Is(err, errPolicyVersion), errors.Is(err, errPolicyRuleLimit):
+	case errors.Is(err, errPolicyVersion), errors.Is(err, errPolicyRuleLimit):
 		problem(w, http.StatusConflict, err.Error())
 	case errors.Is(err, pgx.ErrNoRows):
 		problem(w, http.StatusNotFound, "Merchant policy not found.")
@@ -228,7 +228,7 @@ func (s mockMerchantService) policyMutate(w http.ResponseWriter, r *http.Request
 		actor = platformMaker
 	}
 	rule, err := s.repo.mutateMerchantPolicy(r.Context(), merchant, merchantPolicyMutation{
-		Actor: actor, Kind: operation, ID: id, ExpectedVersion: input.ExpectedVersion, RollbackVersion: input.Version,
+		Actor: auditActor(r.Context(), actor), Kind: operation, ID: id, ExpectedVersion: input.ExpectedVersion, RollbackVersion: input.Version,
 		Proposal: input.Proposal, Instruction: instruction,
 	})
 	if err != nil {

@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
+import { localPreviewAllowed } from "../../../production-auth-server";
 
 type RouteContext = { params: Promise<{ path?: string[] }> };
 
-const loopback = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const draftId = /^[a-f0-9]{32}$/;
 const noStore = { "Cache-Control": "no-store" };
@@ -46,7 +46,7 @@ function allowed(method: string, path: string[]) {
 async function proxy(request: NextRequest, { params }: RouteContext) {
   const token = process.env.PAYGUARD_LOCAL_MERCHANT_PREVIEW_TOKEN?.trim();
   const host = request.headers.get("host") ?? "";
-  if (!token || !loopback.test(host) || !loopback.test(request.nextUrl.host)) {
+  if (!token || !localPreviewAllowed(request.headers, request.nextUrl.host)) {
     return Response.json({ code: "MERCHANT_PREVIEW_DISABLED", error: "Local merchant preview is unavailable." }, { status: 404, headers: noStore });
   }
 

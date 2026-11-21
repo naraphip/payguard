@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { getMerchantDemoRole, subscribeMerchantDemoSession } from "./merchant-demo";
+import { useProductionSession } from "./production-auth";
 
 export type WorkspaceView = "platform" | "merchant";
 
@@ -35,7 +36,9 @@ function getServerWorkspaceView() {
 }
 
 export function useWorkspaceView() {
-  return useSyncExternalStore(subscribe, getWorkspaceView, getServerWorkspaceView);
+  const session = useProductionSession();
+  const sandboxView = useSyncExternalStore(subscribe, getWorkspaceView, getServerWorkspaceView);
+  return session ? session.role === "merchant" ? "merchant" : "platform" : sandboxView;
 }
 
 export function useMerchantDemoRole() {

@@ -105,7 +105,16 @@ func (a bookingAuth) actor(headers []string) bookingActor {
 }
 
 func (a bookingAuth) requireBookingActor(w http.ResponseWriter, r *http.Request, roles ...bookingRole) bookingActor {
-	actor := a.actor(r.Header.Values("Authorization"))
+	var actor bookingActor
+	if account, ok := productionActorFromRequest(r); ok {
+		if account.Role != productionRoleMerchant {
+			problem(w, http.StatusForbidden, "A merchant account is required for this operation.")
+			return bookingActor{}
+		}
+		actor = bookingActor{MerchantID: account.MerchantID, ActorID: account.ID, Role: bookingRoleMerchant}
+	} else {
+		actor = a.actor(r.Header.Values("Authorization"))
+	}
 	if actor.MerchantID == "" {
 		w.Header().Set("WWW-Authenticate", "Bearer")
 		problem(w, http.StatusUnauthorized, "A valid demo merchant bearer token is required.")
@@ -116,7 +125,7 @@ func (a bookingAuth) requireBookingActor(w http.ResponseWriter, r *http.Request,
 			return actor
 		}
 	}
-	problem(w, http.StatusForbidden, "The demo actor does not have access to this operation.")
+	problem(w, http.StatusForbidden, "This account does not have access to this operation.")
 	return bookingActor{}
 }
 

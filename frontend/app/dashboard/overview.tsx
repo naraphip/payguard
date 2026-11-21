@@ -7,6 +7,7 @@ import { loadLocalMerchantDirectory, merchantDemoRequest } from "../merchant-dem
 import type { DemoDirectory, DemoTransaction } from "../merchant-demo";
 import { TransactionStatusBadge, transactionStatus, transactionStatuses } from "../merchant-transaction-status";
 import { useWorkspaceView } from "../workspace-view";
+import { useProductionSession } from "../production-auth";
 import { useRuleCredential } from "../settings/rule-composer";
 import { merchantDetailsHref } from "../settings/merchants/management-contracts";
 
@@ -19,6 +20,7 @@ export function DashboardOverview() {
 }
 
 function ConnectedOverview({ token, merchantView }: { token: string; merchantView: boolean }) {
+  const production = useProductionSession() !== null;
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -29,9 +31,9 @@ function ConnectedOverview({ token, merchantView }: { token: string; merchantVie
     const { signal } = controller;
     async function load() {
       try {
-        const localDirectory = merchantView || token ? null : await loadLocalMerchantDirectory();
+        const localDirectory = merchantView || token || production ? null : await loadLocalMerchantDirectory();
         if (signal.aborted) return;
-        const directory = localDirectory ?? (token ? await merchantDemoRequest<DemoDirectory>("", token, { signal }) : null);
+        const directory = localDirectory ?? (token || production ? await merchantDemoRequest<DemoDirectory>("", token, { signal }) : null);
         if (directory?.role !== (merchantView ? "merchant" : "admin")) return;
         const grouped = await Promise.all(directory.merchants.map(async merchant => {
           const response = await merchantDemoRequest<{ transactions: DemoTransaction[] }>(
@@ -49,7 +51,7 @@ function ConnectedOverview({ token, merchantView }: { token: string; merchantVie
     }
     void load();
     return () => controller.abort();
-  }, [attempt, merchantView, token]);
+  }, [attempt, merchantView, production, token]);
 
   const statusCounts = { APPROVED: 0, REJECTED: 0, REVIEW: 0 };
   for (const transaction of data?.transactions ?? []) {
@@ -74,7 +76,7 @@ function ConnectedOverview({ token, merchantView }: { token: string; merchantVie
         setAttempt(value => value + 1);
       }}>Retry</button>
     </div>}
-    {!loading && !error && !data && <p className="text-sm text-muted">{merchantView ? "Open Transactions to connect with your merchant access token." : "Open Merchants to connect as an administrator."}</p>}
+    {!production && !loading && !error && !data && <p className="text-sm text-muted">{merchantView ? "Open Transactions to connect with your merchant access token." : "Open Merchants to connect as an administrator."}</p>}
     {data && <>
       <dl id="risk-trends" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         {[

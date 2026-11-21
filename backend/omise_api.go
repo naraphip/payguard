@@ -42,7 +42,7 @@ func newOmiseCheckout(store omiseChargeStore, publicKey, secretKey string) omise
 
 func (checkout omiseCheckout) config(w http.ResponseWriter, r *http.Request) {
 	publicKey := checkout.publicKey
-	if len(r.Header.Values("Authorization")) != 0 {
+	if _, signedIn := productionActorFromRequest(r); signedIn || len(r.Header.Values("Authorization")) != 0 {
 		publicKey = ""
 	}
 	respond(w, 200, struct {
@@ -76,7 +76,7 @@ func checkoutAmount(saved run) (int64, bool) {
 }
 
 func (checkout omiseCheckout) create(w http.ResponseWriter, r *http.Request) {
-	if len(r.Header.Values("Authorization")) != 0 {
+	if _, signedIn := productionActorFromRequest(r); signedIn || len(r.Header.Values("Authorization")) != 0 {
 		problem(w, 403, "Omise test checkout is available only in the public simulation workspace.")
 		return
 	}

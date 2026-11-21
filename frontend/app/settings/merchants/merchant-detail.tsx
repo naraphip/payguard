@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { FlaskConical, ShoppingCart } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MerchantDemoError, merchantDemoRequest, merchantPolicyProducts } from "../../merchant-demo";
 import type { DemoMerchant } from "../../merchant-demo";
 import { TransactionStatusBadge, transactionStatus, transactionStatuses } from "../../merchant-transaction-status";
 import { useWorkspaceView } from "../../workspace-view";
+import { useProductionSession } from "../../production-auth";
 import { AdminMerchantPolicyWorkspace } from "../rule-composer";
 import { outlineButton } from "../system-rules/contracts";
 import { SystemRulesDashboard } from "../system-rules/dashboard";
@@ -58,6 +60,7 @@ export function MerchantDetail({ merchantId, tab, transaction }: { merchantId: s
 function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: {
   token: string; merchantId: string; tab: MerchantTab; merchantView: boolean; transaction?: string;
 }) {
+  const production = useProductionSession() !== null;
   const path = `/${encodeURIComponent(merchantId)}`;
   const { response, failure, reload } = useMerchantResource<MerchantDetails>(path, token);
   const [updated, setUpdated] = useState<DemoMerchant>();
@@ -95,15 +98,19 @@ function ConnectedDetail({ token, merchantId, tab, merchantView, transaction }: 
           {merchant.createdAt && <p className="text-xs text-muted">Created {merchantDate(merchant.createdAt)}</p>}
         </div>
         {!merchantView && <div className="flex flex-wrap items-center gap-2">
-          <Link className={outlineButton} href={`/settings/mock-checkout?${sandboxQuery}`}>Mock Checkout</Link>
-          <Link className={outlineButton} href={`/simulation-lab?${sandboxQuery}#merchant-rules`}>Simulation Lab</Link>
+          {!production && <Link className={outlineButton} href={`/settings/mock-checkout?${sandboxQuery}`}>
+            <ShoppingCart size={16} aria-hidden="true" />Mock Checkout
+          </Link>}
+          <Link className={outlineButton} href={`/simulation-lab?${sandboxQuery}#merchant-rules`}>
+            <FlaskConical size={16} aria-hidden="true" />Simulation Lab
+          </Link>
         </div>}
       </div>
     </header>
     {!merchantView && <nav className="flex flex-wrap gap-1 rounded-lg border border-line bg-white p-1.5 text-sm" aria-label="Merchant sections">
       {Object.entries(merchantTabs).map(([id, name]) => <Link key={id} href={merchantDetailsHref(merchant.id, id as MerchantTab)}
         aria-current={id === tab ? "page" : undefined}
-        className="rounded-md px-2.5 py-2 font-semibold text-muted hover:bg-paper aria-[current=page]:bg-soft aria-[current=page]:text-accent">{name}</Link>)}
+        className="inline-flex min-h-10 items-center rounded-md border border-transparent px-2.5 py-2 font-semibold text-muted hover:bg-paper aria-[current=page]:border-blue-200 aria-[current=page]:bg-soft aria-[current=page]:text-accent">{name}</Link>)}
     </nav>}
     {tab === "overview" && <MerchantOverview detail={response} merchant={merchant} token={token} onSave={setUpdated}
       onDelete={() => router.push("/settings/merchants")} />}
@@ -121,6 +128,7 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
   detail: MerchantDetails; merchant: DemoMerchant; token: string;
   onSave: (merchant: DemoMerchant) => void; onDelete: () => void;
 }) {
+  const production = useProductionSession() !== null;
   const { metrics, profile, recentTransactions } = detail;
   const statusCounts = {
     APPROVED: metrics.approved ?? metrics.allowed,
@@ -128,7 +136,7 @@ function MerchantOverview({ detail, merchant, token, onSave, onDelete }: {
     REVIEW: metrics.review ?? metrics.underReview + metrics.challenged,
   };
   return <div className="space-y-5">
-    <MerchantAccessToken merchantId={merchant.id} adminToken={token} />
+    {!production && <MerchantAccessToken merchantId={merchant.id} adminToken={token} />}
     <section aria-label="Merchant activity" className="space-y-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold">Merchant activity</h2>

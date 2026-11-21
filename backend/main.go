@@ -34,16 +34,6 @@ func env(key, fallback string) string {
 }
 
 func main() {
-	bookingAuth, err := newBookingAuth(os.Getenv("PAYGUARD_DEMO_MERCHANT_A_TOKEN"), os.Getenv("PAYGUARD_DEMO_MERCHANT_B_TOKEN"),
-		bookingActorCredential{"demo-merchant-a", "analyst", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_A_TOKEN")},
-		bookingActorCredential{"demo-merchant-a", "analyst-2", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_A2_TOKEN")},
-		bookingActorCredential{"demo-merchant-a", "viewer", bookingRoleViewer, os.Getenv("PAYGUARD_DEMO_VIEWER_A_TOKEN")},
-		bookingActorCredential{"demo-merchant-b", "analyst", bookingRoleAnalyst, os.Getenv("PAYGUARD_DEMO_ANALYST_B_TOKEN")},
-		bookingActorCredential{"demo-merchant-b", "viewer", bookingRoleViewer, os.Getenv("PAYGUARD_DEMO_VIEWER_B_TOKEN")},
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
 	merchantJev, err := newMerchantJev(os.Getenv("PAYGUARD_AI_MODE"), os.Getenv("OPENROUTER_API_KEY"), os.Getenv("OPENROUTER_MODEL_PRIMARY"))
 	if err != nil {
 		log.Fatal(err)
@@ -62,6 +52,26 @@ func main() {
 	}
 	defer db.Close()
 	if err := initialize(ctx, db); err != nil {
+		log.Fatal(err)
+	}
+	production, err := newProductionAuth(ctx, db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	demoCredential := func(key string) string {
+		if production != nil {
+			return ""
+		}
+		return os.Getenv(key)
+	}
+	bookingAuth, err := newBookingAuth(demoCredential("PAYGUARD_DEMO_MERCHANT_A_TOKEN"), demoCredential("PAYGUARD_DEMO_MERCHANT_B_TOKEN"),
+		bookingActorCredential{"demo-merchant-a", "analyst", bookingRoleAnalyst, demoCredential("PAYGUARD_DEMO_ANALYST_A_TOKEN")},
+		bookingActorCredential{"demo-merchant-a", "analyst-2", bookingRoleAnalyst, demoCredential("PAYGUARD_DEMO_ANALYST_A2_TOKEN")},
+		bookingActorCredential{"demo-merchant-a", "viewer", bookingRoleViewer, demoCredential("PAYGUARD_DEMO_VIEWER_A_TOKEN")},
+		bookingActorCredential{"demo-merchant-b", "analyst", bookingRoleAnalyst, demoCredential("PAYGUARD_DEMO_ANALYST_B_TOKEN")},
+		bookingActorCredential{"demo-merchant-b", "viewer", bookingRoleViewer, demoCredential("PAYGUARD_DEMO_VIEWER_B_TOKEN")},
+	)
+	if err != nil {
 		log.Fatal(err)
 	}
 	options, err := redis.ParseURL(env("REDIS_URL", "redis://127.0.0.1:56379/0"))
@@ -93,28 +103,33 @@ func main() {
 	mux.HandleFunc("GET /api/v1/booking/events/{id}/lineage", bookingRisk.readLineage)
 	mux.HandleFunc("POST /api/v1/booking/shadow", bookingRisk.shadowBookings)
 	registerBookingOps(mux, a.repo, bookingAuth, a.secret)
-	adminToken := os.Getenv("PAYGUARD_DEMO_ADMIN_TOKEN")
+	adminToken := demoCredential("PAYGUARD_DEMO_ADMIN_TOKEN")
 	registerMerchantDemo(mux, a.repo, adminToken, merchantJev)
 	registerRuleComposer(mux, a, adminToken)
 	registerJevAIConfiguration(mux, a.repo, adminToken, merchantJev)
-	registerPlatformRuleGovernance(mux, a.repo, adminToken, os.Getenv("PAYGUARD_PLATFORM_RULE_CHECKER_TOKEN"))
+	registerPlatformRuleGovernance(mux, a.repo, adminToken, demoCredential("PAYGUARD_PLATFORM_RULE_CHECKER_TOKEN"))
 	registerBookingDossiers(mux, a.repo, bookingAuth)
 	registerBookingGovernance(mux, a.repo, bookingAuth)
 	go a.repo.runBookingDossiers(ctx)
 	mux.HandleFunc("POST /api/v1/enrichment", enrichment.lookup)
-	mux.HandleFunc("POST /api/v1/simulation/runs", a.create)
-	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", a.readRun)
-	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", a.readReport)
+	mux.HandleFunc("POST /api/v1/simulation/runs", productionRoles(a.create, productionRoleAdmin))
+	mux.HandleFunc("GET /api/v1/simulation/runs/{id}", productionRoles(a.readRun, productionRoleAdmin))
+	mux.HandleFunc("GET /api/v1/simulation/runs/{id}/report", productionRoles(a.readReport, productionRoleAdmin))
 	a.registerTenantSimulation(mux, bookingAuth)
 	mux.HandleFunc("GET /api/v1/simulation/checkout/config", checkout.config)
 	mux.HandleFunc("POST /api/v1/simulation/checkout/charges", checkout.create)
-	mux.HandleFunc("GET /api/v1/system/rules", a.readRules)
+	mux.HandleFunc("GET /api/v1/system/rules", productionRoles(a.readRules, productionRoleAdmin, productionRoleChecker))
 	mux.HandleFunc("POST /api/v1/system/rules", platformRuleWrite(a.repo, adminToken, a.createRule))
 	mux.HandleFunc("DELETE /api/v1/system/rules/{id}", platformRuleWrite(a.repo, adminToken, a.deleteRule))
 	mux.HandleFunc("PUT /api/v1/system/rules/{id}", platformRuleWrite(a.repo, adminToken, a.updateRule))
 	mux.HandleFunc("POST /api/v1/system/rules/preview", platformRuleWrite(a.repo, adminToken, a.previewRules))
+	var handler http.Handler = mux
+	if production != nil {
+		production.register(mux)
+		handler = production.protect(mux)
+	}
 	srv := &http.Server{
-		Addr: env("PAYGUARD_ADDR", "127.0.0.1:8081"), Handler: mux,
+		Addr: env("PAYGUARD_ADDR", "127.0.0.1:8081"), Handler: handler,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute,
 	}

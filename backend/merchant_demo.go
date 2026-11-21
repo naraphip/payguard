@@ -37,6 +37,7 @@ type mockMerchantService struct {
 type mockMerchantActor struct {
 	Admin      bool
 	MerchantID string
+	AccountID  string
 }
 
 type merchantAccessToken struct {
@@ -58,6 +59,7 @@ type mockMerchantInput struct {
 	Name                string                     `json:"name"`
 	Description         *string                    `json:"description,omitempty"`
 	CreationRequestHash []byte                     `json:"-"`
+	OmitDemoCredential  bool                       `json:"-"`
 	Setup               *merchantSetup             `json:"setup"`
 	PolicyIntegration   *merchantPolicyIntegration `json:"policyIntegration,omitempty"`
 }
@@ -149,6 +151,21 @@ func registerMerchantDemo(mux *http.ServeMux, repo repository, adminToken string
 }
 
 func (s mockMerchantService) authorize(w http.ResponseWriter, r *http.Request, adminOnly bool) (mockMerchantActor, bool) {
+	if account, ok := productionActorFromRequest(r); ok {
+		switch {
+		case account.Role == productionRoleAdmin:
+			return mockMerchantActor{Admin: true, AccountID: account.ID}, true
+		case account.Role != productionRoleMerchant || adminOnly:
+			problem(w, http.StatusForbidden, "This account does not have access to this operation.")
+		case account.MerchantID == "":
+			problem(w, http.StatusForbidden, "This account is not assigned to a merchant.")
+		case r.PathValue("merchantId") != "" && r.PathValue("merchantId") != account.MerchantID:
+			problem(w, http.StatusNotFound, "Merchant not found.")
+		default:
+			return mockMerchantActor{MerchantID: account.MerchantID, AccountID: account.ID}, true
+		}
+		return mockMerchantActor{}, false
+	}
 	headers := r.Header.Values("Authorization")
 	if len(headers) == 1 {
 		scheme, value, ok := strings.Cut(headers[0], " ")
@@ -293,6 +310,7 @@ func (s mockMerchantService) createMerchant(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	_, input.OmitDemoCredential = productionActorFromRequest(r)
 	if keys := r.Header.Values("Idempotency-Key"); len(keys) > 0 {
 		if len(keys) != 1 || !bookingKeyPattern.MatchString(keys[0]) {
 			problem(w, http.StatusBadRequest, "Expected one Idempotency-Key of 1 to 128 printable ASCII characters without spaces.")
@@ -303,13 +321,25 @@ func (s mockMerchantService) createMerchant(w http.ResponseWriter, r *http.Reque
 	}
 	merchant, token, err := s.repo.createMockMerchant(r.Context(), input)
 	if err != nil {
+		if input.OmitDemoCredential && errors.Is(err, errMerchantCreateReplay) {
+			problem(w, http.StatusConflict, "This creation request was already used. Find the existing merchant in the directory.")
+			return
+		}
 		demoWriteError(w, err)
 		return
 	}
-	respond(w, http.StatusCreated, map[string]any{"merchant": merchant, "token": token})
+	result := map[string]any{"merchant": merchant}
+	if !input.OmitDemoCredential {
+		result["token"] = token
+	}
+	respond(w, http.StatusCreated, result)
 }
 
 func (s mockMerchantService) createMerchantAccessToken(w http.ResponseWriter, r *http.Request) {
+	if _, ok := productionActorFromRequest(r); ok {
+		problem(w, http.StatusNotFound, "Merchant demo credential issuance is unavailable.")
+		return
+	}
 	if _, ok := s.authorize(w, r, true); !ok {
 		return
 	}
@@ -531,7 +561,7 @@ func (s mockMerchantService) decideTransaction(w http.ResponseWriter, r *http.Re
 		problem(w, http.StatusUnprocessableEntity, "Choose cleared or rejected.")
 		return
 	}
-	result, err := s.repo.decideMockTransaction(r.Context(), merchantID, transactionID, input.Decision, "administrator")
+	result, err := s.repo.decideMockTransaction(r.Context(), merchantID, transactionID, input.Decision, auditActor(r.Context(), "administrator"))
 	if err != nil {
 		demoWriteError(w, err)
 		return

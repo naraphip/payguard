@@ -7,6 +7,7 @@ import {
 } from "../../merchant-demo";
 import type { DemoDirectory } from "../../merchant-demo";
 import { useLocalAdminPreview } from "../../local-admin-preview";
+import { useProductionSession } from "../../production-auth";
 import { useRuleCredential } from "../rule-composer";
 import { outlineButton, primaryButton } from "../system-rules/contracts";
 import type { MerchantDirectoryPage } from "./management-contracts";
@@ -22,6 +23,7 @@ export function MerchantManagementAccess({ merchant, children }: {
   children: (token: string) => ReactNode;
 }) {
   const token = useRuleCredential(merchant ? "MERCHANT" : "PLATFORM");
+  const session = useProductionSession();
   const localAdmin = useLocalAdminPreview();
   const [preview, setPreview] = useState<"checking" | "enabled" | "disabled">("checking");
   const [credential, setCredential] = useState("");
@@ -32,7 +34,7 @@ export function MerchantManagementAccess({ merchant, children }: {
 
   useEffect(() => () => signIn.current?.abort(), []);
   useEffect(() => {
-    if (merchant || token) return;
+    if (session || merchant || token) return;
     const controller = new AbortController();
     setPreview("checking");
     setError("");
@@ -44,7 +46,7 @@ export function MerchantManagementAccess({ merchant, children }: {
         if (!(error instanceof LocalMerchantPreviewDisabled)) setError(managementError(error));
       });
     return () => controller.abort();
-  }, [merchant, token, previewRevision]);
+  }, [session, merchant, token, previewRevision]);
 
   async function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -81,6 +83,7 @@ export function MerchantManagementAccess({ merchant, children }: {
     }
   }
 
+  if (session) return children("");
   if (token || (!merchant && preview === "enabled")) return <>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
       <p>{token ? (merchant ? "Merchant access" : "Administrator access") : "Local sandbox preview"}</p>

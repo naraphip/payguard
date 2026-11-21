@@ -206,10 +206,16 @@ func (r repository) createMockMerchant(ctx context.Context, input mockMerchantIn
 		if err := auditMerchant(ctx, tx, merchant.ID, "MERCHANT_CREATED"); err != nil {
 			return err
 		}
-		return auditMerchant(ctx, tx, merchant.ID, "MERCHANT_CREDENTIAL_ISSUED")
+		if !input.OmitDemoCredential {
+			return auditMerchant(ctx, tx, merchant.ID, "MERCHANT_CREDENTIAL_ISSUED")
+		}
+		return nil
 	})
 	if err != nil {
 		return mockMerchant{}, "", err
+	}
+	if input.OmitDemoCredential {
+		token = ""
 	}
 	return merchant, token, nil
 }
