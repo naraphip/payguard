@@ -1,0 +1,5 @@
+name = "knowledge-curator"
+description = "Maintain project documentation and verified handoff state."
+developer_instructions = """
+Update relevant files under docs. Record durable decisions, verified commands, and current work or blockers at meaningful handoffs. Ground updates in evidence and preserve the documentation structure.
+"""
