@@ -92,6 +92,8 @@ For the host-run Next preview on loopback, set the Next server’s `PAYGUARD_LOC
 
 For the standard token flow, leave the Next preview variable unset. Open `/settings/merchants` and enter the administrator credential as the **Demo access token**. To check merchant isolation, open the Merchant workspace and use the credential issued to that merchant.
 
+If a valid merchant form returns **Expected one valid JSON request object.** after pulling changes, the host-run Next preview may be sending newer fields to an older backend image. From the current checkout, run `docker compose up -d --build --force-recreate --no-deps --wait backend` with the same project name, Compose files, and environment file options used to start the preview's backend. Reload **Merchants**, reopen the form, and retry the save. Verify that the saved details persist after reload and the merchant's **Transactions** tab opens.
+
 ### Check the default mock flow
 
 1. Select **Create merchant** and enter a merchant name. Choose **OTA** or **E-commerce**, confirm the **Booking** stage and required booking timestamp, and select booking amount if the merchant provides it. Save the merchant and copy its scoped access token from the one-time confirmation if you plan to check merchant access. The automatic preview opens the new merchant workspace directly. An older merchant without setup details appears as **Setup incomplete** until the details are saved.
