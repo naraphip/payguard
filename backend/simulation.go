@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -21,30 +22,36 @@ const (
 	merchantID       = "demo-merchant"
 )
 
+var contactDomainPattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+test$`)
+
 type config struct {
-	Seed           uint64 `json:"seed"`
-	Product        string `json:"product"`
-	Scenario       string `json:"scenario"`
-	Accounts       int    `json:"accounts"`
-	Rate           int    `json:"rate"`
-	Quantity       int    `json:"quantity"`
-	Date           string `json:"date"`
-	Delivery       string `json:"delivery"`
-	RotateIP       bool   `json:"rotateIp"`
-	SharedIP       bool   `json:"sharedIp"`
-	SharedDevice   bool   `json:"sharedDevice"`
-	SharedToken    bool   `json:"sharedToken"`
-	NewAccount     bool   `json:"newAccount"`
-	Retry          bool   `json:"retry"`
-	MissingToken   bool   `json:"missingToken"`
-	JevTimeout     bool   `json:"jevTimeout"`
-	MerchantPolicy bool   `json:"merchantPolicy"`
+	Seed               uint64 `json:"seed"`
+	Product            string `json:"product"`
+	Scenario           string `json:"scenario"`
+	Accounts           int    `json:"accounts"`
+	Rate               int    `json:"rate"`
+	Quantity           int    `json:"quantity"`
+	Date               string `json:"date"`
+	Delivery           string `json:"delivery"`
+	RotateIP           bool   `json:"rotateIp"`
+	SharedIP           bool   `json:"sharedIp"`
+	SharedDevice       bool   `json:"sharedDevice"`
+	SharedToken        bool   `json:"sharedToken"`
+	NewAccount         bool   `json:"newAccount"`
+	Retry              bool   `json:"retry"`
+	MissingToken       bool   `json:"missingToken"`
+	JevTimeout         bool   `json:"jevTimeout"`
+	MerchantPolicy     bool   `json:"merchantPolicy"`
+	ContactEmailDomain string `json:"contactEmailDomain,omitempty"`
 }
 
 func (c config) validate() error {
 	if c.Seed > 9007199254740991 || c.Accounts < 1 || c.Accounts > 100 ||
 		c.Rate < 1 || c.Rate > 60 || c.Quantity < 1 || c.Quantity > 20 {
 		return errors.New("seed, accounts, event rate or quantity is outside its allowed range")
+	}
+	if domain := c.ContactEmailDomain; domain != "" && (len(domain) > 253 || !contactDomainPattern.MatchString(domain)) {
+		return errors.New("Contact email must use a valid .test domain.")
 	}
 	switch c.Scenario {
 	case "normal", "fraud", "mixed":
@@ -134,6 +141,9 @@ func generate(c config, tenant string, secret []byte) ([]event, []label) {
 		domain := "traveler.test"
 		if i%4 == 0 {
 			domain = "restricted.test"
+		}
+		if i == 0 && c.ContactEmailDomain != "" {
+			domain = c.ContactEmailDomain
 		}
 		age := 110 + random.IntN(250)
 		if c.NewAccount {
@@ -230,27 +240,18 @@ func assess(e event, features []feature, policy, timeout bool) decision {
 		Event: e, Action: "ALLOW", Source: "PLATFORM", Platform: "ALLOW", Merchant: "NOT_APPLICABLE",
 		JevStatus: "MOCK", JevAnswer: "LOW", RuleHits: []string{}, Missing: []string{}, Features: features,
 	}
-	var device, token int64
-	for _, f := range features {
-		switch f.Kind {
-		case "device":
-			device = f.Orders
-		case "token":
-			token = f.Orders
-		}
-	}
-	if paymentStage(e.Stage) && token == 0 {
+	if paymentTokenMissing(e, features) {
 		d.Missing = append(d.Missing, "payment_token")
 	}
-	if token >= 2 && device >= 2 {
-		d.RuleHits = append(d.RuleHits, "SHARED_DEVICE_AND_TOKEN")
-		d.Platform, d.JevAnswer = "REVIEW", "HIGH"
-	} else if (token >= 2 || device >= 2) && e.AgeDays <= 7 {
-		d.RuleHits = append(d.RuleHits, "NEW_ACCOUNT_SHARED_INSTRUMENT_OR_DEVICE")
-		d.Platform, d.JevAnswer = "CHALLENGE", "MEDIUM"
-	} else if len(d.Missing) > 0 {
-		d.RuleHits = append(d.RuleHits, "PAYMENT_TOKEN_MISSING")
-		d.Platform, d.JevAnswer = "REVIEW", "INSUFFICIENT_EVIDENCE"
+	for _, rule := range builtinRules {
+		if !rule.includesStage(e.Stage) {
+			continue
+		}
+		if matched, _ := rule.matchSignals(e, features); matched {
+			d.RuleHits = append(d.RuleHits, rule.Code)
+			d.Platform, d.JevAnswer = rule.Action, rule.jevAnswer
+			break
+		}
 	}
 	d.Action = d.Platform
 	if timeout {

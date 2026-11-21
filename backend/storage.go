@@ -211,7 +211,7 @@ func initialize(ctx context.Context, db *pgxpool.Pool) error {
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(746690167)"); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, schema); err != nil {
+	if _, err := tx.Exec(ctx, schema+rulesSchema); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

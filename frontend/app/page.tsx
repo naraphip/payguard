@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Activity, ArrowRight, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, TabletSmartphone } from "lucide-react";
+import { Activity, ArrowRight, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, SlidersHorizontal, TabletSmartphone } from "lucide-react";
 import { Network } from "./network";
+import { PayGuardLogo } from "./payguard-logo";
 import type { Config, Decision, Product, Report, Run, Scenario } from "./types";
 
 const defaults: Config = {
@@ -40,6 +42,9 @@ const button = "inline-flex items-center justify-center gap-2 rounded-lg bg-acce
 const outline = "inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-paper disabled:opacity-65";
 const endpoint = "/api/v1/simulation/runs";
 const display = (value: string) => value.replaceAll("_", " ");
+const contactDomainPattern = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[Tt][Ee][Ss][Tt]$/;
+const emptyContact = { name: "", email: "", phone: "" };
+type Contact = typeof emptyContact;
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -74,25 +79,39 @@ function Summary({ run }: { run: Run | null }) {
   </div>;
 }
 
-function Evidence({ decision, run }: { decision: Decision; run: Run }) {
+function Evidence({ decision, run, contact }: { decision: Decision; run: Run; contact?: Contact }) {
   const d = decision;
   return (
     <section className="border-t border-line p-4 sm:p-5" aria-labelledby="evidence">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h3 id="evidence" className="font-semibold">Decision evidence</h3>
-        <span className="font-mono text-xs text-muted">{d.event.id}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-xs text-muted">{d.event.id}</span>
+          <Badge action={d.action} />
+        </div>
       </div>
+      {contact && <div className="mb-4 rounded-lg border border-line p-3">
+        <h4 className="text-sm font-semibold">Checkout contact</h4>
+        <dl className="mt-2 grid gap-3 text-xs sm:grid-cols-3">
+          {([["Name", contact.name], ["Email", contact.email], ["Phone", contact.phone]] as const)
+            .filter(([, value]) => value)
+            .map(([label, value]) => <div className="min-w-0" key={label}>
+              <dt className="text-muted">{label}</dt><dd className="mt-1 wrap-anywhere font-semibold">{value}</dd>
+            </div>)}
+        </dl>
+      </div>}
       <dl className="mb-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
         {[
           ["Platform action", d.platformDecision],
           ["Merchant policy", d.merchantPolicyDecision],
+          ["Event email domain", d.event.domain],
           ["Final action source", d.actionSource],
           ["Jev status", d.jevStatus],
           ["Jev risk level", d.jevAnswer],
           ["Missing signals", d.missing.join(", ") || "None"],
         ].map(([label, value]) => (
           <div className="rounded-lg bg-paper p-3" key={label}>
-            <dt className="text-muted">{label}</dt><dd className="mt-1 break-words font-semibold">{value}</dd>
+            <dt className="text-muted">{label}</dt><dd className="mt-1 wrap-anywhere font-semibold">{value}</dd>
           </div>
         ))}
       </dl>
@@ -125,7 +144,10 @@ function Metrics({ report }: { report: Report }) {
 
 export default function Home() {
   const [config, setConfig] = useState(defaults);
+  const [contact, setContact] = useState(emptyContact);
+  const [contactEmailError, setContactEmailError] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
+  const [runContact, setRunContact] = useState<{ orderId: string; contact: Contact } | null>(null);
   const [selectedID, select] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
@@ -152,9 +174,20 @@ export default function Home() {
 
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
     setError("");
-    const current = { ...config, merchantPolicy: config.product === "flight_ticket" && config.merchantPolicy };
+    const submittedContact = { name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone.trim() };
+    const emailDomain = submittedContact.email.slice(submittedContact.email.lastIndexOf("@") + 1);
+    if (submittedContact.email && (emailDomain.length > 253 || !contactDomainPattern.test(emailDomain))) {
+      setContactEmailError(true);
+      return;
+    }
+    setContactEmailError(false);
+    setBusy(true);
+    const current: Config = {
+      ...config,
+      merchantPolicy: config.product === "flight_ticket" && config.merchantPolicy,
+      contactEmailDomain: emailDomain.toLowerCase() || undefined,
+    };
     if (!lastRequest.current || JSON.stringify(lastRequest.current.config) !== JSON.stringify(current)) {
       lastRequest.current = { id: crypto.randomUUID(), config: current };
     }
@@ -163,7 +196,15 @@ export default function Home() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(lastRequest.current),
       });
       setRun(result);
-      select((result.decisions.find(d => d.action === "REVIEW") ?? result.decisions[1] ?? result.decisions[0])?.event.id ?? "");
+      const firstOrderID = result.decisions[0]?.event.orderId;
+      const savedContact = firstOrderID && Object.values(submittedContact).some(Boolean)
+        ? { orderId: firstOrderID, contact: submittedContact }
+        : null;
+      setRunContact(savedContact);
+      const contactPayment = savedContact && result.decisions.find(({ event }) =>
+        event.orderId === savedContact.orderId && (event.stage === "PRE_PAYMENT" || event.stage === "PAYMENT"));
+      const preferred = contactPayment || result.decisions.find(d => d.action === "REVIEW") || result.decisions[1] || result.decisions[0];
+      select(preferred?.event.id ?? "");
       setReport(null);
       setReportError("");
     } catch (failure) {
@@ -191,11 +232,15 @@ export default function Home() {
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex min-h-16 max-w-[1440px] items-center justify-between px-4 sm:px-8">
           <div className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center rounded-lg bg-ink text-white"><ShieldCheck size={21} aria-hidden /></span>
-            <span className="font-semibold tracking-tight">PayGuard</span>
+            <PayGuardLogo />
             <span className="hidden border-l border-line pl-3 text-sm text-muted sm:inline">Simulation Lab</span>
           </div>
-          <span className="flex items-center gap-2 rounded-full border border-line bg-paper px-3 py-1 text-xs font-semibold text-muted"><span className="size-2 rounded-full bg-teal-600" /> Sandbox</span>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <Link href="/settings/system-rules" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-paper hover:text-ink">
+              <SlidersHorizontal size={14} aria-hidden /><span>Platform Rules</span>
+            </Link>
+            <span className="hidden items-center gap-2 rounded-full border border-line bg-paper px-3 py-1 text-xs font-semibold text-muted min-[400px]:flex"><span className="size-2 rounded-full bg-teal-600" /> Sandbox</span>
+          </div>
         </div>
       </header>
 
@@ -239,6 +284,21 @@ export default function Home() {
                 <Field label={ota ? "Party / rooms" : "Cart quantity"}><input className="control" type="number" min={1} max={20} required value={config.quantity || ""} onChange={e => update("quantity", e.target.valueAsNumber)} /></Field>
               </div>
 
+              <section className="space-y-3 border-t border-line pt-4" aria-labelledby="contact">
+                <div>
+                  <h3 id="contact" className="text-sm font-semibold">Contact <span className="font-normal text-muted">(optional)</span></h3>
+                  <p id="contact-hint" className="mt-1 text-xs text-muted">Use test contact details for the first checkout. Only the .test email domain is sent for evaluation.</p>
+                </div>
+                <Field label="Name"><input className="control" type="text" autoComplete="off" maxLength={120} value={contact.name} onChange={e => setContact(current => ({ ...current, name: e.target.value }))} /></Field>
+                <Field label="Email"><input className="control" type="email" autoComplete="off" maxLength={254} placeholder="buyer@example.test" aria-invalid={contactEmailError} aria-describedby={contactEmailError ? "contact-hint contact-email-error" : "contact-hint"} value={contact.email} onChange={e => {
+                  setContact(current => ({ ...current, email: e.target.value }));
+                  setContactEmailError(false);
+                }} /></Field>
+                {contactEmailError && <p id="contact-email-error" role="alert" className="text-xs text-red-800">Use a valid .test email address, such as buyer@example.test.</p>}
+                <Field label="Phone"><input className="control" type="tel" autoComplete="off" maxLength={40} value={contact.phone} onChange={e => setContact(current => ({ ...current, phone: e.target.value }))} /></Field>
+                {config.product === "flight_ticket" && <label className="flex items-center gap-2 text-xs"><input type="checkbox" className="size-4 accent-accent" checked={config.merchantPolicy} onChange={e => update("merchantPolicy", e.target.checked)} />Block flights for restricted.test</label>}
+              </section>
+
               <div className="space-y-3 border-t border-line pt-4">
                 <Field label="Scenario"><select className="control" value={config.scenario} onChange={e => update("scenario", e.target.value as Scenario)}>
                   <option value="mixed">Mixed traffic</option><option value="normal">Normal traffic</option><option value="fraud">Fraud ring</option>
@@ -254,7 +314,6 @@ export default function Home() {
                 <summary className="cursor-pointer text-xs font-semibold">Traffic signals and edge cases</summary>
                 <div className="mt-3 grid gap-2.5">
                   {controls.map(([key, label]) => <label className="flex items-center gap-2 text-xs" key={key}><input type="checkbox" className="size-4 accent-accent" checked={config[key]} onChange={e => update(key, e.target.checked)} />{label}</label>)}
-                  {config.product === "flight_ticket" && <label className="flex items-center gap-2 text-xs"><input type="checkbox" className="size-4 accent-accent" checked={config.merchantPolicy} onChange={e => update("merchantPolicy", e.target.checked)} />Block flights for restricted.test</label>}
                 </div>
               </details>
 
@@ -285,7 +344,7 @@ export default function Home() {
                     ))}</tbody>
                   </table>
                 </div>
-                {selected && <Evidence decision={selected} run={run} />}
+                {selected && <Evidence decision={selected} run={run} contact={runContact?.orderId === selected.event.orderId ? runContact.contact : undefined} />}
                 <p className="border-t border-line px-4 py-3 font-mono text-xs text-muted sm:px-5">{run.generatorVersion} / {run.ruleVersion} / {run.jevVersion}</p>
               </>}
             </section>
