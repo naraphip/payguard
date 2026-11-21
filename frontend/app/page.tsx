@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Activity, ArrowRight, CreditCard, FlaskConical, GitFork, Hotel, ListChecks, Package, Plane, Play, ShieldCheck, ShoppingBag, TabletSmartphone } from "lucide-react";
+import { DemoScenarioSimulation } from "./demo-scenario-runner";
 import { Network } from "./network";
 import type { Config, Decision, SimulationProduct, Report, Run, Scenario } from "./types";
 
@@ -238,6 +239,7 @@ export default function Home() {
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Simulation Lab</h1>
           <p className="mt-2 text-sm text-muted">Simulate synthetic checkout activity and inspect PayGuard risk decisions.</p>
         </div>
+        <DemoScenarioSimulation />
         <Summary run={run} />
 
         <div className="grid items-start gap-5 lg:grid-cols-[350px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]">

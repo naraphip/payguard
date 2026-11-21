@@ -81,6 +81,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/booking/events/{id}/lineage", bookingRisk.readLineage)
 	mux.HandleFunc("POST /api/v1/booking/shadow", bookingRisk.shadowBookings)
 	registerBookingOps(mux, a.repo, bookingAuth, a.secret)
+	registerMerchantDemo(mux, a.repo, os.Getenv("PAYGUARD_DEMO_ADMIN_TOKEN"))
 	registerBookingDossiers(mux, a.repo, bookingAuth)
 	registerBookingGovernance(mux, a.repo, bookingAuth)
 	go a.repo.runBookingDossiers(ctx)

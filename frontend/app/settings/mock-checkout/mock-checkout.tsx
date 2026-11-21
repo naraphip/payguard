@@ -3,6 +3,9 @@
 import { Hotel, Package, Plane, ShoppingBag, TabletSmartphone } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import {
+  DemoScenarioPicker, DemoScenarioResult, invalidDemoAmount, readDemoAmount, useDemoScenario,
+} from "../../demo-scenario-runner";
 import type { Product } from "../../types";
 import { AssessmentResult } from "../booking-assessment/assessment-result";
 import { bookingRequest, submitBookingAssessment } from "../booking-assessment/booking-api";
@@ -24,13 +27,6 @@ const secondaryButton = "rounded-lg border border-slate-300 bg-white px-4 py-2.5
 type CheckoutAttempt = BookingAttempt & { event: BookingAttempt["event"] & { product: Product } };
 type CheckoutResult = { assessment: Assessment; booking: BookingReceipt; product: Product };
 
-function readAmount(value: string) {
-  const entered = value.trim();
-  if (entered === "") return undefined;
-  const amount = Number(entered);
-  return /^\d+$/.test(entered) && Number.isSafeInteger(amount) ? amount : NaN;
-}
-
 function displayAmount(amountMinor: number | undefined) {
   if (amountMinor === undefined) return "Omitted";
   if (Number.isNaN(amountMinor)) return "Invalid amount";
@@ -42,6 +38,7 @@ function displayAmount(amountMinor: number | undefined) {
 }
 
 export function MockCheckout() {
+  const scenarioFlow = useDemoScenario();
   const [product, setProduct] = useState<Product>("flight_ticket");
   const [amount, setAmount] = useState(String(products.flight_ticket.price));
   const [sdkStatus, setSDKStatus] = useState<SDKStatus>("observed");
@@ -56,13 +53,14 @@ export function MockCheckout() {
   const resultRef = useRef<HTMLDivElement>(null);
 
   const item = products[product];
-  const amountMinor = readAmount(amount);
+  const amountMinor = readDemoAmount(amount);
   const bearer = token.trim();
-  const checkoutLocked = busy !== null || pending !== null;
+  const merchantCheckout = Boolean(scenarioFlow.directory || scenarioFlow.connecting || scenarioFlow.requestedSelection);
+  const checkoutLocked = merchantCheckout ? scenarioFlow.pending !== null : busy !== null || pending !== null;
 
   useEffect(() => {
-    if (result) resultRef.current?.focus();
-  }, [result]);
+    if (result || scenarioFlow.result) resultRef.current?.focus();
+  }, [result, scenarioFlow.result]);
 
   function selectProduct(key: Product) {
     setProduct(key);
@@ -102,11 +100,15 @@ export function MockCheckout() {
 
   async function checkout(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!bearer || busy) return;
-    if (!pending && Number.isNaN(amountMinor)) {
-      setAmountError("Enter a whole number from 0 to 9,007,199,254,740,991 or leave it empty.");
+    if (Number.isNaN(amountMinor)) {
+      setAmountError(invalidDemoAmount);
       return;
     }
+    if (merchantCheckout) {
+      await scenarioFlow.submit({ source: "checkout", amountMinor, product, simulateTimeout: mode === "timeout" });
+      return;
+    }
+    if (!bearer || busy) return;
     const attempt: CheckoutAttempt = pending ?? {
       event: {
         eventId: crypto.randomUUID(),
@@ -166,12 +168,12 @@ export function MockCheckout() {
               {amountError || "Enter cents. Leave blank to omit the amount."}
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="block text-sm font-semibold">SDK signal
+              {!merchantCheckout && <label className="block text-sm font-semibold">SDK signal
                 <select className="control mt-2" value={sdkStatus} onChange={event => setSDKStatus(event.currentTarget.value === "unavailable" ? "unavailable" : "observed")}>
                   <option value="observed">Observed</option>
                   <option value="unavailable">Unavailable</option>
                 </select>
-              </label>
+              </label>}
               <label className="block text-sm font-semibold">Jev response
                 <select className="control mt-2" value={mode} onChange={event => setMode(event.currentTarget.value === "timeout" ? "timeout" : "mock")}>
                   <option value="mock">Mock response</option>
@@ -196,6 +198,11 @@ export function MockCheckout() {
           <dt className="text-slate-600">Booking amount</dt>
           <dd className="break-all font-semibold">{displayAmount(amountMinor)}</dd>
         </dl>
+        <fieldset className="mt-4 border-b border-slate-200 pb-4" disabled={busy !== null}>
+          <legend className="mb-2 text-sm font-semibold">Merchant scenario</legend>
+          <DemoScenarioPicker flow={scenarioFlow} allowLegacy />
+        </fieldset>
+        {!merchantCheckout && <>
         <label htmlFor="checkout-demo-token" className="mt-4 block text-sm font-semibold">Demo merchant token</label>
         <input id="checkout-demo-token" className="control mt-2" autoComplete="off" type="password" value={token}
           disabled={busy !== null} aria-describedby="checkout-token-help" onChange={event => changeToken(event.currentTarget.value)} />
@@ -204,13 +211,17 @@ export function MockCheckout() {
           {busy === "approval" ? "Approving…" : "Approve demo profile"}
         </button>
         {profileVersion && <p role="status" className="mt-2 text-xs font-medium text-emerald-800">Demo profile approved.</p>}
+        </>}
         <div className="mt-4 space-y-2 border-t border-slate-200 pt-4">
-          {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs leading-relaxed text-red-800">{error}</p>}
-          <button type="submit" className={`${primaryButton} w-full`} disabled={!bearer || busy !== null}>
+          {(merchantCheckout ? scenarioFlow.submissionError : error) && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs leading-relaxed text-red-800">{merchantCheckout ? scenarioFlow.submissionError : error}</p>}
+          <button type="submit" className={`${primaryButton} w-full`} disabled={merchantCheckout
+            ? !scenarioFlow.scenario || scenarioFlow.submitting
+            : !bearer || busy !== null}>
             <ShoppingBag className="size-4" aria-hidden="true" />
-            {busy === "checkout" ? "Assessing…" : pending ? "Retry checkout" : "Submit mock checkout"}
+            {busy === "checkout" || scenarioFlow.submitting ? "Assessing…" : (merchantCheckout ? scenarioFlow.pending : pending) ? "Retry checkout" : "Submit mock checkout"}
           </button>
-          {pending && busy === null && <button type="button" className={`${secondaryButton} w-full`} onClick={() => {
+          {merchantCheckout && scenarioFlow.pending && !scenarioFlow.submitting && <button type="button" className={`${secondaryButton} w-full`} onClick={scenarioFlow.clearAttempt}>Start a new checkout</button>}
+          {!merchantCheckout && pending && busy === null && <button type="button" className={`${secondaryButton} w-full`} onClick={() => {
             setPending(null);
             setError("");
           }}>Start a new checkout</button>}
@@ -218,7 +229,10 @@ export function MockCheckout() {
         <p className="mt-3 text-xs text-slate-600">Synthetic order. No payment will be collected.</p>
       </section>
     </form>
-    {result && <div ref={resultRef} tabIndex={-1} className="scroll-mt-4 focus:outline-none" aria-label="Checkout assessment">
+    {scenarioFlow.result && scenarioFlow.merchant && <div ref={resultRef} tabIndex={-1} className="scroll-mt-4 focus:outline-none" aria-label="Checkout assessment">
+      <DemoScenarioResult transaction={scenarioFlow.result} merchantName={scenarioFlow.merchant.name} />
+    </div>}
+    {!merchantCheckout && result && <div ref={resultRef} tabIndex={-1} className="scroll-mt-4 focus:outline-none" aria-label="Checkout assessment">
       <AssessmentResult assessment={result.assessment} booking={result.booking} context={`${products[result.product].label} · ${products[result.product].name}`} />
     </div>}
   </div>;

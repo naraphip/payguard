@@ -1,5 +1,18 @@
 # Current work
 
+## Merchant scenarios and mocked Jev
+
+The local preview implements a runnable slice of the [merchant scenarios requirements](requirements/merchant-scenarios.md). Under **Merchants**, a demo administrator can create and rename merchants and save multiple named scenarios. Each scenario previews and versions one booking amount threshold rule. Created merchants receive a scoped access token.
+
+Mock Checkout and the **Merchant scenario simulation** panel in Simulation Lab select a merchant and scenario, run the mock Jev decision, and save a transaction with its source, reasons, and versions. The merchant workspace lists transactions and records a review disposition separately from the saved assessment. [Evaluation steps](simulation-runbook.md#merchant-scenarios-and-mock-jev)
+
+The [local preview](http://127.0.0.1:3001/settings/merchants) uses a structured threshold form and direct demo review. AI-assisted draft generation, a fully configurable rule set, the full HOLD lifecycle in this merchant workspace, and live Jev integration remain open.
+
+- Live API checks verified the administrator directory and merchant-scoped access. In both Mock Checkout and Simulation Lab, an amount of 50,000 minor units returned **Low risk** at a threshold of 100,000 and **Review** at a threshold of 50,000.
+- Live API checks verified missing amount versus zero, timeout and review resolution, replay pinned to an earlier revision, and cross-merchant denial.
+- Go tests, race tests, and vet passed. The isolated frontend production build, TypeScript checks, and existing booking smoke checks also passed.
+- Independent browser checks verified merchant creation, one-time token display, and saving two scenario drafts. The browser showed a **Low risk** checkout, a **Review** simulation with a matching rule, and an **Unresolved** simulation after a mock timeout. The merchant’s ledger contained exactly three transactions with the expected sources and outcomes. A direct link opened the saved transaction, and sign-in with the issued token showed only the merchant’s own workspace with merchant creation and editing unavailable.
+
 ## PG-11 through PG-19 local evaluation
 
 Local evaluation uses synthetic bookings and outcomes. The [evaluation runbook](simulation-runbook.md#local-evaluation) walks through the operations queue, fixed-window shadow replay, change approvals, and linked-entity simulation.

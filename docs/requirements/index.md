@@ -5,6 +5,7 @@ Add a note for each feature with its status, user need, scope, constraints, and 
 - [Simulation Lab](simulation-lab.md)
 - [System Rules dashboard](system-rules.md)
 - [Merchant setup](merchant-setup.md)
+- [Merchant scenarios and rules](merchant-scenarios.md)
 - [Booking assessment](booking-assessment.md)
 - [Mock checkout, baseline and booking lineage](checkout-and-lineage.md)
 - [Jev Rules](jev-rules.md)

@@ -58,6 +58,19 @@ For a repeatable local check, configure both distinct demo merchant tokens in yo
 python3 scripts/booking-smoke.py --base http://127.0.0.1:8081 --threshold 3
 ```
 
+## Merchant scenarios and mock Jev
+
+Set `PAYGUARD_DEMO_ADMIN_TOKEN` to a local demo value before starting or rebuilding Compose. Open `/settings/merchants` and enter that value as the **Demo access token**. The page supports administrator access across merchants and merchant access scoped to one record.
+
+1. Select **Create merchant**, enter a merchant name, and save it. Copy the merchant access token when it appears. The directory shows it once, at creation.
+2. Select **Add scenario**. Create **Everyday bookings** with a review threshold of **100000** minor units, select **Generate rule preview**, and select **Save scenario and rules**. Repeat for **High-value bookings** with a threshold of **50000**. Editing a scenario and saving a new threshold creates a new revision.
+3. In **Mock Checkout**, select **Connect merchant directory** using the administrator token or the new merchant token. Select the merchant and **Everyday bookings**, set the booking amount to **50000** minor units, and submit. Expect **Low risk**. Repeat with **High-value bookings** and expect **Review**. Confirm that the result identifies the scenario, rule revision, and checkout source.
+4. In **Simulation Lab**, use **Merchant scenario simulation** to connect and repeat the same selections and amount. Confirm the same outcomes and versions, with Simulation Lab recorded as the source. The existing batch simulation remains available on the same page.
+5. Run either tool with a simulated Jev timeout for **High-value bookings**. Expect **Unresolved** and **Needs decision**. Open **Merchants** with the merchant token, select **Needs decision**, and open the transaction. Clear or reject it to verify that the manual disposition appears separately from the saved mock decision.
+6. Create a second merchant and connect with its token to verify that it cannot view the first merchant’s scenarios or transactions. Reopen a saved test after changing its scenario’s rule to verify that the previous result still shows the original revision.
+
+This path uses synthetic transactions, one structured threshold rule per scenario, and mocked Jev responses. The local review records a disposition without taking a payment action.
+
 ## Local evaluation
 
 Start the stack with distinct demo merchant and operations bearer tokens. Configure `PAYGUARD_DEMO_ANALYST_A_TOKEN`, `PAYGUARD_DEMO_ANALYST_A2_TOKEN`, `PAYGUARD_DEMO_VIEWER_A_TOKEN`, `PAYGUARD_DEMO_ANALYST_B_TOKEN`, and `PAYGUARD_DEMO_VIEWER_B_TOKEN` as needed. Analyst and viewer credentials identify a fixed demo actor within their own merchant. The browser keeps credentials in memory for the current page. Use the [booking smoke script](#mock-checkout-and-booking-lineage) to create repeatable labeled synthetic cases for the shadow report.
