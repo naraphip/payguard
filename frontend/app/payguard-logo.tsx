@@ -1,15 +1,15 @@
 import Image from "next/image";
 
-export function PayGuardLogo() {
+export function PayGuardLogo({ compact = false }: { compact?: boolean }) {
   return (
     <Image
-      src="/brand/payguard-logo-primary.svg"
-      alt="PayGuard"
-      width={840}
-      height={215}
+      src={compact ? "/brand/payguard-symbol.svg?v=4" : "/brand/payguard-logo-horizontal.svg?v=4"}
+      alt=""
+      width={compact ? 280 : 954}
+      height={compact ? 265 : 266}
       priority
       unoptimized
-      className="h-auto w-[190px] shrink-0"
+      className={compact ? "h-auto w-9 shrink-0" : "h-auto w-[190px] shrink-0"}
     />
   );
 }
