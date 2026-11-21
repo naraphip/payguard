@@ -15,6 +15,18 @@ Created the [PayGuard GitHub Activity database](https://app.notion.com/p/41f4da4
 - Independent fixture and workflow YAML checks passed. A live local sync changed 18 activity records in Notion. The GitHub Actions repository secret and variable are configured.
 - The [manual GitHub Actions run](https://github.com/pwatakul/payguard/actions/runs/44868685163) succeeded. The Notion health row showed Last Success at 11:59 Bangkok time on 21 November 2026. Verification of two scheduled runs is ongoing.
 
+## Merchant AI Rule email conditions and editing
+
+Gother's rule is active as version 4 in the local preview. It blocks Flight ticket and Hotel room bookings at `BOOKING` when the email uses a disposable domain or the part before `@` matches the random-looking username check. Version 2 contained only a Hotel room condition. Version 3 disabled it during the fix. Version 4 uses the same rule ID and retains the earlier versions and decisions in history. [Email rule contract](requirements/ai-rule-management.md#disposable-email-domains-and-random-looking-email-usernames)
+
+**Edit** restores the revision's safe authored description. For versions without a saved description, it shows a summary of the actual saved conditions. Temporary exact-address rules request the email and duration again. [Rule lifecycle](requirements/ai-rule-management.md#rule-lifecycle-and-isolation)
+
+- In the isolated backend, Flight and Hotel each blocked a known disposable domain and a random-looking Gmail username through both merchant transaction sources. An ordinary Gmail username, consecutive digits, punctuation, absent email, and an out-of-scope product did not trigger this rule. Missing evidence remained distinguishable from an observed false. The saved decision survived identical replay. A changed classification returned HTTP 409 and invalid shape metadata returned HTTP 422.
+- The isolated composer produced both OR conditions from English and Thai prompts, returned clarification for incomplete input, and rejected an email-risk proposal containing only a product condition. Rule reads returned the safe saved instruction and excluded exact-address source text.
+- In isolated Chrome, a random-looking email username triggered Rejected for a flight in Mock Checkout. A disposable email domain triggered Rejected for a hotel in Simulation Lab. Chrome also confirmed the count-only shape request, the saved source instruction in Edit, the legacy summary, and exact-address re-entry.
+- The full Go suite passed against dedicated PostgreSQL. `npm run build`, `npm run typecheck`, and `node --test tests/*.test.mjs` passed. The eight Node tests cover the count-only shape and exact-address regressions.
+- The local backend built from `14ae75a` reported ready on port 8082. An API read verified Gother's active version 4, the two OR conditions, and the saved description used in Edit. The rollout check created zero Gother test transactions. [Gother AI Rule on the local preview](http://127.0.0.1:3001/settings/merchants/f8a5a1b5-c47c-46a2-b870-ed7a6fa50510?tab=rules)
+
 ## Merchant transaction Risk Score and email changes
 
 Merchant-selected Mock Checkout, Simulation Lab, and **Transactions** show the saved advisory score and its contributing factors. The initial scoring commit `56ee4e5` adds `merchant-risk-v1`. `merchant-risk-v2` adds an optional merchant-scoped Customer ID and 15 points for a confirmed address change after the previous disposable-email booking for that customer. The recorded rule and Jev actions drive the final decision. [Score formula and API contract](requirements/decision-engine.md#merchant-transaction-risk-score) · [Three-transaction walkthrough](simulation-runbook.md#test-the-risk-score-and-email-changes)
