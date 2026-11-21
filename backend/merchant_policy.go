@@ -17,12 +17,14 @@ import (
 
 const (
 	policyDomain                   = "customer.email_domain"
+	policyMailbox                  = "customer.mailbox_ref"
 	policyAmount                   = "order.amount_minor"
 	policyProduct                  = "product.type"
 	merchantScenarioProfileVersion = "merchant-scenario-amount-v1"
 )
 
 type merchantPolicyProfile struct {
+	MerchantID            string               `json:"merchantId"`
 	BusinessName          string               `json:"businessName"`
 	BusinessModel         string               `json:"businessModel,omitempty"`
 	Products              []string             `json:"products"`
@@ -44,12 +46,13 @@ type merchantPolicyConditions struct {
 }
 
 type merchantPolicyProposal struct {
-	Scope        string                   `json:"scope"`
-	Name         string                   `json:"name"`
-	ProductTypes []string                 `json:"product_types"`
-	Stages       []string                 `json:"stages"`
-	Conditions   merchantPolicyConditions `json:"conditions"`
-	Action       string                   `json:"action"`
+	Scope         string                   `json:"scope"`
+	Name          string                   `json:"name"`
+	ProductTypes  []string                 `json:"product_types"`
+	Stages        []string                 `json:"stages"`
+	Conditions    merchantPolicyConditions `json:"conditions"`
+	Action        string                   `json:"action"`
+	DurationHours int                      `json:"durationHours,omitempty"`
 }
 
 type policyField struct {
@@ -69,6 +72,7 @@ type merchantCapability struct {
 
 var merchantPolicyFields = map[string]policyField{
 	policyDomain:  {"string", []string{"eq"}, "merchant transaction email domain", "normalized-domain", "no_match"},
+	policyMailbox: {"string", []string{"eq"}, "merchant transaction mailbox reference", "merchant-scoped-reference", "no_match"},
 	policyAmount:  {"number", []string{"eq", "ne", "gt", "gte", "lt", "lte"}, "merchant transaction amount", "transaction-amount", "no_match"},
 	policyProduct: {"enum", []string{"eq"}, "merchant transaction product", "catalog-metadata", "no_match"},
 }
@@ -124,6 +128,9 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 	if p.Scope != "MERCHANT" || p.Name == "" || utf8.RuneCountInString(p.Name) > 80 || strings.IndexFunc(p.Name, unicode.IsControl) >= 0 {
 		return errors.New("A Merchant Policy requires a name of 1 to 80 characters.")
 	}
+	if sensitiveComposerText(p.Name) {
+		return errors.New("Use a rule name without personal data or credentials.")
+	}
 	if !slices.Contains([]string{"BLOCK", "REVIEW", "CHALLENGE"}, p.Action) {
 		return errors.New("Merchant Policy actions are BLOCK, REVIEW, and CHALLENGE.")
 	}
@@ -145,6 +152,19 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 	}
 	if (p.Conditions.Logic != "AND" && p.Conditions.Logic != "OR") || len(p.Conditions.Rules) < 1 || len(p.Conditions.Rules) > 5 {
 		return errors.New("Use an AND or OR group containing 1 to 5 conditions.")
+	}
+	hasMailbox := slices.ContainsFunc(p.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+		return condition.Field == policyMailbox
+	})
+	if hasMailbox {
+		if p.Action != "BLOCK" || p.Conditions.Logic != "AND" || len(p.Conditions.Rules) != 1 {
+			return errors.New("A temporary email block requires one exact mailbox condition.")
+		}
+		if p.DurationHours < 1 || p.DurationHours > maximumMailboxBlockHours {
+			return fmt.Errorf("Enter a temporary email block duration from 1 to %d hours.", maximumMailboxBlockHours)
+		}
+	} else if p.DurationHours != 0 {
+		return errors.New("A duration is supported for temporary email blocks.")
 	}
 	for i := range p.Conditions.Rules {
 		condition := &p.Conditions.Rules[i]
@@ -184,6 +204,9 @@ func (p *merchantPolicyProposal) validate(profile merchantPolicyProfile) error {
 				}
 				value = domain
 			}
+			if condition.Field == policyMailbox && !validMailboxDigest(value) {
+				return errors.New("Generate a preview from an exact email address to create a temporary email block.")
+			}
 			if condition.Field == policyProduct && !slices.Contains(p.ProductTypes, value) {
 				return errors.New("A product condition must refer to a selected product.")
 			}
@@ -214,10 +237,11 @@ func sortedPolicyValues(values []string) []string {
 }
 
 type merchantPolicyEvidence struct {
-	product string
-	stage   string
-	domain  string
-	amount  *int64
+	product    string
+	stage      string
+	domain     string
+	mailboxRef string
+	amount     *int64
 }
 
 func (p merchantPolicyProposal) evaluate(evidence merchantPolicyEvidence) (matched, missing bool) {
@@ -239,10 +263,15 @@ func (p merchantPolicyProposal) evaluate(evidence merchantPolicyEvidence) (match
 
 func (condition merchantPolicyCondition) evaluate(evidence merchantPolicyEvidence) (bool, bool) {
 	switch condition.Field {
-	case policyProduct, policyDomain:
-		actual := evidence.product
-		if condition.Field == policyDomain {
+	case policyProduct, policyDomain, policyMailbox:
+		var actual string
+		switch condition.Field {
+		case policyProduct:
+			actual = evidence.product
+		case policyDomain:
 			actual = evidence.domain
+		case policyMailbox:
+			actual = evidence.mailboxRef
 		}
 		if actual == "" {
 			return false, true

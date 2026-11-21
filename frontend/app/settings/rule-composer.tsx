@@ -5,8 +5,10 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import type { FormEvent } from "react";
 import { getMerchantDemoRole, getMerchantDemoToken, merchantDemoRequest, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken, subscribeMerchantDemoSession } from "../merchant-demo";
 import type { DemoDirectory } from "../merchant-demo";
+import { containsMailbox, merchantMailboxDigest, parseMailboxBlock } from "../merchant-mailbox";
 import { useWorkspaceView } from "../workspace-view";
 import type { ReactNode } from "react";
+import { merchantDate } from "./merchants/management-contracts";
 import { outlineButton, primaryButton, ruleRequest, rulesEndpoint, stages } from "./system-rules/contracts";
 import type { Preview, PreviewRun, Rule, RuleCatalogue, RuleInput } from "./system-rules/contracts";
 
@@ -24,6 +26,7 @@ type MerchantProposal = {
   stages: string[];
   conditions: { logic: "AND" | "OR"; rules: PolicyCondition[] };
   action: PolicyAction;
+  durationHours?: number;
 };
 type PlatformProposal = { scope: "PLATFORM"; rule: RuleInput };
 type Proposal = MerchantProposal | PlatformProposal;
@@ -39,14 +42,16 @@ type PolicyRule = {
   id: string;
   version: number;
   activeVersion?: number;
-  status: "ACTIVE" | "PENDING_APPROVAL" | "DISABLED";
+  status: "ACTIVE" | "PENDING_APPROVAL" | "DISABLED" | "EXPIRED";
   proposal: MerchantProposal;
   preview: PolicyPreview;
+  expiresAt?: string;
 };
 type PolicySave = { rule: PolicyRule; status: PolicyRule["status"] };
 export type MerchantPolicyVersion = PolicyRule & { createdAt?: string; createdBy?: string; actor?: string; changeReason?: string };
 type PlatformSave = { rule: Rule; status: "DRAFT"; preview?: Preview };
 type BusinessProfile = {
+  merchantId: string;
   businessName: string;
   products: string[];
   stages: string[];
@@ -56,9 +61,12 @@ type BusinessProfile = {
 
 const scopeLabels = { MERCHANT: "Merchant policy", PLATFORM: "Platform fraud rule" };
 const products: Record<string, string> = merchantPolicyProducts;
+const mailboxField = "customer.mailbox_ref";
+const mailboxExample = "Block email buyer@example.test for 12 hours";
 const fields: Record<string, string> = {
   "product.type": "Product",
   "customer.email_domain": "Customer email domain",
+  [mailboxField]: "Exact email address",
   "order.amount_minor": "Order amount in minor units",
   account_age_days: "Account age in days",
   device_orders: "Orders from this device in 60 seconds",
@@ -71,7 +79,7 @@ const operatorLabels: Record<string, string> = {
   eq: "equals", ne: "does not equal", gt: "is greater than", gte: "is at least", lt: "is less than", lte: "is at most",
 };
 const statusLabels = {
-  ACTIVE: "Active", PENDING_APPROVAL: "Pending approval", DISABLED: "Disabled", DRAFT: "Draft",
+  ACTIVE: "Active", PENDING_APPROVAL: "Pending approval", DISABLED: "Disabled", EXPIRED: "Expired", DRAFT: "Draft",
 };
 const prompts: Record<Scope, string> = {
   MERCHANT: "If a customer books a flight ticket using an email address from skycannner.com, block the booking.",
@@ -159,13 +167,15 @@ export function RuleAccess({ scope }: { scope: Scope }) {
   </form>;
 }
 
-export function RulePreview({ proposal }: { proposal: Proposal }) {
+export function RulePreview({ proposal, mailbox }: { proposal: Proposal; mailbox?: string }) {
   const merchant = proposal.scope === "MERCHANT";
   const name = merchant ? proposal.name : proposal.rule.name;
   const action = merchant ? proposal.action : proposal.rule.action;
   const ruleStages = merchant ? proposal.stages : [proposal.rule.stage];
   const conditions = merchant ? proposal.conditions.rules : proposal.rule.conditions.map(({ signal, operator, value }) => ({ field: signal, operator, value }));
   const logic = merchant && proposal.conditions.logic === "OR" ? "Any condition" : "All conditions";
+  const hasMailbox = conditions.some(condition => condition.field === mailboxField);
+  const duration = merchant ? proposal.durationHours : undefined;
   return <div className="space-y-4 rounded-lg border border-line bg-paper p-4">
     <dl className="grid gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
       <div><dt className="text-muted">Rule name</dt><dd className="font-semibold wrap-anywhere">{name}</dd></div>
@@ -173,20 +183,28 @@ export function RulePreview({ proposal }: { proposal: Proposal }) {
       {merchant && <div><dt className="text-muted">Products</dt><dd>{proposal.product_types.map(product => products[product] ?? product).join(", ")}</dd></div>}
       <div><dt className="text-muted">When</dt><dd>{ruleStages.map(stage => stages[stage as keyof typeof stages] ?? stage).join(", ")}</dd></div>
       <div><dt className="text-muted">Action</dt><dd className="font-semibold">{policyActionLabels[action] ?? action}</dd></div>
+      {duration && <div><dt className="text-muted">Duration</dt><dd>{duration} {duration === 1 ? "hour" : "hours"} from activation</dd></div>}
     </dl>
     <div>
       <p className="text-sm font-semibold">{logic}</p>
       <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
         {conditions.map(({ field, operator, value }, index) => <li key={index} className="wrap-anywhere">
-          {fields[field] ?? field} {operatorLabels[operator] ?? operator} {field === "product.type" ? products[String(value)] ?? value : String(value)}
+          {fields[field] ?? field} {operatorLabels[operator] ?? operator} {field === mailboxField ? mailbox ?? "the specified address" : field === "product.type" ? products[String(value)] ?? value : String(value)}
         </li>)}
       </ul>
     </div>
-    <details>
+    {!hasMailbox && <details>
       <summary className="cursor-pointer text-xs font-semibold text-accent">Advanced rule details</summary>
       <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-white p-3 text-xs">{JSON.stringify(proposal, null, 2)}</pre>
-    </details>
+    </details>}
   </div>;
+}
+
+export function PolicyExpiry({ expiresAt, status }: Pick<PolicyRule, "expiresAt" | "status">) {
+  if (!expiresAt) return null;
+  return <p className="mt-1 text-xs text-muted">
+    {status === "EXPIRED" ? "Expired" : "Expires"} <time dateTime={expiresAt}>{merchantDate(expiresAt)}</time>
+  </p>;
 }
 
 export function RuleComposer({ scope, onSaved, edit, onCancel }: {
@@ -215,6 +233,7 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
   const [profileError, setProfileError] = useState("");
   const request = useRef<AbortController>(null);
   const id = useId();
+  const mailboxBlock = scope === "MERCHANT" ? parseMailboxBlock(instruction) : null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -245,8 +264,20 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
     setSaved(null);
     setError("");
     try {
+      let payload: { scope: Scope; instruction: string } | { scope: Scope; mailboxBlock: { mailboxDigest: string; durationHours: number } };
+      if (mailboxBlock) {
+        if (!profile?.merchantId) throw new Error("The merchant profile is unavailable. Reconnect and try again.");
+        const mailboxDigest = await merchantMailboxDigest(profile.merchantId, mailboxBlock.mailbox);
+        payload = { scope, mailboxBlock: { mailboxDigest, durationHours: mailboxBlock.durationHours } };
+      } else {
+        if (scope === "MERCHANT" && containsMailbox(instruction)) {
+          throw new Error(`To block one email address temporarily, enter a duration from 1 to 8,760 whole hours. For example, ${mailboxExample}.`);
+        }
+        payload = { scope, instruction: instruction.trim() };
+      }
+      if (controller.signal.aborted) return;
       const result = await authenticatedRequest<Interpretation>(`${composer}/interpret`, token, {
-        method: "POST", body: JSON.stringify({ scope, instruction: instruction.trim() }), signal: controller.signal,
+        method: "POST", body: JSON.stringify(payload), signal: controller.signal,
       });
       if (controller.signal.aborted) return;
       if (result.proposal && result.proposal.scope !== scope) throw new Error("The proposal belongs to another rule system.");
@@ -316,7 +347,10 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
           setSaved(null);
           setError("");
         }} />
-      <p id={`${id}-instruction-help`} className="text-xs text-muted">Use policy conditions and domains. Leave out customer identities and card details.</p>
+      <p id={`${id}-instruction-help`} className="text-xs text-muted">
+        {scope === "MERCHANT" ? <>For a temporary block on one address, use <code>{mailboxExample}</code>. Use bare domains for domain rules. Leave out card details and credentials.</>
+          : "Use policy conditions and domains. Leave out customer identities and card details."}
+      </p>
       <button type="submit" className={ready ? outlineButton : primaryButton} disabled={!instruction.trim() || pending !== null}>
         {pending === "interpret" ? "Generating preview…" : "Generate preview"}
       </button>
@@ -327,7 +361,7 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
       {messages.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
         {messages.map((message, index) => <li key={index}>{message}</li>)}
       </ul>}
-      {draft.proposal && <RulePreview proposal={draft.proposal} />}
+      {draft.proposal && <RulePreview proposal={draft.proposal} mailbox={mailboxBlock?.mailbox} />}
       {ready && !saved && <>
         {scope === "PLATFORM" && runs.length > 0 && <label className="block text-sm font-semibold">Simulation run for replay (optional)
           <select className="control mt-1 max-w-md" value={runId} onChange={event => setRunId(event.currentTarget.value)} disabled={pending !== null}>
@@ -344,6 +378,7 @@ function ConnectedComposer({ scope, token, onSaved, edit, onCancel }: {
     {saved && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
       <p className="font-semibold">Rule saved · {statusLabels[saved.status]}</p>
       {reason && <p className="mt-1">{reason}</p>}
+      {"expiresAt" in saved.rule && <PolicyExpiry expiresAt={saved.rule.expiresAt} status={saved.rule.status} />}
       {preview && ("evaluated" in preview ? <PolicySample preview={preview} />
         : <p className="mt-1">{preview.matched} matched out of {preview.eligible} eligible events · {preview.skipped} with missing signals</p>)}
     </div>}
@@ -425,6 +460,7 @@ function ConnectedPolicyRules({ token, refreshKey, onEdit }: {
             <p className="mt-1 text-xs text-muted">{statusLabels[rule.status]} · Version {rule.version} · {policyActionLabels[rule.proposal.action]}
               {rule.activeVersion && rule.activeVersion !== rule.version ? ` · Version ${rule.activeVersion} remains active` : ""}
             </p>
+            <PolicyExpiry expiresAt={rule.expiresAt} status={rule.status} />
             {rule.preview && <PolicySample preview={rule.preview} />}
           </div>
           <div className="flex flex-wrap gap-2">
@@ -453,8 +489,9 @@ function ConnectedPolicyRules({ token, refreshKey, onEdit }: {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <details className="min-w-0">
                 <summary className="cursor-pointer text-sm font-semibold wrap-anywhere">
-                  Version {version.version} · {version.proposal.name}
+                  Version {version.version} · {statusLabels[version.status]} · {version.proposal.name}
                 </summary>
+                <PolicyExpiry expiresAt={version.expiresAt} status={version.status} />
                 <div className="mt-2"><RulePreview proposal={version.proposal} /></div>
               </details>
               {version.version !== rule.version && <button type="button" className={outlineButton}

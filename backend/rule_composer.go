@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -58,6 +60,11 @@ type composerInterpretation struct {
 	Message    string             `json:"message,omitempty"`
 }
 
+type mailboxBlockInstruction struct {
+	MailboxDigest string `json:"mailboxDigest"`
+	DurationHours int    `json:"durationHours"`
+}
+
 func composerAuthorization(repo repository, adminToken string) mockMerchantService {
 	return mockMerchantService{repo: repo, adminHash: sha256.Sum256([]byte(adminToken)), adminEnabled: adminToken != ""}
 }
@@ -86,14 +93,18 @@ func registerRuleComposer(mux *http.ServeMux, a app, adminToken string) {
 	mux.HandleFunc("POST "+composerPath+"/platform/save", composer.savePlatform)
 }
 
-func sensitiveComposerText(value string) bool {
-	if composerSecret.MatchString(value) || composerCVV.MatchString(value) {
-		return true
-	}
+func composerHasMailbox(value string) bool {
 	for _, mailbox := range composerMailbox.FindAllStringSubmatch(value, -1) {
 		if mailbox[1] != "*" {
 			return true
 		}
+	}
+	return false
+}
+
+func sensitiveComposerText(value string) bool {
+	if composerSecret.MatchString(value) || composerCVV.MatchString(value) || composerHasMailbox(value) {
+		return true
 	}
 	for _, candidate := range composerIP.FindAllString(value, -1) {
 		if !strings.ContainsAny(candidate, ".:") {
@@ -147,22 +158,27 @@ func composerMerchantPrompt(profile merchantPolicyProfile) string {
 	}
 	fields := make([]productSignal, 0, len(profile.FieldRegistry))
 	for _, field := range profile.FieldRegistry {
+		if field.Name == policyMailbox {
+			continue
+		}
 		fields = append(fields, productSignal{field.Name, field.Operators, field.Products, field.Stages})
 	}
+	signals := slices.DeleteFunc(slices.Clone(profile.Signals), func(signal string) bool { return signal == policyMailbox })
 	capabilities, _ := json.Marshal(struct {
 		Products []string        `json:"products"`
 		Stages   []string        `json:"stages"`
 		Signals  []string        `json:"signals"`
 		Fields   []productSignal `json:"supportedFieldsByProduct"`
-	}{profile.Products, profile.Stages, profile.Signals, fields})
+	}{profile.Products, profile.Stages, signals, fields})
 	return commonComposerPrompt + `
 Draft a MERCHANT policy using only the provided products, stages, and observed signals. Include 1 to 5 conditions in one AND or OR group. Actions: BLOCK, REVIEW, CHALLENGE. product.type supports eq with a selected product ID. customer.email_domain supports eq with an exact normalized bare host name, without a username, @, wildcard, or subdomain matching. Input such as *@example.com or @example.com means an exact match for example.com. order.amount_minor requires a nonnegative integer and supports eq, ne, gt, gte, lt, lte. If THB or baht is explicit, convert baht to satang exactly; if the amount unit is unspecified, ask. Travel products flight_ticket and hotel_room use BOOKING. Store products physical and digital use CHECKOUT. payment_gateway uses CHECKOUT in scenario simulation only; it is not available for mock checkout. For an unambiguous named product, use its corresponding stage. Never broaden to other products. If the operator explicitly requests all travel or all store products, select only matching listed products. Clearly explain unsupported products, stages, fields or operators and ask for an available alternative. Capabilities: ` + string(capabilities)
 }
 
 func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Scope       string `json:"scope"`
-		Instruction string `json:"instruction"`
+		Scope        string                   `json:"scope"`
+		Instruction  *string                  `json:"instruction"`
+		MailboxBlock *mailboxBlockInstruction `json:"mailboxBlock"`
 	}
 	if !decodeBookingRiskJSON(w, r, &input) {
 		return
@@ -180,15 +196,32 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := time.Now()
-	input.Instruction = strings.TrimSpace(input.Instruction)
-	if input.Instruction == "" || utf8.RuneCountInString(input.Instruction) > 2000 || strings.IndexFunc(input.Instruction, func(r rune) bool {
+	if input.MailboxBlock != nil {
+		if input.Scope != composerMerchant || input.Instruction != nil {
+			s.audit("mailbox_interpret", input.Scope, actor, "INVALID_INSTRUCTION", "", started)
+			problem(w, http.StatusUnprocessableEntity, "Submit an exact email block by itself in Merchant AI Rules.")
+			return
+		}
+		s.interpretMailboxBlock(w, r, actor, *input.MailboxBlock, started)
+		return
+	}
+	var instruction string
+	if input.Instruction != nil {
+		instruction = strings.TrimSpace(*input.Instruction)
+	}
+	if instruction == "" || utf8.RuneCountInString(instruction) > 2000 || strings.IndexFunc(instruction, func(r rune) bool {
 		return unicode.IsControl(r) && r != '\t' && r != '\n' && r != '\r'
 	}) != -1 {
 		s.audit("interpret", input.Scope, actor, "INVALID_INSTRUCTION", "", started)
 		problem(w, http.StatusUnprocessableEntity, "Enter an instruction of 1 to 2,000 characters.")
 		return
 	}
-	if sensitiveComposerText(input.Instruction) {
+	if input.Scope == composerMerchant && composerHasMailbox(instruction) {
+		s.audit("interpret", input.Scope, actor, "SENSITIVE_INSTRUCTION", "", started)
+		problem(w, http.StatusUnprocessableEntity, "To block one email address temporarily, use the format Block email <address> for 12 hours in Merchant AI Rules.")
+		return
+	}
+	if sensitiveComposerText(instruction) {
 		s.audit("interpret", input.Scope, actor, "SENSITIVE_INSTRUCTION", "", started)
 		problem(w, http.StatusUnprocessableEntity, "Remove email addresses, IP addresses, payment card numbers, card security codes, and credentials. Bare email domains can be used.")
 		return
@@ -213,7 +246,7 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 		}
 		prompt = composerMerchantPrompt(profile)
 	}
-	data, err := s.provider.interpret(ctx, input.Scope, prompt, input.Instruction)
+	data, err := s.provider.interpret(ctx, input.Scope, prompt, instruction)
 	if err != nil {
 		result := "PROVIDER_UNAVAILABLE"
 		message := "AI rule interpretation failed. Try again or create the rule manually."
@@ -236,6 +269,52 @@ func (s ruleComposer) interpret(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit("interpret", input.Scope, actor, output.Status, "", started)
 	respond(w, http.StatusOK, output)
+}
+
+func (s ruleComposer) interpretMailboxBlock(w http.ResponseWriter, r *http.Request, actor mockMerchantActor, block mailboxBlockInstruction, started time.Time) {
+	if !validMailboxDigest(block.MailboxDigest) || block.DurationHours < 1 || block.DurationHours > maximumMailboxBlockHours {
+		s.audit("mailbox_interpret", composerMerchant, actor, "INVALID_INSTRUCTION", "", started)
+		problem(w, http.StatusUnprocessableEntity, fmt.Sprintf("Provide an exact email address and a whole duration from 1 to %d hours.", maximumMailboxBlockHours))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	profile, err := s.access.merchantPolicyProfile(ctx, actor.MerchantID)
+	if err != nil {
+		s.audit("mailbox_interpret", composerMerchant, actor, "PROFILE_ERROR", "", started)
+		demoWriteError(w, err)
+		return
+	}
+	if len(profile.Products) == 0 {
+		s.audit("mailbox_interpret", composerMerchant, actor, "CLARIFICATION", "", started)
+		respond(w, http.StatusOK, composerInterpretation{
+			Status: "CLARIFICATION", Message: "Add at least one supported product in Merchant Details before creating an exact email block.",
+		})
+		return
+	}
+	mailboxRef, err := merchantMailboxRef(ctx, s.access.repo.db, actor.MerchantID, block.MailboxDigest)
+	if err != nil {
+		s.audit("mailbox_interpret", composerMerchant, actor, "PROFILE_ERROR", "", started)
+		demoWriteError(w, err)
+		return
+	}
+	value, _ := json.Marshal(mailboxRef)
+	proposal := merchantPolicyProposal{
+		Scope: composerMerchant, Name: fmt.Sprintf("Email block %s.%s (%d h)", mailboxRef[:6], mailboxRef[6:12], block.DurationHours),
+		ProductTypes: profile.Products, Stages: profile.Stages, Action: "BLOCK", DurationHours: block.DurationHours,
+		Conditions: merchantPolicyConditions{Logic: "AND", Rules: []merchantPolicyCondition{{
+			Field: policyMailbox, Operator: "eq", Value: value,
+		}}},
+	}
+	if err := proposal.validate(profile); err != nil {
+		s.audit("mailbox_interpret", composerMerchant, actor, "CLARIFICATION", "", started)
+		respond(w, http.StatusOK, composerInterpretation{
+			Status: "CLARIFICATION", Validation: composerValidation{Errors: []string{err.Error()}},
+		})
+		return
+	}
+	s.audit("mailbox_interpret", composerMerchant, actor, "READY", "", started)
+	respond(w, http.StatusOK, composerInterpretation{Status: "READY", Proposal: proposal, Validation: composerValidation{Valid: true}})
 }
 
 func validComposerJSON(data []byte, target any) bool {
@@ -283,6 +362,11 @@ func parseComposerInterpretation(data []byte, scope string, profile merchantPoli
 	} else {
 		var merchant merchantPolicyProposal
 		if !validComposerJSON(body.Proposal, &merchant) || merchant.Scope != composerMerchant {
+			return composerInterpretation{}, errComposerOutput
+		}
+		if merchant.DurationHours != 0 || slices.ContainsFunc(merchant.Conditions.Rules, func(condition merchantPolicyCondition) bool {
+			return condition.Field == policyMailbox
+		}) {
 			return composerInterpretation{}, errComposerOutput
 		}
 		err = merchant.validate(profile)

@@ -115,9 +115,9 @@ func (s mockMerchantService) managedMerchantList(w http.ResponseWriter, r *http.
 		) stats ON true
 		LEFT JOIN LATERAL (
 			SELECT count(*) AS total FROM (
-				SELECT DISTINCT ON (rule_id) status FROM merchant_policy_rule_versions
+				SELECT DISTINCT ON (rule_id) status,`+merchantPolicyExpiry+` AS expires_at FROM merchant_policy_rule_versions
 				WHERE merchant_id=m.id AND status<>'PENDING_APPROVAL' ORDER BY rule_id,version DESC
-			) rules WHERE status='ACTIVE'
+			) rules WHERE status='ACTIVE' AND (expires_at IS NULL OR expires_at>statement_timestamp())
 		) policies ON true
 		ORDER BY `+strings.ReplaceAll(order, "activity.at", "m.at"), query, page.Limit, (page.Page-1)*page.Limit)
 	if err != nil {

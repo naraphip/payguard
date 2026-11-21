@@ -7,7 +7,7 @@ import { MerchantDemoError, merchantDemoRequest, merchantJevStatus, merchantOutc
 import type { DemoMerchant, DemoTransaction } from "../../merchant-demo";
 import { useWorkspaceView } from "../../workspace-view";
 import { JevRulesPanel } from "../jev-rules/panel";
-import { RuleAccess, RulePreview, useRuleCredential } from "../rule-composer";
+import { PolicyExpiry, RuleAccess, RulePreview, useRuleCredential } from "../rule-composer";
 import type { MerchantPolicyVersion } from "../rule-composer";
 import { outlineButton } from "../system-rules/contracts";
 import { SystemRulesDashboard } from "../system-rules/dashboard";
@@ -231,6 +231,7 @@ function PolicyInspection({ path, token }: { path: string; token: string }) {
           <div className="min-w-0">
             <p className="text-sm font-semibold wrap-anywhere">{rule.proposal.name}</p>
             <p className="text-xs text-muted">{label(rule.status)} · {policyActionLabels[rule.proposal.action]} · Version {rule.version}</p>
+            <PolicyExpiry expiresAt={rule.expiresAt} status={rule.status} />
             <p className="text-xs text-muted wrap-anywhere">{rule.proposal.product_types.map(product => products[product] ?? product).join(", ")}</p>
             {rule.createdAt && <p className="text-xs text-muted">{merchantDate(rule.createdAt)}</p>}
             {(rule.createdBy || rule.actor) && <p className="text-xs text-muted">Created by {rule.createdBy ?? rule.actor}</p>}
@@ -252,6 +253,7 @@ function PolicyVersions({ path, token }: { path: string; token: string }) {
       <details className="rounded-lg border border-line bg-white p-3">
         <summary className="cursor-pointer text-sm font-semibold">Version {version.version} · {label(version.status)}</summary>
         <p className="mt-2 text-xs text-muted">{merchantDate(version.createdAt)}{(version.createdBy || version.actor) && ` · ${version.createdBy ?? version.actor}`}{version.changeReason && ` · ${version.changeReason}`}</p>
+        <PolicyExpiry expiresAt={version.expiresAt} status={version.status} />
         <div className="mt-2"><RulePreview proposal={version.proposal} /></div>
       </details>
     </li>)}

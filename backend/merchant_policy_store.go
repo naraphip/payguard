@@ -71,6 +71,7 @@ type merchantPolicyRule struct {
 	Proposal        merchantPolicyProposal `json:"proposal"`
 	Preview         merchantPolicyPreview  `json:"preview"`
 	CreatedAt       time.Time              `json:"createdAt"`
+	ExpiresAt       *time.Time             `json:"expiresAt,omitempty"`
 	CreatedBy       string                 `json:"createdBy"`
 	ChangeReason    string                 `json:"changeReason"`
 	RollbackVersion *int                   `json:"rollbackVersion,omitempty"`
@@ -82,7 +83,7 @@ func (s mockMerchantService) merchantPolicyProfile(ctx context.Context, merchant
 }
 
 func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merchant string) (merchantPolicyProfile, []merchantPolicyEvidence, error) {
-	profile := merchantPolicyProfile{Products: []string{}, Stages: []string{}, Signals: []string{policyProduct}}
+	profile := merchantPolicyProfile{MerchantID: merchant, Products: []string{}, Stages: []string{}, Signals: []string{policyProduct}}
 	var setup *merchantSetup
 	var integration *merchantPolicyIntegration
 	if err := db.QueryRow(ctx, `SELECT name,setup,policy_integration FROM merchant_demo_merchants
@@ -101,7 +102,7 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	}
 	declaredAmount, declaredDomain := hasAmount, hasDomain
 	observedAmount, observedDomain := map[string]bool{}, map[string]bool{}
-	rows, err := db.Query(ctx, `SELECT product, amount_minor, customer_email_domain FROM merchant_demo_transactions
+	rows, err := db.Query(ctx, `SELECT product, amount_minor, customer_email_domain, customer_mailbox_ref FROM merchant_demo_transactions
 		WHERE merchant_id=$1::text::uuid ORDER BY created_at DESC,id DESC LIMIT 200`, merchant)
 	if err != nil {
 		return profile, nil, err
@@ -110,7 +111,7 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	var evidence []merchantPolicyEvidence
 	for rows.Next() {
 		var item merchantPolicyEvidence
-		if err := rows.Scan(&item.product, &item.amount, &item.domain); err != nil {
+		if err := rows.Scan(&item.product, &item.amount, &item.domain, &item.mailboxRef); err != nil {
 			return profile, nil, err
 		}
 		item.stage = merchantPolicyStage(item.product)
@@ -143,6 +144,9 @@ func readMerchantPolicyContext(ctx context.Context, db mockMerchantQueryer, merc
 	}
 	if hasDomain {
 		profile.Signals = append(profile.Signals, policyDomain)
+	}
+	if len(profile.Products) > 0 {
+		profile.Signals = append(profile.Signals, policyMailbox)
 	}
 	for _, signal := range profile.Signals {
 		entry := merchantCapability{Name: signal, policyField: merchantPolicyFields[signal], Products: []string{}, Stages: []string{}}
@@ -180,12 +184,18 @@ func previewMerchantPolicy(proposal merchantPolicyProposal, evidence []merchantP
 	return preview
 }
 
-const merchantPolicyColumns = `rule_id::text, version, status, proposal, preview, created_at, created_by, change_reason, rollback_version`
+const merchantPolicyExpiry = `(CASE WHEN status='ACTIVE' THEN created_at+((proposal->>'durationHours')::integer * interval '1 hour') END)`
+
+const merchantPolicyColumns = `rule_id::text, version, status, proposal, preview, created_at, created_by, change_reason, rollback_version, ` + merchantPolicyExpiry + `, statement_timestamp()`
 
 func scanMerchantPolicy(row pgx.Row) (merchantPolicyRule, error) {
 	var rule merchantPolicyRule
+	var asOf time.Time
 	err := row.Scan(&rule.ID, &rule.Version, &rule.Status, &rule.Proposal, &rule.Preview,
-		&rule.CreatedAt, &rule.CreatedBy, &rule.ChangeReason, &rule.RollbackVersion)
+		&rule.CreatedAt, &rule.CreatedBy, &rule.ChangeReason, &rule.RollbackVersion, &rule.ExpiresAt, &asOf)
+	if rule.ExpiresAt != nil && !asOf.Before(*rule.ExpiresAt) {
+		rule.Status = "EXPIRED"
+	}
 	return rule, err
 }
 
@@ -234,7 +244,7 @@ func merchantPoliciesCouldConflict(candidate, active merchantPolicyProposal) boo
 	}) {
 		return false
 	}
-	for _, field := range []string{policyDomain, policyProduct} {
+	for _, field := range []string{policyDomain, policyMailbox, policyProduct} {
 		a, b := policyExclusiveText(candidate, field), policyExclusiveText(active, field)
 		if a != "" && b != "" && a != b {
 			return false

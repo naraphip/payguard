@@ -62,13 +62,14 @@ type mockScenario struct {
 }
 
 type mockTransactionInput struct {
-	ID                  string `json:"id"`
-	ScenarioID          string `json:"scenarioId"`
-	Source              string `json:"source"`
-	Product             string `json:"product,omitempty"`
-	AmountMinor         *int64 `json:"amountMinor"`
-	SimulateTimeout     bool   `json:"simulateTimeout"`
-	CustomerEmailDomain string `json:"customerEmailDomain,omitempty"`
+	ID                    string `json:"id"`
+	ScenarioID            string `json:"scenarioId"`
+	Source                string `json:"source"`
+	Product               string `json:"product,omitempty"`
+	AmountMinor           *int64 `json:"amountMinor"`
+	SimulateTimeout       bool   `json:"simulateTimeout"`
+	CustomerEmailDomain   string `json:"customerEmailDomain,omitempty"`
+	CustomerMailboxDigest string `json:"customerMailboxDigest,omitempty"`
 }
 
 type mockTransaction struct {
@@ -98,6 +99,7 @@ type mockTransaction struct {
 	JevConfidence           *float64   `json:"jevConfidence,omitempty"`
 	JevConfigurationVersion int64      `json:"jevConfigurationVersion,omitempty"`
 	simulateTimeout         bool
+	customerMailboxRef      string
 	CustomerEmailDomain     string                     `json:"-"`
 	PolicyDecision          *transactionPolicyDecision `json:"policyDecision,omitempty"`
 }
@@ -393,6 +395,10 @@ func (s mockMerchantService) createTransaction(w http.ResponseWriter, r *http.Re
 	}
 	if !validMockTransaction(input) {
 		problem(w, http.StatusUnprocessableEntity, "Enter valid transaction and scenario IDs, source, product, and optional amount in minor units.")
+		return
+	}
+	if input.CustomerMailboxDigest != "" && !validMailboxDigest(input.CustomerMailboxDigest) {
+		problem(w, http.StatusUnprocessableEntity, "Enter a valid customer mailbox digest.")
 		return
 	}
 	if input.CustomerEmailDomain != "" {

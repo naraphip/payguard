@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { merchantMailboxDigest, parseScenarioEmail } from "./merchant-mailbox";
 import {
   getMerchantDemoToken, loadLocalMerchantDirectory, merchantDemoRequest, merchantOutcomeLabels, merchantPolicyProducts, policyActionLabels, setMerchantDemoToken,
 } from "./merchant-demo";
@@ -16,11 +17,16 @@ type ScenarioInputs = {
   source: "checkout" | "simulation";
   product?: SimulationProduct;
   amountMinor?: number;
-  customerEmailDomain?: string;
+  customerEmail?: string;
   simulateTimeout: boolean;
 };
 
-type ScenarioAttempt = ScenarioInputs & { id: string; scenarioId: string };
+type ScenarioAttempt = Omit<ScenarioInputs, "customerEmail"> & {
+  id: string;
+  scenarioId: string;
+  customerEmailDomain?: string;
+  customerMailboxDigest?: string;
+};
 
 const action = "rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50";
 const secondary = "rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-paper disabled:opacity-50";
@@ -33,16 +39,6 @@ export function readDemoAmount(value: string) {
 }
 
 export const invalidDemoAmount = "Enter a whole number from 0 to 9,007,199,254,740,991 or leave it empty.";
-
-function syntheticEmailDomain(value?: string) {
-  const entered = value?.trim();
-  if (!entered) return undefined;
-  const parts = entered.split("@");
-  if (parts.length > 2 || !parts[0] || /\s/u.test(entered)) return null;
-  const domain = parts[parts.length - 1].toLowerCase();
-  if (!domain.includes(".") || domain.length > 254 || /[:/\\?#%]/u.test(domain)) return null;
-  return domain;
-}
 
 export function useDemoScenario() {
   const [credential, setCredential] = useState("");
@@ -161,23 +157,28 @@ export function useDemoScenario() {
     setScenarioId(id);
   }
 
-  async function submit(inputs: ScenarioInputs) {
+  async function submit({ customerEmail, ...inputs }: ScenarioInputs) {
     if (!directory || !merchant || !scenario || submittingRef.current) return;
-    const domain = syntheticEmailDomain(inputs.customerEmailDomain);
-    if (domain === null) {
+    const email = parseScenarioEmail(customerEmail);
+    if (!email) {
       setSubmissionError("Enter a synthetic email or its domain, such as buyer@example.test.");
       return;
     }
-    const attempt = pending ?? {
-      ...inputs, customerEmailDomain: domain, id: crypto.randomUUID(), scenarioId: scenario.id,
-    };
     const request = ++requestGeneration.current;
     submittingRef.current = true;
-    setPending(attempt);
     setSubmitting(true);
     setResult(null);
     setSubmissionError("");
     try {
+      const attempt = pending ?? {
+        ...inputs,
+        id: crypto.randomUUID(),
+        scenarioId: scenario.id,
+        customerEmailDomain: email.domain,
+        customerMailboxDigest: email.mailbox ? await merchantMailboxDigest(merchant.id, email.mailbox) : undefined,
+      };
+      if (requestGeneration.current !== request) return;
+      setPending(attempt);
       const { transaction } = await merchantDemoRequest<{ transaction: DemoTransaction }>(
         `/${encodeURIComponent(merchant.id)}/transactions`, accessToken,
         { method: "POST", body: JSON.stringify(attempt) },
@@ -301,7 +302,7 @@ export function DemoScenarioSimulation() {
   const flow = useDemoScenario();
   const [amount, setAmount] = useState("50000");
   const [product, setProduct] = useState<SimulationProduct>("flight_ticket");
-  const [domain, setDomain] = useState("");
+  const [email, setEmail] = useState("");
   const [simulateTimeout, setSimulateTimeout] = useState(false);
   const [amountError, setAmountError] = useState("");
   const amountId = useId();
@@ -313,7 +314,7 @@ export function DemoScenarioSimulation() {
       setAmountError(invalidDemoAmount);
       return;
     }
-    void flow.submit({ source: "simulation", product, amountMinor, customerEmailDomain: domain, simulateTimeout });
+    void flow.submit({ source: "simulation", product, amountMinor, customerEmail: email, simulateTimeout });
   }
 
   return <section className="space-y-4 rounded-xl border border-line bg-white p-4 sm:p-5" aria-labelledby="scenario-simulation">
@@ -323,15 +324,15 @@ export function DemoScenarioSimulation() {
     </div>
     <DemoScenarioPicker flow={flow} />
     {flow.directory && <form onSubmit={submit} noValidate className="space-y-3">
-      <fieldset className="grid gap-3 sm:grid-cols-2" disabled={flow.pending !== null || !flow.scenario}>
+      <fieldset className="grid gap-3 sm:grid-cols-2" disabled={flow.submitting || flow.pending !== null || !flow.scenario}>
         <label className="text-sm font-semibold">Product
           <select className="control mt-1.5" value={product} onChange={event => setProduct(event.currentTarget.value as SimulationProduct)}>
             {Object.entries(merchantPolicyProducts).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
           </select>
         </label>
         <label className="text-sm font-semibold">Synthetic email or domain
-          <input className="control mt-1.5" value={domain} maxLength={320} placeholder="example.test (optional)"
-            autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={event => setDomain(event.currentTarget.value)} />
+          <input className="control mt-1.5" value={email} maxLength={320} placeholder="buyer@example.test (optional)"
+            autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={event => setEmail(event.currentTarget.value)} />
         </label>
         <label htmlFor={amountId} className="text-sm font-semibold">Booking amount in minor units
           <input id={amountId} className="control mt-1.5" inputMode="numeric" value={amount} placeholder="Optional"

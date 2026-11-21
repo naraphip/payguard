@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS merchant_demo_merchants (
 );
 ALTER TABLE merchant_demo_merchants
   ADD COLUMN IF NOT EXISTS setup jsonb,
+  ADD COLUMN IF NOT EXISTS mailbox_ref_key uuid NOT NULL DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 CREATE TABLE IF NOT EXISTS merchant_demo_scenarios (
   merchant_id uuid NOT NULL REFERENCES merchant_demo_merchants(id),
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS merchant_demo_transactions (
 CREATE INDEX IF NOT EXISTS merchant_demo_transactions_created_idx
   ON merchant_demo_transactions(merchant_id, created_at DESC, id DESC);
 ALTER TABLE merchant_demo_transactions
+  ADD COLUMN IF NOT EXISTS customer_mailbox_ref text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS jev_rule_version text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS jev_answer text NOT NULL DEFAULT '' CHECK (jev_answer IN ('', 'LOW_RISK', 'REVIEW')),
   ADD COLUMN IF NOT EXISTS jev_decision_id text NOT NULL DEFAULT '',
@@ -272,7 +274,8 @@ func (r repository) saveMockScenario(ctx context.Context, merchantID, scenarioID
 const mockTransactionReadQuery = `
 SELECT t.id::text, t.merchant_id::text, t.scenario_id::text, s.name, t.scenario_revision,
 	s.threshold_minor, t.source, t.product, t.amount_minor, t.simulate_timeout, t.outcome, t.reason, t.rule_hits, t.jev_status,
-	t.jev_version, t.jev_rule_version, t.jev_answer, t.jev_decision_id, t.jev_confidence, t.jev_configuration_version, t.created_at, t.disposition, t.decided_by, t.decided_at, t.customer_email_domain, t.policy_decision
+	t.jev_version, t.jev_rule_version, t.jev_answer, t.jev_decision_id, t.jev_confidence, t.jev_configuration_version,
+	t.created_at, t.disposition, t.decided_by, t.decided_at, t.customer_email_domain, t.customer_mailbox_ref, t.policy_decision
 FROM merchant_demo_transactions t
 JOIN merchant_demo_merchants m ON m.id=t.merchant_id AND m.deleted_at IS NULL
 JOIN merchant_demo_scenarios s ON s.merchant_id=t.merchant_id AND s.id=t.scenario_id AND s.revision=t.scenario_revision
@@ -283,7 +286,7 @@ func scanMockTransaction(row pgx.Row) (mockTransaction, error) {
 	err := row.Scan(&result.ID, &result.MerchantID, &result.ScenarioID, &result.ScenarioName, &result.ScenarioVersion,
 		&result.ThresholdMinor, &result.Source, &result.Product, &result.AmountMinor, &result.simulateTimeout, &result.Outcome,
 		&result.Reason, &result.RuleHits, &result.JevStatus, &result.JevVersion, &result.JevRuleVersion, &result.JevAnswer, &result.JevDecisionID, &result.JevConfidence, &result.JevConfigurationVersion, &result.CreatedAt,
-		&result.Disposition, &result.DecidedBy, &result.DecidedAt, &result.CustomerEmailDomain, &result.PolicyDecision)
+		&result.Disposition, &result.DecidedBy, &result.DecidedAt, &result.CustomerEmailDomain, &result.customerMailboxRef, &result.PolicyDecision)
 	if err != nil {
 		return result, err
 	}
@@ -373,9 +376,14 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		if err := lockMockMerchant(ctx, tx, merchantID); err != nil {
 			return err
 		}
+		mailboxRef, err := merchantMailboxRef(ctx, tx, merchantID, input.CustomerMailboxDigest)
+		if err != nil {
+			return err
+		}
+		input.CustomerMailboxDigest = ""
 		current, err := readMockTransaction(ctx, tx, merchantID, input.ID)
 		if err == nil {
-			if !current.matchesRequest(input) {
+			if current.customerMailboxRef != mailboxRef || !current.matchesRequest(input) {
 				return errDemoReplayConflict
 			}
 			result = current
@@ -408,12 +416,13 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		}
 		result.MerchantID = merchantID
 		result.CustomerEmailDomain = input.CustomerEmailDomain
+		result.customerMailboxRef = mailboxRef
 		platform := policyDecisionPart{Action: result.Outcome, ReasonCodes: result.RuleHits}
 		if platform.Action == "LOW_RISK" {
 			platform.Action = "ALLOW"
 		}
 		merchant := evaluateMerchantPolicies(activePolicies, merchantPolicyEvidence{
-			product: input.Product, stage: merchantPolicyStage(input.Product), domain: input.CustomerEmailDomain, amount: input.AmountMinor,
+			product: input.Product, stage: merchantPolicyStage(input.Product), domain: input.CustomerEmailDomain, mailboxRef: mailboxRef, amount: input.AmountMinor,
 		})
 		policyDecision := resolvePolicyDecision(platform, merchant)
 		policyDecision.ScoringProfileVersion = merchantScenarioProfileVersion
@@ -425,12 +434,14 @@ func (r repository) saveMockTransaction(ctx context.Context, merchantID string, 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO merchant_demo_transactions
 				(merchant_id, id, scenario_id, scenario_revision, source, product, amount_minor, simulate_timeout,
-				 outcome, reason, rule_hits, jev_status, jev_version, jev_rule_version, customer_email_domain, policy_decision, jev_answer, jev_decision_id, jev_confidence, jev_configuration_version)
-			VALUES ($1::text::uuid, $2::text::uuid, $3::text::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+				 outcome, reason, rule_hits, jev_status, jev_version, jev_rule_version, customer_email_domain, customer_mailbox_ref,
+				 policy_decision, jev_answer, jev_decision_id, jev_confidence, jev_configuration_version)
+			VALUES ($1::text::uuid, $2::text::uuid, $3::text::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 			RETURNING created_at`,
 			merchantID, input.ID, input.ScenarioID, result.ScenarioVersion, input.Source, input.Product, input.AmountMinor,
 			input.SimulateTimeout, result.Outcome, result.Reason, result.RuleHits, result.JevStatus, result.JevVersion,
-			result.JevRuleVersion, result.CustomerEmailDomain, result.PolicyDecision, result.JevAnswer, result.JevDecisionID, result.JevConfidence, result.JevConfigurationVersion).Scan(&result.CreatedAt)
+			result.JevRuleVersion, result.CustomerEmailDomain, result.customerMailboxRef, result.PolicyDecision,
+			result.JevAnswer, result.JevDecisionID, result.JevConfidence, result.JevConfigurationVersion).Scan(&result.CreatedAt)
 		created = err == nil
 		return err
 	})

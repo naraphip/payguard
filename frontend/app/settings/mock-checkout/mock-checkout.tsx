@@ -41,7 +41,7 @@ export function MockCheckout() {
   const scenarioFlow = useDemoScenario();
   const [product, setProduct] = useState<Product>("flight_ticket");
   const [amount, setAmount] = useState(String(products.flight_ticket.price));
-  const [domain, setDomain] = useState("");
+  const [email, setEmail] = useState("");
   const [sdkStatus, setSDKStatus] = useState<SDKStatus>("observed");
   const [mode, setMode] = useState<JevMode>("mock");
   const [token, setToken] = useState("");
@@ -57,7 +57,7 @@ export function MockCheckout() {
   const amountMinor = readDemoAmount(amount);
   const bearer = token.trim();
   const merchantCheckout = Boolean(scenarioFlow.directory || scenarioFlow.connecting || scenarioFlow.requestedSelection);
-  const checkoutLocked = merchantCheckout ? scenarioFlow.pending !== null : busy !== null || pending !== null;
+  const checkoutLocked = merchantCheckout ? scenarioFlow.submitting || scenarioFlow.pending !== null : busy !== null || pending !== null;
 
   useEffect(() => {
     if (result || scenarioFlow.result) resultRef.current?.focus();
@@ -106,7 +106,7 @@ export function MockCheckout() {
       return;
     }
     if (merchantCheckout) {
-      await scenarioFlow.submit({ source: "checkout", amountMinor, product, customerEmailDomain: domain, simulateTimeout: mode === "timeout" });
+      await scenarioFlow.submit({ source: "checkout", amountMinor, product, customerEmail: email, simulateTimeout: mode === "timeout" });
       return;
     }
     if (!bearer || busy) return;
@@ -170,8 +170,8 @@ export function MockCheckout() {
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               {merchantCheckout && <label className="block text-sm font-semibold">Synthetic email or domain
-                <input className="control mt-2" value={domain} maxLength={320} placeholder="example.test (optional)"
-                  autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={event => setDomain(event.currentTarget.value)} />
+                <input className="control mt-2" value={email} maxLength={320} placeholder="buyer@example.test (optional)"
+                  autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={event => setEmail(event.currentTarget.value)} />
               </label>}
               {!merchantCheckout && <label className="block text-sm font-semibold">SDK signal
                 <select className="control mt-2" value={sdkStatus} onChange={event => setSDKStatus(event.currentTarget.value === "unavailable" ? "unavailable" : "observed")}>

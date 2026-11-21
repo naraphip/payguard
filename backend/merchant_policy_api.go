@@ -78,6 +78,13 @@ func (s mockMerchantService) respondMerchantPolicies(w http.ResponseWriter, r *h
 		return
 	}
 	for i := range rules {
+		if rules[i].Status == "ACTIVE" {
+			rules[i].ActiveVersion = rules[i].Version
+			continue
+		}
+		if rules[i].Status != "PENDING_APPROVAL" {
+			continue
+		}
 		for _, current := range effective {
 			if rules[i].ID == current.ID {
 				rules[i].ActiveVersion = current.Version
