@@ -1,5 +1,14 @@
 # Current work
 
+## P0 Dashboard layout refactor
+
+The [Next.js root layout](../frontend/app/layout.tsx) wraps every page in one [AppShell](../frontend/app/app-shell.tsx). `/` redirects to `/dashboard`, and [Simulation Lab](../frontend/app/simulation-lab/page.tsx) opens at `/simulation-lab`. The desktop sidebar collapses from 240 px to 64 px, and a drawer serves narrow screens. The topbar holds the breadcrumb, workspace, notifications, user controls, and Sandbox status.
+
+[Fraud Overview](../frontend/app/dashboard/page.tsx) labels its KPIs, risk trends, HOLD queue, and recent transactions as sample data. Analytics, Transactions, and Fraud Network take users to the relevant sections of Dashboard, Risk Operations, and Simulation Lab. Merchant Rules opens the existing rule workspace. Platform Rules sits under Decision Engine and is available in the Platform Admin view. The workspace selector changes Sandbox navigation and page presentation. Credential handling and API authorization stay in the existing workflows.
+
+- `go test ./...`, `npm run typecheck`, `npm run build` on Node.js 24.22.3, and `git diff --check` passed. HTTP checks verified the root redirect, the frontend routes, and read API parity for the Platform Rules catalogue, Omise configuration, Jev Rules, and Risk Operations.
+- Chrome checked all 13 destinations at 320, 390, 1024, and 1440 px with one shell and no horizontal page scrolling. Desktop checks verified 240 and 64 px sidebar widths, breadcrumbs, and active links. Mobile checks covered drawer navigation, keyboard dismissal, focus return, and backdrop dismissal. Platform Admin could open and cancel a draft. In Merchant view, a direct Platform Rules reload displayed the restricted view and sent no Platform Rules API requests.
+
 ## Integrated main candidate
 
 The local integration candidate combines the upstream merchant and booking flows, Jev Rules, Risk Operations and governance with the Simulation Lab storefront, provider enrichment, Omise Sandbox checkout, and earlier project documentation.
