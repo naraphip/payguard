@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -42,12 +43,16 @@ type bookingOpsDetail struct {
 	Assessment json.RawMessage   `json:"assessment"`
 	Contact    bookingOpsContact `json:"contact"`
 	Actor      bookingActor      `json:"actor"`
+	Hold       *bookingHold      `json:"hold,omitempty"`
 }
 
 func registerBookingOps(mux *http.ServeMux, repo repository, auth bookingAuth, secret []byte) {
 	handler := bookingOpsHandler{repo, auth, secret}
 	mux.HandleFunc("GET "+bookingOpsPath+"/{id}", handler.detail)
 	mux.HandleFunc("POST "+bookingOpsPath+"/{id}/reveal", handler.revealContact)
+	for _, action := range []string{"claim", "escalate", "resolve"} {
+		mux.HandleFunc("POST "+bookingOpsPath+"/{id}/hold/"+action, handler.changeHold(action))
+	}
 }
 
 func (h bookingOpsHandler) readActor(w http.ResponseWriter, r *http.Request) bookingActor {
@@ -77,11 +82,21 @@ func (h bookingOpsHandler) detail(w http.ResponseWriter, r *http.Request) {
 	booking := &detail.Booking
 	booking.MerchantID = actor.MerchantID
 	booking.EventID = eventID
+	var hold bookingHold
+	var state *string
+	var dueAt *time.Time
+	var now time.Time
 	err := h.repo.db.QueryRow(r.Context(), `
-		SELECT e.schema_version, e.stage, e.occurred_at, e.amount_minor, e.product, e.sdk_status, e.received_at, a.result
+		SELECT e.schema_version, e.stage, e.occurred_at, e.amount_minor, e.product, e.sdk_status, e.received_at, a.result,
+		  CASE WHEN a.result->>'handoff' = 'MANUAL_REVIEW' THEN COALESCE(h.state, 'OPEN') END,
+		  CASE WHEN a.result->>'handoff' = 'MANUAL_REVIEW' THEN COALESCE(h.due_at, `+bookingHoldDue+`) END,
+		  COALESCE(h.assigned_actor, ''), COALESCE(h.resolution, ''), h.escalated_at, h.resolved_at, statement_timestamp()
 		FROM booking_events e LEFT JOIN booking_assessments a USING (merchant_id, event_id)
+		LEFT JOIN booking_holds h USING (merchant_id, event_id)
 		WHERE e.merchant_id = $1 AND e.event_id = $2::text::uuid`, actor.MerchantID, eventID).
-		Scan(&booking.SchemaVersion, &booking.Stage, &booking.OccurredAt, &booking.AmountMinor, &booking.Product, &booking.SDKStatus, &booking.ReceivedAt, &detail.Assessment)
+		Scan(&booking.SchemaVersion, &booking.Stage, &booking.OccurredAt, &booking.AmountMinor, &booking.Product,
+			&booking.SDKStatus, &booking.ReceivedAt, &detail.Assessment, &state, &dueAt, &hold.AssignedActor,
+			&hold.Resolution, &hold.EscalatedAt, &hold.ResolvedAt, &now)
 	if errors.Is(err, pgx.ErrNoRows) {
 		problem(w, http.StatusNotFound, "Booking event not found.")
 		return
@@ -97,6 +112,11 @@ func (h bookingOpsHandler) detail(w http.ResponseWriter, r *http.Request) {
 	}
 	if booking.Product != "" {
 		detail.Contact = bookingOpsContact{State: "MASKED", Email: "b•••@checkout.test"}
+	}
+	if state != nil && dueAt != nil {
+		hold.State, hold.DueAt = *state, *dueAt
+		hold.normalize(now)
+		detail.Hold = &hold
 	}
 	respond(w, http.StatusOK, detail)
 }
